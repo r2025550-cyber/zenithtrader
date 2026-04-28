@@ -7,13 +7,16 @@ import {
   KeyRound,
   LogIn,
   Radio,
+  Settings,
   ShieldCheck,
   SlidersHorizontal,
   TrendingUp,
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -43,6 +46,7 @@ const Index = () => {
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
@@ -88,6 +92,8 @@ const Index = () => {
     setIsBusy(true);
     try {
       await invokeFunction("save-trading-settings", { ...settings, redirectUri: window.location.origin });
+      setSettings({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
+      setSettingsOpen(false);
       toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -176,6 +182,11 @@ const Index = () => {
               </div>
             </div>
           </div>
+          {session && (
+            <Button type="button" variant="terminal" className="md:w-auto" onClick={() => setSettingsOpen(true)}>
+              <Settings className="h-4 w-4" /> API Settings
+            </Button>
+          )}
         </header>
 
         {!session && (
@@ -190,22 +201,41 @@ const Index = () => {
           </section>
         )}
 
-        {session && (
-          <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
-            <div className="mb-4 flex items-center gap-2"><KeyRound className="h-5 w-5 text-primary" /><h2 className="text-xl font-semibold">Secure API Settings</h2></div>
-            <form onSubmit={saveSettings} className="grid gap-3 lg:grid-cols-3">
-              <Input type="password" placeholder="Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
-              <Input type="password" placeholder="Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
-              <Input type="password" placeholder="OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
-              <Button disabled={isBusy} type="submit" variant="trading" className="lg:col-span-1">Save Securely</Button>
-              <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>Start Upstox OAuth</Button>
-              <div className="flex gap-2">
-                <Input placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-surface" />
+        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <DialogContent className="max-h-[92vh] overflow-y-auto border-border bg-panel text-foreground shadow-panel sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
+              <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
+            </DialogHeader>
+            <form onSubmit={saveSettings} className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="upstox-api-key">Upstox API Key</Label>
+                  <Input id="upstox-api-key" type="password" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="upstox-api-secret">Upstox API Secret</Label>
+                  <Input id="upstox-api-secret" type="password" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="openai-api-key">OpenAI API Key</Label>
+                  <Input id="openai-api-key" type="password" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
+                </div>
+              </div>
+              <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
+                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>Start Upstox OAuth</Button>
+                <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
+              </DialogFooter>
+            </form>
+            <div className="rounded-md border border-border bg-surface p-3">
+              <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <Input id="oauth-code" placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-panel" />
                 <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>Connect</Button>
               </div>
-            </form>
-          </section>
-        )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <div className="grid gap-5 xl:grid-cols-[1.55fr_0.85fr]">
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
