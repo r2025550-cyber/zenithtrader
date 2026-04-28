@@ -186,6 +186,30 @@ const Index = () => {
     return market.data;
   };
 
+  const checkSystemStatus = async (showToast = true) => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<SystemStatus>("system-status");
+      setSystemStatus(status);
+      if (showToast) {
+        const failures = [status.upstox, status.openai].filter((item) => !item.ok).map((item) => item.message).join(" ");
+        toast({
+          title: status.ready ? "System ready for market open" : "Connection needs attention",
+          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
+          variant: status.ready ? "default" : "destructive",
+        });
+      }
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to verify system status.";
+      setSystemStatus(null);
+      if (showToast) toast({ title: "System status failed", description: message, variant: "destructive" });
+      throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
   const runTradingCycle = async () => {
     await fetchLiveNifty();
     const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai");
