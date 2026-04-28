@@ -21,7 +21,7 @@ serve(async (req) => {
     const prompt = `You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)\n\nMarket data:\n${JSON.stringify(latest)}`;
 
     const genAI = new GoogleGenerativeAI(settings.openai_api_key.trim());
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { temperature: 0.2, maxOutputTokens: 300 } });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { temperature: 0.2, maxOutputTokens: 300 } }, { apiVersion: "v1" });
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim() || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text);
