@@ -34,6 +34,7 @@ const history = [
 
 const chartBars = [34, 48, 42, 58, 51, 64, 73, 69, 82, 76, 88, 79, 92, 85, 97, 91, 103, 96, 111, 106, 118, 109];
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
+const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
 type NiftyData = { ltp?: number; open_price?: number; high_price?: number; low_price?: number; close_price?: number };
@@ -88,7 +89,12 @@ const Index = () => {
 
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
-    if (error) throw error;
+    if (error) {
+      const message = error.message.includes(UPSTOX_INVALID_CODE_ERROR)
+        ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
+        : error.message;
+      throw new Error(message);
+    }
     return data;
   };
 
@@ -112,6 +118,8 @@ const Index = () => {
       const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
       setAuthorizationUrl(data.url);
       setSettings((prev) => ({ ...prev, redirectUri }));
+      setOauthCode("");
+      setOauthDebugLog(`Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`);
       window.open(data.url, "_blank", "noopener,noreferrer");
       toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
     } catch (error) {
@@ -125,9 +133,17 @@ const Index = () => {
     setOauthDebugLog(`Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`);
     try {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
+      setOauthCode("");
+      setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
-      toast({ title: "OAuth exchange failed", description: error instanceof Error ? error.message : "Check the authorization code.", variant: "destructive" });
+      const message = error instanceof Error ? error.message : "Check the authorization code.";
+      const isInvalidCode = message.includes(UPSTOX_INVALID_CODE_ERROR) || message.toLowerCase().includes("invalid auth code");
+      if (isInvalidCode) {
+        setOauthCode("");
+        setOauthDebugLog(`Upstox rejected this code as invalid or already used.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nNext step: tap Get Code, complete login again, and paste the brand-new code.`);
+      }
+      toast({ title: isInvalidCode ? "Fresh OAuth code required" : "OAuth exchange failed", description: message, variant: "destructive" });
     }
   };
 
