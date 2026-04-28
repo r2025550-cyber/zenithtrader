@@ -17,22 +17,20 @@ serve(async (req) => {
       .single();
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const prompt = `You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)\n\nMarket data:\n${JSON.stringify(latest)}`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${settings.openai_api_key}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${settings.openai_api_key}`, "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: "You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)" },
-          { role: "user", content: JSON.stringify(latest) },
-        ],
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
       }),
     });
 
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return json({ error: "OpenAI analysis failed", details: payload }, response.status);
-    const text = payload?.choices?.[0]?.message?.content ?? "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
+    if (!response.ok) return json({ error: "Gemini analysis failed", details: payload }, response.status);
+    const text = payload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("").trim() ?? "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text);
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
