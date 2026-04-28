@@ -120,12 +120,17 @@ export default {
           "0%, 100%": { opacity: "0.45" },
           "50%": { opacity: "0.9" },
         },
+        goldenBlink: {
+          "0%, 100%": { borderColor: "hsl(var(--warning) / 0.45)", boxShadow: "0 0 0 0 hsl(var(--warning) / 0.12)" },
+          "50%": { borderColor: "hsl(var(--warning))", boxShadow: "0 0 28px -8px hsl(var(--warning) / 0.85)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         scan: "scan 5s linear infinite",
         "pulse-glow": "pulseGlow 2.8s ease-in-out infinite",
+        "golden-blink": "goldenBlink 1.15s ease-in-out infinite",
       },
     },
   },
