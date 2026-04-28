@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
@@ -49,6 +50,7 @@ const Index = () => {
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: window.location.origin });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
+  const [authorizationUrl, setAuthorizationUrl] = useState("");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -104,7 +106,9 @@ const Index = () => {
 
   const startUpstoxOAuth = async () => {
     try {
-      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri: settings.redirectUri });
+      const redirectUri = settings.redirectUri.trim();
+      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
+      setAuthorizationUrl(data.url);
       window.open(data.url, "_blank", "noopener,noreferrer");
       toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
     } catch (error) {
@@ -114,7 +118,7 @@ const Index = () => {
 
   const completeUpstoxOAuth = async () => {
     try {
-      await invokeFunction("upstox-oauth", { mode: "token", code: oauthCode, redirectUri: window.location.origin });
+      await invokeFunction("upstox-oauth", { mode: "token", code: oauthCode, redirectUri: settings.redirectUri.trim() });
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       toast({ title: "OAuth exchange failed", description: error instanceof Error ? error.message : "Check the authorization code.", variant: "destructive" });
@@ -223,8 +227,9 @@ const Index = () => {
                   <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="redirect-uri">Redirect URL</Label>
+                  <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
                   <Input id="redirect-uri" type="url" autoComplete="off" placeholder="https://your-domain.com" value={settings.redirectUri} onChange={(event) => setSettings((prev) => ({ ...prev, redirectUri: event.target.value }))} required className="border-border bg-surface" />
+                  <p className="text-xs leading-5 text-muted-foreground">Get Code uses this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(settings.redirectUri.trim())}</span>.</p>
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
@@ -232,6 +237,11 @@ const Index = () => {
                 <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
               </DialogFooter>
             </form>
+            <div className="rounded-md border border-border bg-surface p-3">
+              <Label htmlFor="authorization-url" className="text-muted-foreground">Authorization URL generated right now</Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">This is the exact full link returned by the secure backend. Tap Get Code to refresh it, then finish login and copy the <span className="font-semibold text-foreground">code</span> from the redirected URL bar.</p>
+              <Textarea id="authorization-url" readOnly value={authorizationUrl || "Tap Get Code to generate the full Upstox Authorization URL."} className="mt-2 min-h-[120px] resize-none break-all border-border bg-panel font-mono text-xs" />
+            </div>
             <div className="rounded-md border border-border bg-surface p-3">
               <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy the <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
