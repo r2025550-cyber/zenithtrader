@@ -200,15 +200,17 @@ const Index = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (session) {
       intervalRef.current = setInterval(() => {
-        fetchLiveNifty().catch((error) => {
-          toast({ title: "Live Nifty refresh failed", description: error instanceof Error ? error.message : "Unable to fetch Upstox market data.", variant: "destructive" });
+        const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
+        refresh.catch((error) => {
+          if (aiEnabled) setAiEnabled(false);
+          toast({ title: aiEnabled ? "AI loop paused" : "Live Nifty refresh failed", description: error instanceof Error ? error.message : "Unable to fetch Upstox market data.", variant: "destructive" });
         });
       }, 60_000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [session]);
+  }, [session, aiEnabled]);
 
   useEffect(() => {
     if (!session) return;
