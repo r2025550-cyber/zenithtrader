@@ -120,7 +120,7 @@ const Index = () => {
   const completeUpstoxOAuth = async () => {
     const debugRedirectUri = "http://localhost:3000";
     const trimmedCode = oauthCode.trim();
-    setOauthDebugLog(`Token exchange payload sent to Upstox:\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}`);
+    setOauthDebugLog(`Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`);
     try {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
@@ -256,6 +256,7 @@ const Index = () => {
             </div>
             <div className="rounded-md border border-border bg-surface p-3">
               <Label htmlFor="oauth-debug-log" className="text-muted-foreground">Debug Log</Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">This shows the exact token exchange payload. Generate a fresh OAuth code before tapping Connect again.</p>
               <Textarea id="oauth-debug-log" readOnly value={oauthDebugLog} className="mt-2 min-h-[96px] resize-none border-border bg-panel font-mono text-xs" />
             </div>
           </DialogContent>

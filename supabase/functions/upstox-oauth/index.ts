@@ -6,7 +6,7 @@ const TOKEN_EXCHANGE_REDIRECT_URI = "http://localhost:3000";
 
 const BodySchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("url"), redirectUri: z.string().trim().url().max(1000) }),
-  z.object({ mode: z.literal("token"), code: z.string().trim().min(4).max(2000), redirectUri: z.string().trim().url().max(1000).optional() }),
+  z.object({ mode: z.literal("token"), code: z.string().trim().min(4).max(2000), redirectUri: z.literal(TOKEN_EXCHANGE_REDIRECT_URI).optional() }),
 ]);
 
 serve(async (req) => {
@@ -26,6 +26,11 @@ serve(async (req) => {
     }
 
     const redirectUri = TOKEN_EXCHANGE_REDIRECT_URI;
+
+    console.log("Upstox token exchange debug", {
+      code: parsed.data.code,
+      redirectUri,
+    });
 
     const form = new URLSearchParams({
       code: parsed.data.code,
