@@ -131,6 +131,7 @@ const Index = () => {
     try {
       await invokeFunction("save-trading-settings", settings);
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" }));
+      await checkSystemStatus(false).catch(() => null);
       toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -162,6 +163,7 @@ const Index = () => {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
+      await checkSystemStatus(false).catch(() => null);
       await fetchLiveNifty();
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
@@ -248,6 +250,9 @@ const Index = () => {
 
   useEffect(() => {
     if (!session) return;
+    checkSystemStatus(false).catch(() => {
+      // Connection Pulse will show missing setup after a manual check.
+    });
     fetchLiveNifty().catch(() => {
       // Keep the dashboard usable until Upstox OAuth is connected.
     });
