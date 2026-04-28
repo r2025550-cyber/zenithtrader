@@ -1,6 +1,16 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
+const GEMINI_MODEL_CANDIDATES = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-002"];
+
+async function getGeminiModel(apiKey: string) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return GEMINI_MODEL_CANDIDATES[0];
+  const models = (payload.models ?? []) as Array<{ name?: string; supportedGenerationMethods?: string[] }>;
+  return models.find((item) => GEMINI_MODEL_CANDIDATES.some((candidate) => item.name === `models/${candidate}`) && item.supportedGenerationMethods?.includes("generateContent"))?.name?.replace("models/", "") ?? GEMINI_MODEL_CANDIDATES[0];
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -19,7 +29,8 @@ serve(async (req) => {
 
     const prompt = `You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)\n\nMarket data:\n${JSON.stringify(latest)}`;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${settings.openai_api_key}`, {
+    const geminiModel = await getGeminiModel(settings.openai_api_key);
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.openai_api_key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
