@@ -33,6 +33,7 @@ const history = [
 ];
 
 const chartBars = [34, 48, 42, 58, 51, 64, 73, 69, 82, 76, 88, 79, 92, 85, 97, 91, 103, 96, 111, 106, 118, 109];
+const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
 type NiftyData = { ltp?: number; open_price?: number; high_price?: number; low_price?: number; close_price?: number };
@@ -47,7 +48,7 @@ const Index = () => {
   const [riskMode, setRiskMode] = useState("moderate");
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: window.location.origin });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
@@ -107,9 +108,10 @@ const Index = () => {
 
   const startUpstoxOAuth = async () => {
     try {
-      const redirectUri = settings.redirectUri.trim();
+      const redirectUri = UPSTOX_OAUTH_REDIRECT_URI;
       const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
       setAuthorizationUrl(data.url);
+      setSettings((prev) => ({ ...prev, redirectUri }));
       window.open(data.url, "_blank", "noopener,noreferrer");
       toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
     } catch (error) {
@@ -118,7 +120,7 @@ const Index = () => {
   };
 
   const completeUpstoxOAuth = async () => {
-    const debugRedirectUri = "http://localhost:3000";
+    const debugRedirectUri = UPSTOX_OAUTH_REDIRECT_URI;
     const trimmedCode = oauthCode.trim();
     setOauthDebugLog(`Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`);
     try {
@@ -232,8 +234,8 @@ const Index = () => {
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
-                  <Input id="redirect-uri" type="url" autoComplete="off" placeholder="https://your-domain.com" value={settings.redirectUri} onChange={(event) => setSettings((prev) => ({ ...prev, redirectUri: event.target.value }))} required className="border-border bg-surface" />
-                  <p className="text-xs leading-5 text-muted-foreground">Get Code uses this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(settings.redirectUri.trim())}</span>.</p>
+                  <Input id="redirect-uri" type="url" autoComplete="off" value={settings.redirectUri} readOnly className="border-border bg-surface" />
+                  <p className="text-xs leading-5 text-muted-foreground">Get Code and Connect both use this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}</span>.</p>
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
