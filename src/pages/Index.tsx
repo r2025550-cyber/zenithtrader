@@ -42,8 +42,8 @@ type Signal = { action: string; strike: string; reason: string; created_at?: str
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
-type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
-type OpenAIStatus = { openai: PulseCheck; checkedAt: string };
+type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
+type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -195,10 +195,10 @@ const Index = () => {
       const status = await invokeFunction<SystemStatus>("system-status");
       setSystemStatus(status);
       if (showToast) {
-        const failures = [status.upstox, status.openai].filter((item) => !item.ok).map((item) => item.message).join(" ");
+        const failures = [status.upstox, status.gemini].filter((item) => !item.ok).map((item) => item.message).join(" ");
         toast({
           title: status.ready ? "System ready for market open" : "Connection needs attention",
-          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
+          description: status.ready ? "Upstox and Gemini both verified successfully." : failures,
           variant: status.ready ? "default" : "destructive",
         });
       }
@@ -213,21 +213,21 @@ const Index = () => {
     }
   };
 
-  const retestOpenAI = async () => {
+  const retestGemini = async () => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
+      const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
       setSystemStatus((prev) => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
-        return { ready: upstox.ok && status.openai.ok, upstox, openai: status.openai, checkedAt: status.checkedAt };
+        return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
       toast({
-        title: status.openai.ok ? "OpenAI connected" : "OpenAI still failing",
-        description: status.openai.message,
-        variant: status.openai.ok ? "default" : "destructive",
+        title: status.gemini.ok ? "Gemini connected" : "Gemini still failing",
+        description: status.gemini.message,
+        variant: status.gemini.ok ? "default" : "destructive",
       });
     } catch (error) {
-      toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
+      toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
     } finally {
       setIsCheckingStatus(false);
     }
