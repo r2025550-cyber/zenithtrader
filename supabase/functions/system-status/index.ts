@@ -1,16 +1,15 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { GoogleGenerativeAI } from "npm:@google/generative-ai@0.24.1";
 import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.ts";
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
-const GEMINI_MODEL_CANDIDATES = ["models/gemini-1.5-flash", "models/gemini-1.5-flash-latest"];
+const GEMINI_MODELS = ["gemini-1.5-flash", "gemini-1.5-flash-latest"];
 
-function extractGeminiError(payload: Record<string, unknown>) {
-  const error = payload.error as { message?: string; code?: string | number; status?: string } | undefined;
-  const message = error?.message ?? "Unknown Gemini error";
-  const code = error?.status ? ` (${error.status})` : error?.code ? ` (${error.code})` : "";
-  return `${message}${code}`;
+function extractGeminiError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "Unknown Gemini error";
 }
 
 async function checkUpstox(accessToken?: string | null) {
@@ -31,27 +30,22 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
-  const modelsResponse = await fetch(`${GEMINI_API_BASE}/models?key=${apiKey}`);
-  const modelsPayload = await modelsResponse.json().catch(() => ({}));
-  if (!modelsResponse.ok) return fail(extractGeminiError(modelsPayload), { status: modelsResponse.status, payload: modelsPayload });
-  const availableModels = (modelsPayload.models ?? []) as Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-  const model = availableModels.find((item) => GEMINI_MODEL_CANDIDATES.includes(item.name ?? "") && item.supportedGenerationMethods?.includes("generateContent"))?.name ?? GEMINI_MODEL_CANDIDATES[0];
-
-  const response = await fetch(`${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: "Reply with only OK." }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 5 },
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    return fail(extractGeminiError(payload), { status: response.status, payload });
+  let lastError: unknown;
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey.trim());
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { temperature: 0, maxOutputTokens: 5 } }, { apiVersion: "v1" });
+        await model.generateContent("Reply with only OK.");
+        return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: modelName, apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    return fail(extractGeminiError(lastError), { model: GEMINI_MODELS.join(" → "), apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
+  } catch (error) {
+    return fail(extractGeminiError(error), { model: GEMINI_MODELS.join(" → "), apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
   }
-
-  return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { status: response.status, model });
 }
 
 serve(async (req) => {

@@ -1,16 +1,8 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { GoogleGenerativeAI } from "npm:@google/generative-ai@0.24.1";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
-const GEMINI_MODEL_CANDIDATES = ["models/gemini-1.5-flash", "models/gemini-1.5-flash-latest"];
-
-async function getGeminiModel(apiKey: string) {
-  const response = await fetch(`${GEMINI_API_BASE}/models?key=${apiKey}`);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) return GEMINI_MODEL_CANDIDATES[0];
-  const models = (payload.models ?? []) as Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-  return models.find((item) => GEMINI_MODEL_CANDIDATES.includes(item.name ?? "") && item.supportedGenerationMethods?.includes("generateContent"))?.name ?? GEMINI_MODEL_CANDIDATES[0];
-}
+const GEMINI_MODELS = ["gemini-1.5-flash", "gemini-1.5-flash-latest"];
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -30,19 +22,19 @@ serve(async (req) => {
 
     const prompt = `You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)\n\nMarket data:\n${JSON.stringify(latest)}`;
 
-    const geminiModel = await getGeminiModel(settings.openai_api_key);
-    const response = await fetch(`${GEMINI_API_BASE}/${geminiModel}:generateContent?key=${settings.openai_api_key}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 300 },
-      }),
-    });
-
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return json({ error: "Gemini analysis failed", details: payload }, response.status);
-    const text = payload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("").trim() ?? "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
+    const genAI = new GoogleGenerativeAI(settings.openai_api_key.trim());
+    let result;
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { temperature: 0.2, maxOutputTokens: 300 } }, { apiVersion: "v1" });
+        result = await model.generateContent(prompt);
+        break;
+      } catch (error) {
+        if (modelName === GEMINI_MODELS.at(-1)) throw error;
+      }
+    }
+    if (!result) throw new Error("Gemini analysis failed to return a response.");
+    const text = result.response.text().trim() || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text);
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
