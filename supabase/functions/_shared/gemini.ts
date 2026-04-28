@@ -25,7 +25,7 @@ export async function generateGeminiText(apiKey: string, prompt: string, maxOutp
   const genAI = new GoogleGenerativeAI(apiKey.trim());
   const failures: string[] = [];
   const stableModels = await listStableGeminiModels(apiKey).catch(() => []);
-  const discoveredFlashModels = stableModels.filter((modelName) => modelName.startsWith("gemini-1.5-flash"));
+  const discoveredFlashModels = stableModels.filter((modelName) => /^gemini-[\d.]+-flash/.test(modelName));
   const candidateModels = [...new Set([...GEMINI_MODEL_CANDIDATES, ...discoveredFlashModels])];
 
   for (const modelName of candidateModels) {
