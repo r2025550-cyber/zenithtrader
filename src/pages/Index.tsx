@@ -2,16 +2,19 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
+  CheckCircle2,
   Gauge,
   IndianRupee,
   KeyRound,
   LogIn,
   ExternalLink,
   Radio,
+  RefreshCw,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   TrendingUp,
+  XCircle,
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -38,6 +41,8 @@ const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
+type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
+type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -57,6 +62,8 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
   const latestLtp = Number(latestData?.ltp);
@@ -74,6 +81,9 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
+  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
+  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
