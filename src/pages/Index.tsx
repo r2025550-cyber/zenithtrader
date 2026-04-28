@@ -222,14 +222,19 @@ const Index = () => {
                   <Label htmlFor="openai-api-key">OpenAI API Key</Label>
                   <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="redirect-uri">Redirect URL</Label>
+                  <Input id="redirect-uri" type="url" autoComplete="off" placeholder="https://your-domain.com" value={settings.redirectUri} onChange={(event) => setSettings((prev) => ({ ...prev, redirectUri: event.target.value }))} required className="border-border bg-surface" />
+                </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>Start Upstox OAuth</Button>
+                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
                 <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
               <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy the <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <Input id="oauth-code" placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-panel" />
                 <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>Connect</Button>
