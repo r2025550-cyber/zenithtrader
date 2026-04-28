@@ -42,7 +42,9 @@ async function getQuote(instrumentKey: string, headers: HeadersInit) {
   const ohlcPayload = await ohlcResponse.json().catch(() => ({}));
   if (!ltpResponse.ok) throw new Error(JSON.stringify({ error: "Upstox LTP request failed", status: ltpResponse.status, payload: ltpPayload }));
   if (!ohlcResponse.ok) throw new Error(JSON.stringify({ error: "Upstox OHLC request failed", status: ohlcResponse.status, payload: ohlcPayload }));
-  return { quote: { ...quoteFrom(firstNode(ohlcPayload)), ...quoteFrom(firstNode(ltpPayload)) }, raw: { ltp: ltpPayload, ohlc: ohlcPayload } };
+  const ohlcQuote = quoteFrom(firstNode(ohlcPayload));
+  const ltpQuote = quoteFrom(firstNode(ltpPayload));
+  return { quote: { ...ohlcQuote, ltp: ltpQuote.ltp ?? ohlcQuote.ltp, volume: ltpQuote.volume ?? ohlcQuote.volume }, raw: { ltp: ltpPayload, ohlc: ohlcPayload } };
 }
 
 serve(async (req) => {
