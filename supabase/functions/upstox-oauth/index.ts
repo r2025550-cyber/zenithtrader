@@ -4,7 +4,7 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_sha
 
 const BodySchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("url"), redirectUri: z.string().trim().url().max(1000) }),
-  z.object({ mode: z.literal("token"), code: z.string().trim().min(10).max(2000), redirectUri: z.string().trim().url().max(1000) }),
+  z.object({ mode: z.literal("token"), code: z.string().trim().min(4).max(2000), redirectUri: z.string().trim().url().max(1000) }),
 ]);
 
 serve(async (req) => {
