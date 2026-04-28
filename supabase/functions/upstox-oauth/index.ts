@@ -13,7 +13,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const auth = await getAuthenticatedClients(req);
-    if ("error" in auth) return auth.error;
+    if ("error" in auth && auth.error) return auth.error;
     const parsed = BodySchema.safeParse(await req.json());
     if (!parsed.success) return json({ error: parsed.error.flatten().fieldErrors }, 400);
 
