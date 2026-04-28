@@ -6,6 +6,7 @@ import {
   IndianRupee,
   KeyRound,
   LogIn,
+  ExternalLink,
   Radio,
   Settings,
   ShieldCheck,
@@ -45,7 +46,7 @@ const Index = () => {
   const [riskMode, setRiskMode] = useState("moderate");
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: window.location.origin });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
@@ -91,9 +92,8 @@ const Index = () => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { ...settings, redirectUri: window.location.origin });
-      setSettings({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
-      setSettingsOpen(false);
+      await invokeFunction("save-trading-settings", settings);
+      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" }));
       toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -104,8 +104,9 @@ const Index = () => {
 
   const startUpstoxOAuth = async () => {
     try {
-      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri: window.location.origin });
+      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri: settings.redirectUri });
       window.open(data.url, "_blank", "noopener,noreferrer");
+      toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
     } catch (error) {
       toast({ title: "OAuth start failed", description: error instanceof Error ? error.message : "Save settings first.", variant: "destructive" });
     }
