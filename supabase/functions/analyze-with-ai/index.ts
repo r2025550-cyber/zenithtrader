@@ -98,9 +98,9 @@ Computed rule context:\n${JSON.stringify(ruleContext)}
 
 Latest market data:\n${JSON.stringify(latest)}`;
 
-    const result = await generateGeminiText(settings.openai_api_key, prompt, 300);
+    const result = await generateGeminiText(settings.openai_api_key, prompt, 700);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
-    const signal = parseSignal(text);
+    const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
