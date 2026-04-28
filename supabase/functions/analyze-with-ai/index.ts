@@ -100,6 +100,8 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const result = await generateGeminiText(settings.openai_api_key, prompt, 300);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text);
+    const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
+    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
@@ -107,11 +109,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: text,
+      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: data });
+    return json({ success: true, signal: { ...data, conviction, highProbability, ruleContext, raw_text: text } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
