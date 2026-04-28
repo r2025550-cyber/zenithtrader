@@ -2,6 +2,11 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_shared/trading.ts";
 
 const INSTRUMENT_KEY = "NSE_INDEX|Nifty 50";
+const CONTEXT_INSTRUMENTS = {
+  bankNifty: "NSE_INDEX|Nifty Bank",
+  indiaVix: "NSE_INDEX|India VIX",
+  heavyweights: ["NSE_EQ|INE040A01034", "NSE_EQ|INE002A01018", "NSE_EQ|INE090A01021"],
+};
 
 function numberFrom(...values: unknown[]) {
   for (const value of values) {
@@ -9,6 +14,35 @@ function numberFrom(...values: unknown[]) {
     if (Number.isFinite(num)) return num;
   }
   return null;
+}
+
+function firstNode(payload: Record<string, unknown>) {
+  return Object.values(payload?.data ?? {})[0] as any;
+}
+
+function quoteFrom(node: any) {
+  const ohlc = node?.ohlc ?? node ?? {};
+  return {
+    ltp: numberFrom(node?.last_price, node?.ltp, node?.lastPrice),
+    open: numberFrom(ohlc.open, ohlc.o),
+    high: numberFrom(ohlc.high, ohlc.h),
+    low: numberFrom(ohlc.low, ohlc.l),
+    close: numberFrom(ohlc.close, ohlc.c, node?.close_price),
+    volume: numberFrom(node?.volume, node?.volume_traded, node?.totalTradedVolume, ohlc.volume),
+  };
+}
+
+async function getQuote(instrumentKey: string, headers: HeadersInit) {
+  const encoded = encodeURIComponent(instrumentKey);
+  const [ltpResponse, ohlcResponse] = await Promise.all([
+    fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers }),
+    fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers }),
+  ]);
+  const ltpPayload = await ltpResponse.json().catch(() => ({}));
+  const ohlcPayload = await ohlcResponse.json().catch(() => ({}));
+  if (!ltpResponse.ok) throw new Error(JSON.stringify({ error: "Upstox LTP request failed", status: ltpResponse.status, payload: ltpPayload }));
+  if (!ohlcResponse.ok) throw new Error(JSON.stringify({ error: "Upstox OHLC request failed", status: ohlcResponse.status, payload: ohlcPayload }));
+  return { quote: { ...quoteFrom(firstNode(ohlcPayload)), ...quoteFrom(firstNode(ltpPayload)) }, raw: { ltp: ltpPayload, ohlc: ohlcPayload } };
 }
 
 serve(async (req) => {
@@ -20,31 +54,35 @@ serve(async (req) => {
     if (!settings.upstox_access_token) return json({ error: "Connect Upstox OAuth before fetching market data." }, 400);
 
     const headers = { Authorization: `Bearer ${settings.upstox_access_token}`, Accept: "application/json" };
-    const encoded = encodeURIComponent(INSTRUMENT_KEY);
-    const [ltpResponse, ohlcResponse] = await Promise.all([
-      fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers }),
-      fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers }),
+    const nifty = await getQuote(INSTRUMENT_KEY, headers).catch((error) => ({ error }));
+    if ("error" in nifty) return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
+
+    const [bankNifty, indiaVix, ...heavyweights] = await Promise.allSettled([
+      getQuote(CONTEXT_INSTRUMENTS.bankNifty, headers),
+      getQuote(CONTEXT_INSTRUMENTS.indiaVix, headers),
+      ...CONTEXT_INSTRUMENTS.heavyweights.map((key) => getQuote(key, headers)),
     ]);
 
-    const ltpPayload = await ltpResponse.json().catch(() => ({}));
-    const ohlcPayload = await ohlcResponse.json().catch(() => ({}));
-    if (!ltpResponse.ok) return json({ error: "Upstox LTP request failed", details: ltpPayload }, ltpResponse.status);
-    if (!ohlcResponse.ok) return json({ error: "Upstox OHLC request failed", details: ohlcPayload }, ohlcResponse.status);
-
-    const ltpNode = Object.values(ltpPayload?.data ?? {})[0] as any;
-    const ohlcNode = Object.values(ohlcPayload?.data ?? {})[0] as any;
-    const ohlc = ohlcNode?.ohlc ?? ohlcNode ?? {};
-    const ltp = numberFrom(ltpNode?.last_price, ltpNode?.ltp, ohlcNode?.last_price);
+    const contextQuote = (result: PromiseSettledResult<{ quote: Record<string, unknown>; raw: unknown }>) => result.status === "fulfilled" ? result.value.quote : null;
+    const ltp = nifty.quote.ltp;
 
     const row = {
       user_id: auth.user.id,
       symbol: INSTRUMENT_KEY,
       ltp,
-      open_price: numberFrom(ohlc.open, ohlc.o),
-      high_price: numberFrom(ohlc.high, ohlc.h),
-      low_price: numberFrom(ohlc.low, ohlc.l),
-      close_price: numberFrom(ohlc.close, ohlc.c),
-      raw_payload: { ltp: ltpPayload, ohlc: ohlcPayload },
+      open_price: nifty.quote.open,
+      high_price: nifty.quote.high,
+      low_price: nifty.quote.low,
+      close_price: nifty.quote.close,
+      raw_payload: {
+        ...nifty.raw,
+        volume: nifty.quote.volume,
+        context: {
+          bankNifty: contextQuote(bankNifty),
+          indiaVix: contextQuote(indiaVix),
+          heavyweights: heavyweights.map(contextQuote).filter(Boolean),
+        },
+      },
       source_timestamp: new Date().toISOString(),
     };
 
