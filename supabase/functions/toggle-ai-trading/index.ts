@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { z } from "https://deno.land/x/zod@v3.25.76/mod.ts";
+import { z } from "https://esm.sh/zod@3.25.76";
 import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.ts";
 
 const BodySchema = z.object({
