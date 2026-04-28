@@ -51,6 +51,7 @@ const Index = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
+  const [oauthDebugLog, setOauthDebugLog] = useState("No token exchange attempted yet.");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -117,8 +118,11 @@ const Index = () => {
   };
 
   const completeUpstoxOAuth = async () => {
+    const debugRedirectUri = "http://localhost:3000";
+    const trimmedCode = oauthCode.trim();
+    setOauthDebugLog(`Token exchange payload sent to Upstox:\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}`);
     try {
-      await invokeFunction("upstox-oauth", { mode: "token", code: oauthCode, redirectUri: settings.redirectUri.trim() });
+      await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       toast({ title: "OAuth exchange failed", description: error instanceof Error ? error.message : "Check the authorization code.", variant: "destructive" });
@@ -244,11 +248,15 @@ const Index = () => {
             </div>
             <div className="rounded-md border border-border bg-surface p-3">
               <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy the <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy a fresh <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <Input id="oauth-code" placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-panel" />
                 <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>Connect</Button>
               </div>
+            </div>
+            <div className="rounded-md border border-border bg-surface p-3">
+              <Label htmlFor="oauth-debug-log" className="text-muted-foreground">Debug Log</Label>
+              <Textarea id="oauth-debug-log" readOnly value={oauthDebugLog} className="mt-2 min-h-[96px] resize-none border-border bg-panel font-mono text-xs" />
             </div>
           </DialogContent>
         </Dialog>
