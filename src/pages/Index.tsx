@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, Bot, ChevronDown, Gauge, IndianRupee, Radio, ShieldCheck, SlidersHorizontal, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, Bot, Gauge, IndianRupee, Radio, ShieldCheck, SlidersHorizontal, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
