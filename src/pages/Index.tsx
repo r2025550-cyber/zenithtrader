@@ -38,8 +38,9 @@ const history = [
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 
-type Signal = { action: string; strike: string; reason: string; created_at?: string };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
+type RuleContext = { rules?: { volumeValid?: boolean; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
+type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
@@ -85,6 +86,7 @@ const Index = () => {
   const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
+  const highProbabilitySignal = Boolean(latestSignal?.highProbability);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -93,7 +95,20 @@ const Index = () => {
   }, []);
 
   const reasoning = useMemo(() => {
-    if (latestSignal) return `AI Suggestion: ${latestSignal.action} ${latestSignal.strike} — ${latestSignal.reason}`;
+    if (latestSignal) {
+      const rules = latestSignal.ruleContext?.rules;
+      const triggered = [
+        rules?.fakeBreakout && "POTENTIAL TRAP",
+        rules?.vixRising && "VIX risk size-down",
+        rules?.europeanOpenCaution && "European open caution",
+        rules?.overextended && "Overextended Zone",
+        rules?.noTradeRange && "No-Trade Zone",
+        rules?.divergence && "Low Conviction divergence",
+        rules?.volumeValid && "Volume +20% confirmed",
+        rules?.pcrState && `PCR ${rules.pcrState}`,
+      ].filter(Boolean).join(" · ");
+      return `AI Suggestion: ${latestSignal.action} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+    }
     if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
     if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
     if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
