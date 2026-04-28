@@ -3,6 +3,7 @@ import { generateGeminiText } from "../_shared/gemini.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 function num(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
