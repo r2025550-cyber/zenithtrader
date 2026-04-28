@@ -5,7 +5,7 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_sha
 const TOKEN_EXCHANGE_REDIRECT_URI = "http://localhost:3000";
 
 const BodySchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("url"), redirectUri: z.string().trim().url().max(1000) }),
+  z.object({ mode: z.literal("url"), redirectUri: z.string().trim().url().max(1000).optional() }),
   z.object({ mode: z.literal("token"), code: z.string().trim().min(4).max(2000), redirectUri: z.literal(TOKEN_EXCHANGE_REDIRECT_URI).optional() }),
 ]);
 
@@ -19,7 +19,7 @@ serve(async (req) => {
 
     const settings = await getSettings(auth.adminClient, auth.user.id);
     if (parsed.data.mode === "url") {
-      const redirectUri = parsed.data.redirectUri;
+      const redirectUri = TOKEN_EXCHANGE_REDIRECT_URI;
       const params = new URLSearchParams({ response_type: "code", client_id: settings.upstox_api_key, redirect_uri: redirectUri });
       await auth.adminClient.from("trading_api_settings").update({ redirect_uri: redirectUri }).eq("user_id", auth.user.id);
       return json({ url: `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}` });
