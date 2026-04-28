@@ -29,7 +29,7 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
