@@ -42,8 +42,8 @@ type Signal = { action: string; strike: string; reason: string; created_at?: str
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
-type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
-type OpenAIStatus = { openai: PulseCheck; checkedAt: string };
+type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
+type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -195,10 +195,10 @@ const Index = () => {
       const status = await invokeFunction<SystemStatus>("system-status");
       setSystemStatus(status);
       if (showToast) {
-        const failures = [status.upstox, status.openai].filter((item) => !item.ok).map((item) => item.message).join(" ");
+        const failures = [status.upstox, status.gemini].filter((item) => !item.ok).map((item) => item.message).join(" ");
         toast({
           title: status.ready ? "System ready for market open" : "Connection needs attention",
-          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
+          description: status.ready ? "Upstox and Gemini both verified successfully." : failures,
           variant: status.ready ? "default" : "destructive",
         });
       }
@@ -213,21 +213,21 @@ const Index = () => {
     }
   };
 
-  const retestOpenAI = async () => {
+  const retestGemini = async () => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
+      const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
       setSystemStatus((prev) => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
-        return { ready: upstox.ok && status.openai.ok, upstox, openai: status.openai, checkedAt: status.checkedAt };
+        return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
       toast({
-        title: status.openai.ok ? "OpenAI connected" : "OpenAI still failing",
-        description: status.openai.message,
-        variant: status.openai.ok ? "default" : "destructive",
+        title: status.gemini.ok ? "Gemini connected" : "Gemini still failing",
+        description: status.gemini.message,
+        variant: status.gemini.ok ? "default" : "destructive",
       });
     } catch (error) {
-      toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
+      toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
     } finally {
       setIsCheckingStatus(false);
     }
@@ -341,8 +341,8 @@ const Index = () => {
                   <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="openai-api-key">OpenAI API Key</Label>
-                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Label htmlFor="openai-api-key">Gemini API Key</Label>
+                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
@@ -392,17 +392,17 @@ const Index = () => {
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}</p>
               </div>
-              <div className={`rounded-md border p-4 ${systemStatus?.openai?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+              <div className={`rounded-md border p-4 ${systemStatus?.gemini?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
-                    {systemStatus?.openai?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                    <span>OpenAI API Status</span>
+                    {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>Gemini API Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestOpenAI}>
-                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestGemini}>
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
                   </Button>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.openai?.message ?? "Runs a small AI response test using the saved key."}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small Gemini 1.5 Flash response test using the saved key."}</p>
               </div>
             </div>
             {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
