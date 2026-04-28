@@ -48,7 +48,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const auth = await getAuthenticatedClients(req);
-    if ("error" in auth) return auth.error;
+    if ("error" in auth) return auth.error ?? json({ error: "Please sign in before checking system status." }, 401);
 
     const { data: settings, error } = await auth.adminClient
       .from("trading_api_settings")
