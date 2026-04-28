@@ -355,6 +355,32 @@ const Index = () => {
           </DialogContent>
         </Dialog>
 
+        {session && (
+          <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Connection Pulse</p><h2 className="text-xl font-semibold">System Status</h2></div>
+              <Button type="button" variant="terminal" disabled={isCheckingStatus} onClick={() => checkSystemStatus(true)}>
+                <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Verify Now
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {([
+                ["Upstox API Status", systemStatus?.upstox, "Confirms the OAuth access token can reach Upstox right now."],
+                ["OpenAI API Status", systemStatus?.openai, "Runs a small AI response test using the saved key."],
+              ] as const).map(([title, check, fallback]) => (
+                <div key={title} className={`rounded-md border p-4 ${check?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+                  <div className="mb-2 flex items-center gap-2 font-semibold">
+                    {check?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>{title}</span>
+                  </div>
+                  <p className="text-sm leading-6 text-muted-foreground">{check?.message ?? fallback}</p>
+                </div>
+              ))}
+            </div>
+            {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
+          </section>
+        )}
+
         <div className="grid gap-5 xl:grid-cols-[1.55fr_0.85fr]">
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
