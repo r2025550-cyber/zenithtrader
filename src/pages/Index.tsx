@@ -43,6 +43,7 @@ type NiftyData = { ltp?: number | string | null; open_price?: number | string | 
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
+type OpenAIStatus = { openai: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -81,7 +82,7 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready" : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
 
@@ -207,6 +208,26 @@ const Index = () => {
       setSystemStatus(null);
       if (showToast) toast({ title: "System status failed", description: message, variant: "destructive" });
       throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const retestOpenAI = async () => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
+      setSystemStatus((prev) => {
+        const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
+        return { ready: upstox.ok && status.openai.ok, upstox, openai: status.openai, checkedAt: status.checkedAt };
+      });
+      toast({
+        title: status.openai.ok ? "OpenAI connected" : "OpenAI still failing",
+        description: status.openai.message,
+        variant: status.openai.ok ? "default" : "destructive",
+      });
+    } catch (error) {
+      toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
     } finally {
       setIsCheckingStatus(false);
     }
