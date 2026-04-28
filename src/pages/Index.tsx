@@ -6,6 +6,7 @@ import {
   IndianRupee,
   KeyRound,
   LogIn,
+  ExternalLink,
   Radio,
   Settings,
   ShieldCheck,
@@ -45,7 +46,7 @@ const Index = () => {
   const [riskMode, setRiskMode] = useState("moderate");
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: window.location.origin });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
@@ -91,9 +92,8 @@ const Index = () => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { ...settings, redirectUri: window.location.origin });
-      setSettings({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" });
-      setSettingsOpen(false);
+      await invokeFunction("save-trading-settings", settings);
+      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" }));
       toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -104,8 +104,9 @@ const Index = () => {
 
   const startUpstoxOAuth = async () => {
     try {
-      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri: window.location.origin });
+      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri: settings.redirectUri });
       window.open(data.url, "_blank", "noopener,noreferrer");
+      toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
     } catch (error) {
       toast({ title: "OAuth start failed", description: error instanceof Error ? error.message : "Save settings first.", variant: "destructive" });
     }
@@ -221,14 +222,19 @@ const Index = () => {
                   <Label htmlFor="openai-api-key">OpenAI API Key</Label>
                   <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="redirect-uri">Redirect URL</Label>
+                  <Input id="redirect-uri" type="url" autoComplete="off" placeholder="https://your-domain.com" value={settings.redirectUri} onChange={(event) => setSettings((prev) => ({ ...prev, redirectUri: event.target.value }))} required className="border-border bg-surface" />
+                </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>Start Upstox OAuth</Button>
+                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
                 <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
               <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy the <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <Input id="oauth-code" placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-panel" />
                 <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>Connect</Button>
