@@ -2,6 +2,60 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { generateGeminiText } from "../_shared/gemini.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
+function num(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pctMove(current: number | null, base: number | null) {
+  return current !== null && base ? ((current - base) / base) * 100 : null;
+}
+
+function buildRuleContext(latest: any, history: any[]) {
+  const ltp = num(latest?.ltp);
+  const open = num(latest?.open_price);
+  const high = num(latest?.high_price);
+  const low = num(latest?.low_price);
+  const close = num(latest?.close_price);
+  const volume = num(latest?.raw_payload?.volume);
+  const volumes = history.map((row) => num(row?.raw_payload?.volume)).filter((value): value is number => value !== null).slice(0, 5);
+  const avg5Volume = volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
+  const volumeValid = volume !== null && avg5Volume !== null ? volume >= avg5Volume * 1.2 : false;
+  const previous = history[1];
+  const previousHigh = num(previous?.high_price);
+  const previousLow = num(previous?.low_price);
+  const fakeBreakout = volumeValid ? false : Boolean((ltp !== null && previousHigh !== null && ltp > previousHigh) || (ltp !== null && previousLow !== null && ltp < previousLow));
+  const movePct = pctMove(ltp, open ?? close);
+  const overextended = movePct !== null && Math.abs(movePct) > 1.5;
+  const created = new Date(latest?.source_timestamp ?? latest?.created_at ?? Date.now());
+  const minutes = created.getHours() * 60 + created.getMinutes();
+  const europeanOpenCaution = minutes >= 12 * 60 + 30 && minutes <= 13 * 60 + 30;
+  const indiaVix = latest?.raw_payload?.context?.indiaVix;
+  const prevVix = previous?.raw_payload?.context?.indiaVix;
+  const vixRising = num(indiaVix?.ltp) !== null && num(prevVix?.ltp) !== null ? Number(indiaVix.ltp) > Number(prevVix.ltp) : false;
+  const sixtyMinuteRows = history.filter((row) => Date.now() - new Date(row.created_at).getTime() <= 60 * 60 * 1000);
+  const rangeValues = sixtyMinuteRows.flatMap((row) => [num(row.high_price), num(row.low_price), num(row.ltp)]).filter((value): value is number => value !== null);
+  const noTradeRange = rangeValues.length > 2 && Math.max(...rangeValues) - Math.min(...rangeValues) < 40;
+  const bankMove = pctMove(num(latest?.raw_payload?.context?.bankNifty?.ltp), num(latest?.raw_payload?.context?.bankNifty?.open));
+  const niftyMove = pctMove(ltp, open);
+  const heavyMoves = (latest?.raw_payload?.context?.heavyweights ?? []).map((quote: any) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
+  const divergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
+  const pcr = num(latest?.raw_payload?.optionChain?.pcr);
+
+  return {
+    rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral" },
+    guidance: [
+      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : "Volume/trap filter evaluated.",
+      vixRising ? "India VIX rising: reduce position size alert." : "India VIX not rising or unavailable.",
+      europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
+      overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
+      noTradeRange ? "No-Trade Zone: 60-minute range is under 40 points." : "Range filter clear or awaiting more history.",
+      divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
+      pcr === null ? "PCR unavailable from current Upstox payload; do not infer option-chain bias." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
+    ],
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -9,16 +63,39 @@ serve(async (req) => {
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
 
-    const { data: latest, error: latestError } = await auth.adminClient
+    const { data: history, error: latestError } = await auth.adminClient
       .from("nifty_market_data")
       .select("*")
       .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(70);
+    const latest = history?.[0];
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
 
-    const prompt = `You are a professional Nifty Options Scalper. Analyze the provided data and respond with ACTION: BUY/SELL/WAIT, STRIKE: (Current ATM), and REASON: (brief logic)\n\nMarket data:\n${JSON.stringify(latest)}`;
+    const ruleContext = buildRuleContext(latest, history ?? []);
+
+    const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
+- Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
+- Valid signal requires current volume at least 20% above the 5-period average.
+- If India VIX is rising, reduce position size in the reason.
+- 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
+- If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
+- PCR > 1.3 is Overbought; PCR < 0.7 is Oversold. If PCR is unavailable, state unavailable.
+- No-Trade Zone if the last 60 minutes remain inside a 40-point range.
+- Entry must wait for minor retracement: dip for CALL, bounce for PUT.
+- Risk reward must be strict 1:2.
+- TSL: at 50% target, move SL to entry; every 10 points additional gain trails SL by 5 points.
+- Divergence Guard: if Nifty disagrees with Bank Nifty or top heavyweights, label Low Conviction.
+
+Respond exactly with:
+ACTION: BUY/SELL/WAIT
+STRIKE: Current ATM or WAIT
+CONVICTION: HIGH/MEDIUM/LOW
+REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
+
+Computed rule context:\n${JSON.stringify(ruleContext)}
+
+Latest market data:\n${JSON.stringify(latest)}`;
 
     const result = await generateGeminiText(settings.openai_api_key, prompt, 300);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
