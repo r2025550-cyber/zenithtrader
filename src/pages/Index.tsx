@@ -2,16 +2,19 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
+  CheckCircle2,
   Gauge,
   IndianRupee,
   KeyRound,
   LogIn,
   ExternalLink,
   Radio,
+  RefreshCw,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   TrendingUp,
+  XCircle,
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
@@ -38,6 +41,8 @@ const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
+type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
+type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -57,6 +62,8 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
   const latestLtp = Number(latestData?.ltp);
@@ -74,6 +81,9 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
+  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
+  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -121,6 +131,7 @@ const Index = () => {
     try {
       await invokeFunction("save-trading-settings", settings);
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" }));
+      await checkSystemStatus(false).catch(() => null);
       toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -152,6 +163,7 @@ const Index = () => {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
+      await checkSystemStatus(false).catch(() => null);
       await fetchLiveNifty();
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
@@ -174,6 +186,30 @@ const Index = () => {
       setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
     }
     return market.data;
+  };
+
+  const checkSystemStatus = async (showToast = true) => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<SystemStatus>("system-status");
+      setSystemStatus(status);
+      if (showToast) {
+        const failures = [status.upstox, status.openai].filter((item) => !item.ok).map((item) => item.message).join(" ");
+        toast({
+          title: status.ready ? "System ready for market open" : "Connection needs attention",
+          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
+          variant: status.ready ? "default" : "destructive",
+        });
+      }
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to verify system status.";
+      setSystemStatus(null);
+      if (showToast) toast({ title: "System status failed", description: message, variant: "destructive" });
+      throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
   };
 
   const runTradingCycle = async () => {
@@ -214,6 +250,9 @@ const Index = () => {
 
   useEffect(() => {
     if (!session) return;
+    checkSystemStatus(false).catch(() => {
+      // Connection Pulse will show missing setup after a manual check.
+    });
     fetchLiveNifty().catch(() => {
       // Keep the dashboard usable until Upstox OAuth is connected.
     });
@@ -240,8 +279,8 @@ const Index = () => {
             </div>
             <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3">
               <p className="text-xs uppercase text-muted-foreground">Connection Status</p>
-              <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-primary">
-                <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse-glow" /> {session ? "Backend Secured" : "Sign In Required"}
+              <div className={`mt-2 flex items-center gap-2 text-sm font-semibold ${connectionTone}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
             </div>
           </div>
@@ -315,6 +354,32 @@ const Index = () => {
             </div>
           </DialogContent>
         </Dialog>
+
+        {session && (
+          <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Connection Pulse</p><h2 className="text-xl font-semibold">System Status</h2></div>
+              <Button type="button" variant="terminal" disabled={isCheckingStatus} onClick={() => checkSystemStatus(true)}>
+                <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Verify Now
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {([
+                ["Upstox API Status", systemStatus?.upstox, "Confirms the OAuth access token can reach Upstox right now."],
+                ["OpenAI API Status", systemStatus?.openai, "Runs a small AI response test using the saved key."],
+              ] as const).map(([title, check, fallback]) => (
+                <div key={title} className={`rounded-md border p-4 ${check?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+                  <div className="mb-2 flex items-center gap-2 font-semibold">
+                    {check?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>{title}</span>
+                  </div>
+                  <p className="text-sm leading-6 text-muted-foreground">{check?.message ?? fallback}</p>
+                </div>
+              ))}
+            </div>
+            {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
+          </section>
+        )}
 
         <div className="grid gap-5 xl:grid-cols-[1.55fr_0.85fr]">
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
