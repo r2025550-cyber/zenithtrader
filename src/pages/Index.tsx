@@ -32,12 +32,12 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const chartBars = [34, 48, 42, 58, 51, 64, 73, 69, 82, 76, 88, 79, 92, 85, 97, 91, 103, 96, 111, 106, 118, 109];
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
-type NiftyData = { ltp?: number; open_price?: number; high_price?: number; low_price?: number; close_price?: number };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
+type MarketPoint = { value: number; time: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -55,8 +55,25 @@ const Index = () => {
   const [authorizationUrl, setAuthorizationUrl] = useState("");
   const [oauthDebugLog, setOauthDebugLog] = useState("No token exchange attempted yet.");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
+  const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+
+  const latestLtp = Number(latestData?.ltp);
+  const hasLivePrice = Number.isFinite(latestLtp);
+  const chartValues = marketHistory.map((point) => point.value);
+  const chartMin = chartValues.length ? Math.min(...chartValues) : 0;
+  const chartMax = chartValues.length ? Math.max(...chartValues) : 0;
+  const chartRange = Math.max(chartMax - chartMin, 1);
+  const chartLevels = Array.from({ length: 5 }, (_, index) => chartMax - (chartRange * index) / 4);
+  const chartBars = marketHistory.map((point) => Math.max(8, ((point.value - chartMin) / chartRange) * 88 + 8));
+  const chartPolyline = marketHistory
+    .map((point, index) => {
+      const x = marketHistory.length === 1 ? 100 : (index / (marketHistory.length - 1)) * 100;
+      const y = 96 - ((point.value - chartMin) / chartRange) * 88;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -135,6 +152,7 @@ const Index = () => {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
+      await fetchLiveNifty();
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check the authorization code.";
@@ -147,9 +165,19 @@ const Index = () => {
     }
   };
 
-  const runTradingCycle = async () => {
+  const fetchLiveNifty = async () => {
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data");
     setLatestData(market.data);
+    const value = Number(market.data?.ltp);
+    if (Number.isFinite(value)) {
+      const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
+      setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+    }
+    return market.data;
+  };
+
+  const runTradingCycle = async () => {
+    await fetchLiveNifty();
     const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai");
     setLatestSignal(ai.signal);
   };
