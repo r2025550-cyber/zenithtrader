@@ -1,16 +1,9 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { GEMINI_API_VERSION, generateGeminiText } from "../_shared/gemini.ts";
 import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.ts";
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
-const GEMINI_MODELS = ["gemini-1.5-flash", "models/gemini-1.5-flash", "gemini-1.5-flash-latest", "models/gemini-1.5-flash-latest"];
-
-function extractGeminiError(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  return "Unknown Gemini error";
-}
 
 async function checkUpstox(accessToken?: string | null) {
   if (!accessToken) return fail("Upstox access token is missing. Complete OAuth again from API Settings.");
@@ -30,27 +23,12 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
-  let lastError = "Unknown Gemini error";
-  for (const modelName of GEMINI_MODELS) {
-    const modelPath = modelName.startsWith("models/") ? modelName : `models/${modelName}`;
-    const response = await fetch(`${GEMINI_API_BASE}/${modelPath}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey.trim() },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: "Reply with only OK." }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 5 },
-      }),
-    });
-
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok) {
-      return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: modelName, endpointModel: modelPath, apiVersion: "v1", keyHeader: "x-goog-api-key", transport: "REST" });
-    }
-
-    lastError = payload?.error?.message ?? `Gemini check failed with HTTP ${response.status}`;
+  try {
+    const result = await generateGeminiText(apiKey, "Reply with only OK.", 5);
+    return ok("Gemini Flash responded successfully with the saved API key.", { model: result.modelName, apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : "Gemini Flash verification failed.", { apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
   }
-
-  return fail(lastError, { model: GEMINI_MODELS.join(" → "), apiVersion: "v1", keyHeader: "x-goog-api-key", transport: "REST" });
 }
 
 serve(async (req) => {
