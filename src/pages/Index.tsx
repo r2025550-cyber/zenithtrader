@@ -202,7 +202,7 @@ const Index = () => {
         )}
 
         <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent className="max-h-[92vh] overflow-y-auto border-border bg-panel text-foreground shadow-panel sm:max-w-2xl">
+          <DialogContent className="h-dvh w-screen max-w-none overflow-y-auto rounded-none border-border bg-panel text-foreground shadow-panel sm:h-auto sm:max-h-[92vh] sm:max-w-2xl sm:rounded-lg">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
               <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
@@ -211,15 +211,15 @@ const Index = () => {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-key">Upstox API Key</Label>
-                  <Input id="upstox-api-key" type="password" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-secret">Upstox API Secret</Label>
-                  <Input id="upstox-api-secret" type="password" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="openai-api-key">OpenAI API Key</Label>
-                  <Input id="openai-api-key" type="password" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
