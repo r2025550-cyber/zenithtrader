@@ -234,8 +234,8 @@ const Index = () => {
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
-                  <Input id="redirect-uri" type="url" autoComplete="off" placeholder="https://your-domain.com" value={settings.redirectUri} onChange={(event) => setSettings((prev) => ({ ...prev, redirectUri: event.target.value }))} required className="border-border bg-surface" />
-                  <p className="text-xs leading-5 text-muted-foreground">Get Code uses this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(settings.redirectUri.trim())}</span>.</p>
+                  <Input id="redirect-uri" type="url" autoComplete="off" value={settings.redirectUri} readOnly className="border-border bg-surface" />
+                  <p className="text-xs leading-5 text-muted-foreground">Get Code and Connect both use this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}</span>.</p>
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
