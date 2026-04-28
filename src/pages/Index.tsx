@@ -55,7 +55,7 @@ const Index = () => {
   const [riskMode, setRiskMode] = useState("moderate");
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
@@ -82,7 +82,7 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready" : "Action Required";
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
 
@@ -130,10 +130,10 @@ const Index = () => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", settings);
-      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "" }));
-      await checkSystemStatus(false).catch(() => null);
-      toast({ title: "Settings secured", description: "API credentials were stored in the protected backend table." });
+      await invokeFunction("save-trading-settings", { ...settings, openaiApiKey: settings.geminiApiKey });
+      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "" }));
+      const status = await checkSystemStatus(false).catch(() => null);
+      toast({ title: status?.ready ? "System Ready (Market Closed)" : "Settings secured", description: status?.ready ? "Upstox and Gemini 1.5 Flash are both verified." : "API credentials were stored in the protected backend table." });
     } catch (error) {
       toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
@@ -396,7 +396,7 @@ const Index = () => {
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                    <span>Gemini API Status</span>
+                    <span>Gemini 1.5 Flash Status</span>
                   </div>
                   <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestGemini}>
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
