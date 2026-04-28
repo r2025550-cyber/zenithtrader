@@ -3,6 +3,7 @@ import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.t
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
+const GEMINI_MODEL = "gemini-1.5-flash-002";
 
 function extractGeminiError(payload: Record<string, unknown>) {
   const error = payload.error as { message?: string; code?: string | number; status?: string } | undefined;
@@ -29,7 +30,7 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -43,7 +44,7 @@ async function checkGemini(apiKey?: string | null) {
     return fail(extractGeminiError(payload), { status: response.status, payload });
   }
 
-  return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { status: response.status });
+  return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { status: response.status, model: GEMINI_MODEL });
 }
 
 serve(async (req) => {
