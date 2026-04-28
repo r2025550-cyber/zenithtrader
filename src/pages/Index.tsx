@@ -32,12 +32,12 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const chartBars = [34, 48, 42, 58, 51, 64, 73, 69, 82, 76, 88, 79, 92, 85, 97, 91, 103, 96, 111, 106, 118, 109];
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 
 type Signal = { action: string; strike: string; reason: string; created_at?: string };
-type NiftyData = { ltp?: number; open_price?: number; high_price?: number; low_price?: number; close_price?: number };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; created_at?: string; source_timestamp?: string };
+type MarketPoint = { value: number; time: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -55,8 +55,25 @@ const Index = () => {
   const [authorizationUrl, setAuthorizationUrl] = useState("");
   const [oauthDebugLog, setOauthDebugLog] = useState("No token exchange attempted yet.");
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
+  const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+
+  const latestLtp = Number(latestData?.ltp);
+  const hasLivePrice = Number.isFinite(latestLtp);
+  const chartValues = marketHistory.map((point) => point.value);
+  const chartMin = chartValues.length ? Math.min(...chartValues) : 0;
+  const chartMax = chartValues.length ? Math.max(...chartValues) : 0;
+  const chartRange = Math.max(chartMax - chartMin, 1);
+  const chartLevels = Array.from({ length: 5 }, (_, index) => chartMax - (chartRange * index) / 4);
+  const chartBars = marketHistory.map((point) => Math.max(8, ((point.value - chartMin) / chartRange) * 88 + 8));
+  const chartPolyline = marketHistory
+    .map((point, index) => {
+      const x = marketHistory.length === 1 ? 100 : (index / (marketHistory.length - 1)) * 100;
+      const y = 96 - ((point.value - chartMin) / chartRange) * 88;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -135,6 +152,7 @@ const Index = () => {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
+      await fetchLiveNifty();
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check the authorization code.";
@@ -147,9 +165,19 @@ const Index = () => {
     }
   };
 
-  const runTradingCycle = async () => {
+  const fetchLiveNifty = async () => {
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data");
     setLatestData(market.data);
+    const value = Number(market.data?.ltp);
+    if (Number.isFinite(value)) {
+      const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
+      setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+    }
+    return market.data;
+  };
+
+  const runTradingCycle = async () => {
+    await fetchLiveNifty();
     const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai");
     setLatestSignal(ai.signal);
   };
@@ -170,18 +198,26 @@ const Index = () => {
 
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-    if (aiEnabled) {
+    if (session) {
       intervalRef.current = setInterval(() => {
-        runTradingCycle().catch((error) => {
-          setAiEnabled(false);
-          toast({ title: "AI loop paused", description: error instanceof Error ? error.message : "Server-side cycle failed.", variant: "destructive" });
+        const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
+        refresh.catch((error) => {
+          if (aiEnabled) setAiEnabled(false);
+          toast({ title: aiEnabled ? "AI loop paused" : "Live Nifty refresh failed", description: error instanceof Error ? error.message : "Unable to fetch Upstox market data.", variant: "destructive" });
         });
       }, 60_000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [aiEnabled]);
+  }, [session, aiEnabled]);
+
+  useEffect(() => {
+    if (!session) return;
+    fetchLiveNifty().catch(() => {
+      // Keep the dashboard usable until Upstox OAuth is connected.
+    });
+  }, [session]);
 
   return (
     <main className="min-h-screen overflow-hidden bg-terminal text-foreground">
@@ -198,8 +234,8 @@ const Index = () => {
             <div className="rounded-md border border-border bg-surface px-4 py-3">
               <p className="text-xs uppercase text-muted-foreground">Live Nifty 50</p>
               <div className="mt-1 flex items-end gap-2">
-                <span className="text-2xl font-bold text-foreground">{latestData?.ltp ? latestData.ltp.toLocaleString("en-IN") : "22,512.40"}</span>
-                <span className="flex items-center text-sm font-semibold text-profit"><TrendingUp className="h-4 w-4" /> Live</span>
+                <span className="text-2xl font-bold text-foreground">{hasLivePrice ? latestLtp.toLocaleString("en-IN") : "—"}</span>
+                <span className="flex items-center text-sm font-semibold text-profit"><TrendingUp className="h-4 w-4" /> {hasLivePrice ? "Live" : "Waiting"}</span>
               </div>
             </div>
             <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3">
@@ -283,15 +319,15 @@ const Index = () => {
         <div className="grid gap-5 xl:grid-cols-[1.55fr_0.85fr]">
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">TradingView-style chart</p><h2 className="text-xl font-semibold">NIFTY 50 · 5m Options Signal</h2></div>
+              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Real-time Upstox feed</p><h2 className="text-xl font-semibold">NIFTY 50 · 1m Live Price</h2></div>
               <div className="flex gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "CALL"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: High</span></div>
             </div>
             <div className="market-grid relative h-[360px] p-5">
-              <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">{["22,620", "22,560", "22,500", "22,440", "22,380"].map((label) => <span key={label}>{label}</span>)}</div>
+              <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">{chartLevels.map((level, index) => <span key={`${level}-${index}`}>{marketHistory.length ? level.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}</span>)}</div>
               <div className="absolute left-0 top-1/2 h-px w-full bg-profit/40" />
               <div className="absolute left-0 top-0 h-full w-1/3 bg-gradient-to-r from-primary/10 to-transparent animate-scan motion-reduce:animate-none" />
-              <div className="absolute bottom-8 left-5 right-14 flex h-64 items-end gap-2">{chartBars.map((height, index) => <div key={index} className="flex flex-1 items-end justify-center"><span className={`w-full max-w-3 rounded-t-sm ${index % 5 === 1 || index % 7 === 0 ? "bg-loss" : "bg-profit"}`} style={{ height: `${height}%` }} /></div>)}</div>
-              <svg className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true"><polyline points="0,70 8,64 16,68 24,52 32,56 40,38 48,44 56,30 64,35 72,22 80,31 88,18 100,24" fill="none" stroke="hsl(var(--chart-line))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" /></svg>
+              {marketHistory.length ? <div className="absolute bottom-8 left-5 right-14 flex h-64 items-end gap-2">{chartBars.map((height, index) => <div key={`${marketHistory[index].time}-${index}`} className="flex flex-1 items-end justify-center"><span className={`w-full max-w-3 rounded-t-sm ${index > 0 && marketHistory[index].value < marketHistory[index - 1].value ? "bg-loss" : "bg-profit"}`} style={{ height: `${height}%` }} /></div>)}</div> : <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">Connect Upstox OAuth to stream live Nifty 50 prices.</div>}
+              {chartPolyline && <svg className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true"><polyline points={chartPolyline} fill="none" stroke="hsl(var(--chart-line))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" /></svg>}
             </div>
           </section>
 
