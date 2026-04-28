@@ -4,6 +4,13 @@ import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.t
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
 
+function extractProviderError(payload: Record<string, unknown>) {
+  const error = payload.error as { message?: string; code?: string; type?: string } | undefined;
+  const message = error?.message ?? "Unknown OpenAI error";
+  const code = error?.code ? ` (${error.code})` : error?.type ? ` (${error.type})` : "";
+  return `${message}${code}`;
+}
+
 async function checkUpstox(accessToken?: string | null) {
   if (!accessToken) return fail("Upstox access token is missing. Complete OAuth again from API Settings.");
 
@@ -38,7 +45,7 @@ async function checkOpenAI(apiKey?: string | null) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    return fail("OpenAI test failed. Check the saved API key and billing/access status.", { status: response.status, payload });
+    return fail(extractProviderError(payload), { status: response.status, payload });
   }
 
   return ok("AI engine responded successfully with the saved API key.", { status: response.status });
@@ -47,6 +54,8 @@ async function checkOpenAI(apiKey?: string | null) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    const body = await req.json().catch(() => ({}));
+    const target = body?.target === "openai" ? "openai" : "all";
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error ?? json({ error: "Please sign in before checking system status." }, 401);
 
@@ -58,10 +67,12 @@ serve(async (req) => {
 
     if (error) throw error;
 
-    const [upstox, openai] = await Promise.all([
-      checkUpstox(settings?.upstox_access_token),
-      checkOpenAI(settings?.openai_api_key),
-    ]);
+    if (target === "openai") {
+      const openai = await checkOpenAI(settings?.openai_api_key);
+      return json({ openai, checkedAt: new Date().toISOString() });
+    }
+
+    const [upstox, openai] = await Promise.all([checkUpstox(settings?.upstox_access_token), checkOpenAI(settings?.openai_api_key)]);
 
     return json({ ready: upstox.ok && openai.ok, upstox, openai, checkedAt: new Date().toISOString() });
   } catch (error) {
