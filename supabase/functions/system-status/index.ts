@@ -4,6 +4,7 @@ import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.t
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
+const GEMINI_MODELS = ["gemini-1.5-flash", "gemini-1.5-flash-latest"];
 
 function extractGeminiError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -29,13 +30,21 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
+  let lastError: unknown;
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { temperature: 0, maxOutputTokens: 5 } }, { apiVersion: "v1" });
-    await model.generateContent("Reply with only OK.");
-    return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: "gemini-1.5-flash", apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName, generationConfig: { temperature: 0, maxOutputTokens: 5 } }, { apiVersion: "v1" });
+        await model.generateContent("Reply with only OK.");
+        return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: modelName, apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    return fail(extractGeminiError(lastError), { model: GEMINI_MODELS.join(" → "), apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
   } catch (error) {
-    return fail(extractGeminiError(error), { model: "gemini-1.5-flash", apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
+    return fail(extractGeminiError(error), { model: GEMINI_MODELS.join(" → "), apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
   }
 }
 
