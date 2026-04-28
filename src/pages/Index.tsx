@@ -43,6 +43,7 @@ type NiftyData = { ltp?: number | string | null; open_price?: number | string | 
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; openai: PulseCheck; checkedAt: string };
+type OpenAIStatus = { openai: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -81,7 +82,7 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready" : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
 
@@ -207,6 +208,26 @@ const Index = () => {
       setSystemStatus(null);
       if (showToast) toast({ title: "System status failed", description: message, variant: "destructive" });
       throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const retestOpenAI = async () => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
+      setSystemStatus((prev) => {
+        const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
+        return { ready: upstox.ok && status.openai.ok, upstox, openai: status.openai, checkedAt: status.checkedAt };
+      });
+      toast({
+        title: status.openai.ok ? "OpenAI connected" : "OpenAI still failing",
+        description: status.openai.message,
+        variant: status.openai.ok ? "default" : "destructive",
+      });
+    } catch (error) {
+      toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
     } finally {
       setIsCheckingStatus(false);
     }
@@ -364,18 +385,25 @@ const Index = () => {
               </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              {([
-                ["Upstox API Status", systemStatus?.upstox, "Confirms the OAuth access token can reach Upstox right now."],
-                ["OpenAI API Status", systemStatus?.openai, "Runs a small AI response test using the saved key."],
-              ] as const).map(([title, check, fallback]) => (
-                <div key={title} className={`rounded-md border p-4 ${check?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
-                  <div className="mb-2 flex items-center gap-2 font-semibold">
-                    {check?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                    <span>{title}</span>
-                  </div>
-                  <p className="text-sm leading-6 text-muted-foreground">{check?.message ?? fallback}</p>
+              <div className={`rounded-md border p-4 ${systemStatus?.upstox?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+                <div className="mb-2 flex items-center gap-2 font-semibold">
+                  {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                  <span>Upstox API Status</span>
                 </div>
-              ))}
+                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}</p>
+              </div>
+              <div className={`rounded-md border p-4 ${systemStatus?.openai?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+                <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    {systemStatus?.openai?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>OpenAI API Status</span>
+                  </div>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestOpenAI}>
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
+                  </Button>
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.openai?.message ?? "Runs a small AI response test using the saved key."}</p>
+              </div>
             </div>
             {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
           </section>
