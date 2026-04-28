@@ -25,9 +25,9 @@ async function checkGemini(apiKey?: string | null) {
 
   try {
     const result = await generateGeminiText(apiKey, "Reply with only OK.", 5);
-    return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: result.modelName, apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
+    return ok("Gemini Flash responded successfully with the saved API key.", { model: result.modelName, apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
   } catch (error) {
-    return fail(error instanceof Error ? error.message : "Gemini 1.5 Flash verification failed.", { apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
+    return fail(error instanceof Error ? error.message : "Gemini Flash verification failed.", { apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
   }
 }
 
