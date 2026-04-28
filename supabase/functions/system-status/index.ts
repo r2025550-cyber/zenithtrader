@@ -31,11 +31,11 @@ async function checkGemini(apiKey?: string | null) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { temperature: 0, maxOutputTokens: 5 } });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", generationConfig: { temperature: 0, maxOutputTokens: 5 } }, { apiVersion: "v1" });
     await model.generateContent("Reply with only OK.");
-    return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: "gemini-1.5-flash", sdk: "@google/generative-ai" });
+    return ok("Gemini 1.5 Flash responded successfully with the saved API key.", { model: "gemini-1.5-flash", apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
   } catch (error) {
-    return fail(extractGeminiError(error), { model: "gemini-1.5-flash", sdk: "@google/generative-ai" });
+    return fail(extractGeminiError(error), { model: "gemini-1.5-flash", apiVersion: "v1", keyHeader: "x-goog-api-key", sdk: "@google/generative-ai" });
   }
 }
 
