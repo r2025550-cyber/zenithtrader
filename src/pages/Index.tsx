@@ -279,8 +279,8 @@ const Index = () => {
             </div>
             <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3">
               <p className="text-xs uppercase text-muted-foreground">Connection Status</p>
-              <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-primary">
-                <span className="h-2.5 w-2.5 rounded-full bg-primary animate-pulse-glow" /> {session ? "Backend Secured" : "Sign In Required"}
+              <div className={`mt-2 flex items-center gap-2 text-sm font-semibold ${connectionTone}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
             </div>
           </div>
