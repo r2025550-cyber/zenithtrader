@@ -3,7 +3,8 @@ import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.t
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
 const fail = (message: string, details?: Record<string, unknown>) => ({ ok: false, message, details });
-const GEMINI_MODEL_CANDIDATES = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-002"];
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1";
+const GEMINI_MODEL_CANDIDATES = ["models/gemini-1.5-flash", "models/gemini-1.5-flash-latest"];
 
 function extractGeminiError(payload: Record<string, unknown>) {
   const error = payload.error as { message?: string; code?: string | number; status?: string } | undefined;
@@ -30,13 +31,13 @@ async function checkUpstox(accessToken?: string | null) {
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
-  const modelsResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+  const modelsResponse = await fetch(`${GEMINI_API_BASE}/models?key=${apiKey}`);
   const modelsPayload = await modelsResponse.json().catch(() => ({}));
   if (!modelsResponse.ok) return fail(extractGeminiError(modelsPayload), { status: modelsResponse.status, payload: modelsPayload });
   const availableModels = (modelsPayload.models ?? []) as Array<{ name?: string; supportedGenerationMethods?: string[] }>;
-  const model = availableModels.find((item) => GEMINI_MODEL_CANDIDATES.some((candidate) => item.name === `models/${candidate}`) && item.supportedGenerationMethods?.includes("generateContent"))?.name?.replace("models/", "") ?? GEMINI_MODEL_CANDIDATES[0];
+  const model = availableModels.find((item) => GEMINI_MODEL_CANDIDATES.includes(item.name ?? "") && item.supportedGenerationMethods?.includes("generateContent"))?.name ?? GEMINI_MODEL_CANDIDATES[0];
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+  const response = await fetch(`${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
