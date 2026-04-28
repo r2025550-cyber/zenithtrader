@@ -428,7 +428,7 @@ const Index = () => {
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Real-time Upstox feed</p><h2 className="text-xl font-semibold">NIFTY 50 · 1m Live Price</h2></div>
-              <div className="flex gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "CALL"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: High</span></div>
+              <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "WAIT"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: {latestSignal?.ruleContext?.rules?.volumeValid ? "Valid +20%" : "Filtering"}</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">VIX: {latestData?.raw_payload?.context?.indiaVix?.ltp ?? "—"}</span></div>
             </div>
             <div className="market-grid relative h-[360px] p-5">
               <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">{chartLevels.map((level, index) => <span key={`${level}-${index}`}>{marketHistory.length ? level.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}</span>)}</div>
@@ -449,7 +449,7 @@ const Index = () => {
               </div>
             </section>
 
-            <section className="rounded-lg border border-primary/25 bg-panel p-5 shadow-market"><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className="min-h-20 rounded-md border border-border bg-surface p-4 text-sm leading-6 text-muted-foreground">{reasoning}</p></section>
+            <section className={`rounded-lg border bg-panel p-5 shadow-market ${highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25"}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground"}`}>{reasoning}</p></section>
           </aside>
         </div>
 
