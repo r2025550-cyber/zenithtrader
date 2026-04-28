@@ -8,33 +8,50 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 222 33% 6%;
+    --foreground: 210 35% 96%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 220 31% 9%;
+    --card-foreground: 210 35% 96%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 220 31% 9%;
+    --popover-foreground: 210 35% 96%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 158 70% 46%;
+    --primary-foreground: 220 33% 6%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 218 24% 14%;
+    --secondary-foreground: 210 35% 96%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 219 23% 16%;
+    --muted-foreground: 214 15% 64%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 199 85% 58%;
+    --accent-foreground: 222 33% 6%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 78% 58%;
+    --destructive-foreground: 210 35% 96%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 217 22% 20%;
+    --input: 218 24% 14%;
+    --ring: 158 70% 46%;
+
+    --profit: 150 74% 45%;
+    --profit-foreground: 220 33% 6%;
+    --loss: 0 78% 58%;
+    --loss-foreground: 210 35% 96%;
+    --warning: 42 96% 58%;
+    --warning-foreground: 220 33% 6%;
+    --panel: 220 29% 11%;
+    --panel-foreground: 210 35% 96%;
+    --surface: 219 27% 13%;
+    --surface-foreground: 210 35% 96%;
+    --chart-grid: 217 22% 20%;
+    --chart-line: 158 70% 46%;
+    --gradient-terminal: linear-gradient(135deg, hsl(220 33% 6%), hsl(219 27% 13%) 46%, hsl(170 46% 11%));
+    --gradient-panel: linear-gradient(180deg, hsl(var(--panel)), hsl(220 29% 9%));
+    --shadow-market: 0 24px 70px -32px hsl(var(--primary) / 0.45);
+    --shadow-panel: 0 18px 50px -30px hsl(220 40% 2% / 0.9);
 
     --radius: 0.5rem;
 
@@ -100,6 +117,29 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    background: var(--gradient-terminal);
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  }
+}
+
+@layer utilities {
+  .market-grid {
+    background-image:
+      linear-gradient(hsl(var(--chart-grid) / 0.38) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--chart-grid) / 0.38) 1px, transparent 1px);
+    background-size: 56px 42px;
+  }
+
+  .noise-overlay {
+    background-image: radial-gradient(hsl(var(--foreground) / 0.08) 1px, transparent 1px);
+    background-size: 18px 18px;
   }
 }
