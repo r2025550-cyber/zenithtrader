@@ -29,7 +29,7 @@ function quoteFrom(node: any) {
     high: numberFrom(ohlc.high, ohlc.h),
     low: numberFrom(ohlc.low, ohlc.l),
     close: numberFrom(ohlc.close, ohlc.c, node?.close_price),
-    volume: numberFrom(node?.volume, node?.volume_traded, node?.totalTradedVolume, node?.total_traded_volume, node?.volumeTradedToday, ohlc.volume, depth?.total_buy_quantity, depth?.total_sell_quantity),
+    volume: numberFrom(node?.volume, node?.volume_traded, node?.totalTradedVolume, node?.total_traded_volume, node?.volumeTradedToday, node?.volume_traded_today, node?.ttv, ohlc.volume, ohlc.vol, depth?.total_buy_quantity, depth?.total_sell_quantity),
   };
 }
 
@@ -56,9 +56,11 @@ async function getOptionChainPcr(headers: HeadersInit) {
   const totals = rows.reduce((sum: { callOi: number; putOi: number }, row: any) => {
     sum.callOi += numberFrom(row?.call_options?.market_data?.oi, row?.call_options?.market_data?.open_interest, row?.ce_oi) ?? 0;
     sum.putOi += numberFrom(row?.put_options?.market_data?.oi, row?.put_options?.market_data?.open_interest, row?.pe_oi) ?? 0;
+    sum.callVolume += numberFrom(row?.call_options?.market_data?.volume, row?.call_options?.market_data?.volume_traded, row?.call_options?.market_data?.totalTradedVolume, row?.ce_volume) ?? 0;
+    sum.putVolume += numberFrom(row?.put_options?.market_data?.volume, row?.put_options?.market_data?.volume_traded, row?.put_options?.market_data?.totalTradedVolume, row?.pe_volume) ?? 0;
     return sum;
-  }, { callOi: 0, putOi: 0 });
-  return { pcr: totals.callOi > 0 ? Number((totals.putOi / totals.callOi).toFixed(3)) : null, raw: payload, error: null, expiry };
+  }, { callOi: 0, putOi: 0, callVolume: 0, putVolume: 0 });
+  return { pcr: totals.callOi > 0 ? Number((totals.putOi / totals.callOi).toFixed(3)) : null, totalVolume: totals.callVolume + totals.putVolume || null, raw: payload, error: null, expiry };
 }
 
 function isInvalidUpstoxToken(error: unknown) {
@@ -68,17 +70,20 @@ function isInvalidUpstoxToken(error: unknown) {
 
 async function getQuote(instrumentKey: string, headers: HeadersInit) {
   const encoded = encodeURIComponent(instrumentKey);
-  const [ltpResponse, ohlcResponse] = await Promise.all([
+  const [ltpResponse, ohlcResponse, quoteResponse] = await Promise.all([
     fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers }),
     fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers }),
+    fetch(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encoded}`, { headers }),
   ]);
   const ltpPayload = await ltpResponse.json().catch(() => ({}));
   const ohlcPayload = await ohlcResponse.json().catch(() => ({}));
+  const quotePayload = await quoteResponse.json().catch(() => ({}));
   if (!ltpResponse.ok) throw new Error(JSON.stringify({ error: "Upstox LTP request failed", status: ltpResponse.status, payload: ltpPayload }));
   if (!ohlcResponse.ok) throw new Error(JSON.stringify({ error: "Upstox OHLC request failed", status: ohlcResponse.status, payload: ohlcPayload }));
+  const fullQuote = quoteResponse.ok ? quoteFrom(firstNode(quotePayload)) : {};
   const ohlcQuote = quoteFrom(firstNode(ohlcPayload));
   const ltpQuote = quoteFrom(firstNode(ltpPayload));
-  return { quote: { ...ohlcQuote, ltp: ltpQuote.ltp ?? ohlcQuote.ltp, volume: ltpQuote.volume ?? ohlcQuote.volume }, raw: { ltp: ltpPayload, ohlc: ohlcPayload } };
+  return { quote: { ...ohlcQuote, ...fullQuote, ltp: ltpQuote.ltp ?? fullQuote.ltp ?? ohlcQuote.ltp, volume: ltpQuote.volume ?? fullQuote.volume ?? ohlcQuote.volume }, raw: { ltp: ltpPayload, ohlc: ohlcPayload, quote: quotePayload } };
 }
 
 serve(async (req) => {
@@ -122,9 +127,10 @@ serve(async (req) => {
       close_price: nifty.quote.close,
       raw_payload: {
         ...nifty.raw,
-        volume: nifty.quote.volume,
-        volumeStatus: nifty.quote.volume === null ? "unavailable" : "available",
-        optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, expiry: optionChain.value.expiry, error: optionChain.value.error } : { pcr: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
+        volume: nifty.quote.volume ?? (optionChain.status === "fulfilled" ? optionChain.value.totalVolume : null),
+        volumeSource: nifty.quote.volume !== null ? "upstox_quote" : optionChain.status === "fulfilled" && optionChain.value.totalVolume !== null ? "upstox_option_chain" : null,
+        volumeStatus: nifty.quote.volume !== null || (optionChain.status === "fulfilled" && optionChain.value.totalVolume !== null) ? "available" : "unavailable",
+        optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, totalVolume: optionChain.value.totalVolume, expiry: optionChain.value.expiry, error: optionChain.value.error } : { pcr: null, totalVolume: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
         context: {
           bankNifty: contextQuote(bankNifty),
           indiaVix: contextQuote(indiaVix),
