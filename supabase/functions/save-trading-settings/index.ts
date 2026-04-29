@@ -24,6 +24,9 @@ serve(async (req) => {
       upstox_api_secret: parsed.data.upstoxApiSecret,
       openai_api_key: parsed.data.openaiApiKey,
       redirect_uri: parsed.data.redirectUri,
+      upstox_access_token: null,
+      upstox_refresh_token: null,
+      token_expires_at: null,
     }, { onConflict: "user_id" });
 
     if (error) throw error;
