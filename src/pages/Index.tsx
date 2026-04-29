@@ -214,6 +214,36 @@ const Index = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
+  const playAlertTone = () => {
+    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+    const context = audioContextRef.current ?? new AudioCtor();
+    audioContextRef.current = context;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.42);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.45);
+  };
+
+  useEffect(() => {
+    if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+    if (exitAlertActive) {
+      playAlertTone();
+      alertIntervalRef.current = setInterval(playAlertTone, 900);
+    }
+    return () => {
+      if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitAlertActive]);
+
   const showRetryToast = (message: string) => {
     const now = Date.now();
     if (now - retryToastRef.current < 20_000) return;
