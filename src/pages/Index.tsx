@@ -230,13 +230,13 @@ const Index = () => {
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
-      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI trading paused for ${cooldownRemainingMinutes} more minutes.` : targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+  }, [activeTrade, aiEnabled, cooldownActive, cooldownRemainingMinutes, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   useEffect(() => {
-    if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || activeTrade) return;
+    if (!latestSignal || latestSignal.action !== "BUY" || activeTrade) return;
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
