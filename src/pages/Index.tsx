@@ -40,14 +40,19 @@ const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
-const TRADING_QUANTITY_STORAGE_KEY = "zenith-trading-quantity";
+const TRADING_LOT_SIZE_STORAGE_KEY = "zenith-trading-lot-size";
 const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
+const TRADE_COUNT_STORAGE_KEY = "zenith-trade-count-date";
+const ACTIVE_TRADE_STORAGE_KEY = "zenith-active-trade-date";
 const KILL_SWITCH_STORAGE_KEY = "zenith-kill-switch-date";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
+const NIFTY_LOT_SIZE = 65;
+const MAX_TRADES_PER_DAY = 4;
+const DAILY_STOP_LOSS = 2000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -63,6 +68,10 @@ const isWithinMarketHours = (date = new Date()) => {
 
 const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 const todayKey = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+const datedStorageValue = (key: string, fallback = "0") => {
+  const [date, value] = storedValue(key).split(":");
+  return date === todayKey() ? value || fallback : fallback;
+};
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
 const toNumber = (value: unknown) => {
   const parsed = Number(value);
@@ -75,8 +84,8 @@ const formatMoney = (value: unknown) => {
 const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
-type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null } }; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
+type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
@@ -93,11 +102,13 @@ const Index = () => {
   const [authPassword, setAuthPassword] = useState("");
   const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
   const [riskMode, setRiskMode] = useState("moderate");
-  const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
-  const [maxTrades, setMaxTrades] = useState(6);
-  const [stopLoss, setStopLoss] = useState(2500);
+  const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
+  const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
+  const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
+  const [userTargetPoints, setUserTargetPoints] = useState("");
+  const [userSlPoints, setUserSlPoints] = useState("");
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
-  const [maxDailyLoss, setMaxDailyLoss] = useState(() => storedValue(MAX_DAILY_LOSS_STORAGE_KEY, "7500"));
+  const [maxDailyLoss, setMaxDailyLoss] = useState(() => storedValue(MAX_DAILY_LOSS_STORAGE_KEY, String(DAILY_STOP_LOSS)));
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -132,18 +143,22 @@ const Index = () => {
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
-  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
+  const normalizedTradingLotSize = Math.max(1, Number.parseInt(tradingLotSize, 10) || 1);
+  const totalTradingQuantity = normalizedTradingLotSize * NIFTY_LOT_SIZE;
   const pcrValue = toNumber(latestSignal?.ruleContext?.rules?.pcr ?? latestData?.raw_payload?.optionChain?.pcr);
   const vixValue = toNumber(latestData?.raw_payload?.context?.indiaVix?.ltp);
-  const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(1, latestSignal.effectiveTradingQuantity ?? Math.floor(normalizedTradingQuantity / 2)) : normalizedTradingQuantity;
+  const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(NIFTY_LOT_SIZE, latestSignal.effectiveTradingQuantity ?? Math.floor(totalTradingQuantity / 2)) : totalTradingQuantity;
   const aiPanelTone = latestSignal?.action === "BUY" ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]" : latestSignal?.action === "WAIT" ? "border-warning/70" : highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25";
   const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
-  const dailyPnl = history.reduce((sum, trade) => sum + parseCurrency(trade.pnl), 0);
+  const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
+  const dailyPnl = upstoxTodayPnl ?? 0;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
-  const normalizedMaxDailyLoss = Math.max(0, Number.parseInt(maxDailyLoss, 10) || 0);
+  const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
+  const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
+  const maxTradesHit = executedTrades >= MAX_TRADES_PER_DAY;
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
-  const hardKillActive = killSwitchDate === todayKey() || (normalizedMaxDailyLoss > 0 && dailyPnl <= -normalizedMaxDailyLoss);
-  const tradingBlocked = targetAchieved || hardKillActive;
+  const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
+  const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -157,8 +172,8 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(TRADING_QUANTITY_STORAGE_KEY, tradingQuantity);
-  }, [tradingQuantity]);
+    localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
+  }, [tradingLotSize]);
 
   useEffect(() => {
     localStorage.setItem(DAILY_TARGET_STORAGE_KEY, dailyProfitTarget);
@@ -170,13 +185,15 @@ const Index = () => {
       const today = todayKey();
       setKillSwitchDate(today);
       localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
+      emergencyExit(true);
     }
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
-      toast({ title: targetAchieved ? "Target Achieved" : "Hard Kill-Switch Active", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : "Max daily loss reached. Trading is disabled for the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
     }
-  }, [aiEnabled, hardKillActive, killSwitchDate, targetAchieved, toast, tradingBlocked]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   const showRetryToast = (message: string) => {
     const now = Date.now();
@@ -318,7 +335,7 @@ const Index = () => {
   };
 
   const fetchLiveNifty = async (executionIntent = false) => {
-    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingQuantity: normalizedTradingQuantity, executionIntent });
+    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
     if (Number.isFinite(value)) {
@@ -391,7 +408,7 @@ const Index = () => {
   const runTradingCycle = async () => {
     if (tradingBlocked) return;
     await fetchLiveNifty();
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
 
@@ -399,13 +416,20 @@ const Index = () => {
     setIsBusy(true);
     try {
       if (tradingBlocked) {
-        toast({ title: targetAchieved ? "Target Achieved" : "Hard Kill-Switch Active", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
+        toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
         return;
       }
       await fetchLiveNifty(true);
-      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
-      toast({ title: "Execute cycle sent", description: `Trading quantity ${ai.signal.effectiveTradingQuantity ?? normalizedTradingQuantity} was applied for this AI cycle.` });
+      if (ai.signal.action !== "WAIT") {
+        const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
+        setExecutedTrades(nextCount);
+        setActiveTrade(true);
+        localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
+        localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+      }
+      toast({ title: "Execute cycle sent", description: `${ai.signal.effectiveLotSize ?? normalizedTradingLotSize} lot(s) / ${ai.signal.effectiveTradingQuantity ?? totalTradingQuantity} qty applied for this AI cycle.` });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
     } finally {
@@ -413,15 +437,36 @@ const Index = () => {
     }
   };
 
+  const emergencyExit = async (lockForDay = false) => {
+    setIsBusy(true);
+    try {
+      await invokeFunction("emergency-exit", { lockForDay });
+      setActiveTrade(false);
+      localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
+      if (lockForDay) {
+        const today = todayKey();
+        setKillSwitchDate(today);
+        setAiEnabled(false);
+        localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
+        localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
+      }
+      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox." });
+    } catch (error) {
+      toast({ title: "Emergency exit failed", description: error instanceof Error ? error.message : "Please check Upstox and retry.", variant: "destructive" });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const toggleAiTrading = async (checked: boolean) => {
     if (checked && tradingBlocked) {
-      toast({ title: targetAchieved ? "Target Achieved" : "Hard Kill-Switch Active", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
       return;
     }
     setIsBusy(true);
     localStorage.setItem(AI_ARMED_STORAGE_KEY, String(checked));
     try {
-      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
+      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity });
       setAiEnabled(checked);
       if (checked) await fetchLiveNifty();
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
@@ -443,7 +488,7 @@ const Index = () => {
       if (aiEnabled) {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
-          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
             .then((ai) => setLatestSignal(ai.signal))
             .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
         }, AI_REASONING_INTERVAL_MS);
@@ -454,7 +499,7 @@ const Index = () => {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, aiEnabled, normalizedTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl]);
+  }, [session, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
 
   useEffect(() => {
     if (!session) return;
@@ -498,8 +543,8 @@ const Index = () => {
                 <p className="mt-1 text-2xl font-bold text-profit">{formatMoney(latestData?.raw_payload?.account?.margin?.availableCash)}</p>
               </div>
               <div className="rounded-md border border-border bg-surface px-4 py-3">
-                <p className="text-xs uppercase text-muted-foreground">Used Margin</p>
-                <p className="mt-1 text-2xl font-bold text-warning">{formatMoney(latestData?.raw_payload?.account?.margin?.usedMargin)}</p>
+                <p className="text-xs uppercase text-muted-foreground">Today's P&L</p>
+                <p className={`mt-1 text-2xl font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(dailyPnl)}</p>
               </div>
           </div>
           {session && (
@@ -631,14 +676,15 @@ const Index = () => {
             <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
               <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p><h2 className="text-xl font-semibold">Autonomy Settings</h2></div><Bot className="h-6 w-6 text-primary" /></div>
               <div className="space-y-5">
-                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Server-side loop control</p></div><Switch disabled={!session || isBusy || tradingBlocked} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
-                <div className="space-y-2"><Label htmlFor="trading-quantity" className="text-sm font-medium text-muted-foreground">Trading Quantity</Label><Input id="trading-quantity" type="number" min="1" step="1" inputMode="numeric" value={tradingQuantity} onChange={(event) => setTradingQuantity(event.target.value)} className="border-border bg-surface" /></div>
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
+                <div className="space-y-2"><Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">Trading Lot Size</Label><Input id="trading-lot-size" type="number" min="1" step="1" inputMode="numeric" value={tradingLotSize} onChange={(event) => setTradingLotSize(event.target.value)} className="border-border bg-surface" /><p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p></div>
                 {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
-                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="max-daily-loss" className="text-sm font-medium text-muted-foreground">Max Daily Loss</Label><Input id="max-daily-loss" type="number" min="0" step="500" inputMode="numeric" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} className="border-border bg-surface" /></div></div>
+                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">User Target (Points)</Label><Input id="user-target-points" type="number" min="0" step="1" inputMode="numeric" value={userTargetPoints} onChange={(event) => setUserTargetPoints(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">User SL (Points)</Label><Input id="user-sl-points" type="number" min="0" step="1" inputMode="numeric" value={userSlPoints} onChange={(event) => setUserSlPoints(event.target.value)} className="border-border bg-surface" /></div></div>
+                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
                 {(targetAchieved || hardKillActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
                 <Button disabled={!session || isBusy || tradingBlocked} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
-                <Button disabled={!session || isBusy || tradingBlocked} variant="terminal" className="w-full" onClick={executeTradingSignal}>Execute</Button>
+                <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-14 text-lg font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "EMERGENCY EXIT" : "Execute"}</Button>
               </div>
             </section>
 
@@ -654,7 +700,7 @@ const Index = () => {
 
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
             <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Daily Limit</p><h2 className="text-xl font-semibold">Risk Guardrails</h2></div><ShieldCheck className="h-6 w-6 text-primary" /></div>
-            <div className="space-y-5"><label className="block space-y-2"><span className="flex items-center justify-between text-sm text-muted-foreground"><span>Max Trades</span><span className="font-semibold text-foreground">{maxTrades}</span></span><input className="w-full accent-primary" type="range" min="1" max="12" value={maxTrades} onChange={(event) => setMaxTrades(Number(event.target.value))} /></label><label className="block space-y-2"><span className="flex items-center justify-between text-sm text-muted-foreground"><span>Stop Loss per trade</span><span className="font-semibold text-foreground">₹{stopLoss.toLocaleString("en-IN")}</span></span><input className="w-full accent-primary" type="range" min="500" max="10000" step="500" value={stopLoss} onChange={(event) => setStopLoss(Number(event.target.value))} /></label><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Trailing Stop Loss</p><p className="mt-1 text-sm font-semibold text-foreground">Locks at entry once 1:1 RR is reached, then trails every 10 points.</p></div><div className="grid grid-cols-2 gap-3"><div className="rounded-md border border-border bg-surface p-3"><Gauge className="mb-2 h-5 w-5 text-warning" /><p className="text-xs text-muted-foreground">Used Today</p><p className="font-bold">4 / {maxTrades}</p></div><div className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}><IndianRupee className="mb-2 h-5 w-5 text-loss" /><p className="text-xs text-muted-foreground">Daily P&L</p><p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>₹{dailyPnl.toLocaleString("en-IN")}</p></div></div></div>
+            <div className="space-y-5"><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Max Trades</p><p className="mt-1 text-sm font-semibold text-foreground">Trades Remaining: {tradesRemaining}/4</p></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="mt-1 text-sm font-semibold text-loss">Hard lock at -₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Trailing Stop Loss</p><p className="mt-1 text-sm font-semibold text-foreground">Locks at entry once 1:1 RR is reached, then trails every 10 points.</p></div><div className="grid grid-cols-2 gap-3"><div className="rounded-md border border-border bg-surface p-3"><Gauge className="mb-2 h-5 w-5 text-warning" /><p className="text-xs text-muted-foreground">Used Today</p><p className="font-bold">{executedTrades} / {MAX_TRADES_PER_DAY}</p></div><div className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}><IndianRupee className="mb-2 h-5 w-5 text-loss" /><p className="text-xs text-muted-foreground">Today's P&L</p><p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>₹{dailyPnl.toLocaleString("en-IN")}</p></div></div></div>
           </section>
         </div>
       </section>

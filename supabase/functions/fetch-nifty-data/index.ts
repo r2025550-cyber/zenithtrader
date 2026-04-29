@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_shared/trading.ts";
 
 const INSTRUMENT_KEY = "NSE_INDEX|Nifty 50";
+const NIFTY_LOT_SIZE = 65;
 const CONTEXT_INSTRUMENTS = {
   bankNifty: "NSE_INDEX|Nifty Bank",
   indiaVix: "NSE_INDEX|India VIX",
@@ -94,14 +95,16 @@ async function getFundsAndMargin(headers: HeadersInit) {
   const equity = payload?.data?.equity ?? payload?.data?.SEC ?? payload?.data ?? {};
   const availableCash = numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net);
   const usedMargin = numberFrom(equity?.used_margin, equity?.usedMargin, equity?.utilised_margin, equity?.utilized_margin);
-  return { availableCash, usedMargin, raw: payload, error: null };
+  const todayPnl = numberFrom(equity?.realized_profit_and_loss, equity?.realised_profit_and_loss, equity?.realized_pnl, equity?.realised_pnl, equity?.pnl, equity?.mtm);
+  return { availableCash, usedMargin, todayPnl, raw: payload, error: null };
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const tradingQuantity = Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
+    const tradingLotSize = Number.isInteger(body?.tradingLotSize) && body.tradingLotSize > 0 ? body.tradingLotSize : null;
+    const tradingQuantity = tradingLotSize ? tradingLotSize * NIFTY_LOT_SIZE : Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
     const executionIntent = body?.executionIntent === true;
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
@@ -145,13 +148,14 @@ serve(async (req) => {
         optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, totalVolume: optionChain.value.totalVolume, expiry: optionChain.value.expiry, error: optionChain.value.error } : { pcr: null, totalVolume: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
         account: {
           margin: margin.status === "fulfilled" ? { availableCash: margin.value.availableCash, usedMargin: margin.value.usedMargin, error: margin.value.error } : { availableCash: null, usedMargin: null, error: String(margin.reason?.message ?? margin.reason) },
+          todayPnl: margin.status === "fulfilled" ? margin.value.todayPnl : null,
         },
         context: {
           bankNifty: contextQuote(bankNifty),
           indiaVix: contextQuote(indiaVix),
           heavyweights: heavyweights.map(contextQuote).filter(Boolean),
         },
-        execution: { intent: executionIntent, tradingQuantity },
+        execution: { intent: executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity },
       },
       source_timestamp: new Date().toISOString(),
     };

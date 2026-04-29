@@ -18,6 +18,8 @@ function ema(values: number[], period: number) {
   return values.slice(1).reduce((avg, value) => value * multiplier + avg * (1 - multiplier), values[0]);
 }
 
+const NIFTY_LOT_SIZE = 65;
+
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
 
 function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
@@ -91,11 +93,14 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const tradingQuantity = Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
+    const tradingLotSize = Number.isInteger(body?.tradingLotSize) && body.tradingLotSize > 0 ? body.tradingLotSize : Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? Math.max(1, Math.ceil(body.tradingQuantity / NIFTY_LOT_SIZE)) : null;
+    const tradingQuantity = tradingLotSize ? tradingLotSize * NIFTY_LOT_SIZE : null;
     const executionIntent = body?.executionIntent === true;
     const dailyPnl = num(body?.dailyPnl) ?? 0;
     const dailyProfitTarget = num(body?.dailyProfitTarget) ?? 0;
-    const maxDailyLoss = num(body?.maxDailyLoss) ?? 0;
+    const maxDailyLoss = 2000;
+    const userTargetPoints = num(body?.userTargetPoints);
+    const userSlPoints = num(body?.userSlPoints);
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
@@ -129,6 +134,7 @@ serve(async (req) => {
 - Smart indicator rule: 9 EMA / 21 EMA crossover must align with price action for HIGH Conviction; if not aligned, cap conviction below HIGH.
 - Entry must wait for minor retracement: dip for CALL, bounce for PUT.
 - Risk reward must be strict 1:2.
+- Manual override: if User Target Points or User SL Points are provided, use those exact point values instead of AI-generated target/SL.
 - Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
 - Divergence Guard: if Nifty disagrees with Bank Nifty or top heavyweights, label Low Conviction.
 
@@ -140,7 +146,7 @@ REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
-Execution payload:\n${JSON.stringify({ executionIntent, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss })}
+Execution payload:\n${JSON.stringify({ executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss, userTargetPoints, userSlPoints })}
 
 Latest market data:\n${JSON.stringify(latest)}`;
 
@@ -148,7 +154,8 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
-    const effectiveTradingQuantity = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingQuantity ?? 1) / 2)) : tradingQuantity;
+    const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
+    const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
     const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
@@ -157,11 +164,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext, executionIntent, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut }),
+      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, conviction, highProbability, ruleContext, raw_text: text, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut } });
+    return json({ success: true, signal: { ...data, conviction, highProbability, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
