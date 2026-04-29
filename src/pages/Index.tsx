@@ -126,6 +126,7 @@ const Index = () => {
   const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
+  const lastSignalAutofillRef = useRef("");
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -231,10 +232,13 @@ const Index = () => {
 
   useEffect(() => {
     if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || activeTrade) return;
+    const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
+    if (signalKey === lastSignalAutofillRef.current) return;
+    lastSignalAutofillRef.current = signalKey;
     const { targetPoints, slPoints } = calculateVolatilityPoints(marketHistory);
-    if (!userTargetPoints) setUserTargetPoints(String(targetPoints));
-    if (!userSlPoints) setUserSlPoints(String(slPoints));
-  }, [activeTrade, latestSignal, marketHistory, userSlPoints, userTargetPoints]);
+    setUserTargetPoints(String(targetPoints));
+    setUserSlPoints(String(slPoints));
+  }, [activeTrade, latestSignal, marketHistory]);
 
   useEffect(() => {
     if (!activeTradePlan || !hasLivePrice || activeTradePlan.exitAlertReason) return;
