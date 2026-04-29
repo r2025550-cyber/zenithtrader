@@ -18,8 +18,8 @@ function buildRuleContext(latest: any, history: any[]) {
   const high = num(latest?.high_price);
   const low = num(latest?.low_price);
   const close = num(latest?.close_price);
-  const volume = num(latest?.raw_payload?.volume);
-  const volumes = history.map((row) => num(row?.raw_payload?.volume)).filter((value): value is number => value !== null).slice(0, 5);
+  const volume = num(latest?.raw_payload?.volume) ?? num(latest?.raw_payload?.quote?.data && Object.values(latest.raw_payload.quote.data)[0]?.volume) ?? num(latest?.raw_payload?.optionChain?.totalVolume);
+  const volumes = history.map((row) => num(row?.raw_payload?.volume) ?? num(row?.raw_payload?.optionChain?.totalVolume)).filter((value): value is number => value !== null).slice(0, 5);
   const avg5Volume = volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
   const volumeAvailable = volume !== null && avg5Volume !== null && volumes.length >= 2;
   const volumeValid = volumeAvailable ? volume >= avg5Volume * 1.2 : null;
@@ -47,7 +47,7 @@ function buildRuleContext(latest: any, history: any[]) {
   return {
     rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral" },
     guidance: [
-      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? "Volume +20% filter confirmed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
+      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${latest?.raw_payload?.volumeSource ?? "Upstox live feed"}.` : volume !== null ? "Volume received from Upstox but awaiting enough history for +20% comparison; treat as neutral, not failed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixRising ? "India VIX rising: reduce position size alert." : "India VIX not rising or unavailable.",
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
