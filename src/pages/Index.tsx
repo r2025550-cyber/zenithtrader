@@ -332,6 +332,18 @@ const Index = () => {
     setLatestSignal(ai.signal);
   };
 
+  const executeTradingSignal = async () => {
+    setIsBusy(true);
+    try {
+      await runTradingCycle();
+      toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
+    } catch (error) {
+      showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const toggleAiTrading = async (checked: boolean) => {
     setIsBusy(true);
     try {
@@ -529,8 +541,10 @@ const Index = () => {
               <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p><h2 className="text-xl font-semibold">Autonomy Settings</h2></div><Bot className="h-6 w-6 text-primary" /></div>
               <div className="space-y-5">
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Server-side loop control</p></div><Switch disabled={!session || isBusy} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
+                <div className="space-y-2"><Label htmlFor="trading-quantity" className="text-sm font-medium text-muted-foreground">Trading Quantity</Label><Input id="trading-quantity" type="number" min="1" step="1" inputMode="numeric" value={tradingQuantity} onChange={(event) => setTradingQuantity(event.target.value)} className="border-border bg-surface" /></div>
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
-                <Button disabled={!session || isBusy} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "AI Trading Active" : "Arm AI Trading"}</Button>
+                <Button disabled={!session || isBusy} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
+                <Button disabled={!session || isBusy} variant="terminal" className="w-full" onClick={executeTradingSignal}>Execute</Button>
               </div>
             </section>
 
