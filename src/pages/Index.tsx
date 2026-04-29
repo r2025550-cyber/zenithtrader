@@ -262,6 +262,7 @@ const Index = () => {
       const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
       const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
       setActiveTradePlan(nextPlan);
+      setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
       setUserTargetPoints(String(Math.abs(nextPlan.target - nextPlan.entry)));
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       toast({ title: "Trailing target extended", description: `Initial target converted to TSL. New extended target: ${nextTarget.toFixed(2)}.` });
@@ -274,6 +275,7 @@ const Index = () => {
       if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
+        setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       }
     }
