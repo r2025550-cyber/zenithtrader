@@ -42,6 +42,8 @@ const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
 const TRADING_QUANTITY_STORAGE_KEY = "zenith-trading-quantity";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+const UPSTOX_POLL_INTERVAL_MS = 5_000;
+const AI_REASONING_INTERVAL_MS = 30_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -63,12 +65,13 @@ type NiftyData = { ltp?: number | string | null; open_price?: number | string | 
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
-type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
+type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const marketIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -78,7 +81,7 @@ const Index = () => {
   const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
