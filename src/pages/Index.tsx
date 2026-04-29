@@ -282,7 +282,7 @@ const Index = () => {
     setUserTargetPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
-    const nextPlan = { ...activeTradePlan, target: activeTradePlan.action === "BUY" ? activeTradePlan.entry + points : activeTradePlan.entry - points, extendedTargetActive: false };
+    const nextPlan = { ...activeTradePlan, targetPremium: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, target: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
   };
@@ -291,9 +291,10 @@ const Index = () => {
     setUserSlPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
-    const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.action === "BUY" ? activeTradePlan.entry - points : activeTradePlan.entry + points };
+    const nextPlan = { ...activeTradePlan, stopLossPremium: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), stopLoss: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
   };
 
   const playAlertTone = () => {
