@@ -493,6 +493,14 @@ const Index = () => {
                 <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
             </div>
+              <div className="rounded-md border border-border bg-surface px-4 py-3">
+                <p className="text-xs uppercase text-muted-foreground">Available Cash</p>
+                <p className="mt-1 text-2xl font-bold text-profit">{formatMoney(latestData?.raw_payload?.account?.margin?.availableCash)}</p>
+              </div>
+              <div className="rounded-md border border-border bg-surface px-4 py-3">
+                <p className="text-xs uppercase text-muted-foreground">Used Margin</p>
+                <p className="mt-1 text-2xl font-bold text-warning">{formatMoney(latestData?.raw_payload?.account?.margin?.usedMargin)}</p>
+              </div>
           </div>
           {session && (
             <Button type="button" variant="terminal" className="md:w-auto" onClick={() => setSettingsOpen(true)}>
