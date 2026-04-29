@@ -384,15 +384,15 @@ const Index = () => {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
-                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-secret" className="flex items-center gap-2">Upstox API Secret {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
-                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="gemini-api-key" className="flex items-center gap-2">Gemini API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Gemini verified" />}</Label>
-                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
