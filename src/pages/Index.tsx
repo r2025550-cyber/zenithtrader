@@ -543,10 +543,13 @@ const Index = () => {
           toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
           return;
         }
-        const targetPoints = Number(userTargetPoints) || 40;
-        const slPoints = Number(userSlPoints) || 20;
+        const volatilityPoints = calculateVolatilityPoints(marketHistory);
+        const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
+        const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
         const isCallBias = ai.signal.action === "BUY";
-        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints, stopLoss: isCallBias ? liveSpot - slPoints : liveSpot + slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints, stopLoss: isCallBias ? liveSpot - slPoints : liveSpot + slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints };
+        setUserTargetPoints(String(targetPoints));
+        setUserSlPoints(String(slPoints));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
