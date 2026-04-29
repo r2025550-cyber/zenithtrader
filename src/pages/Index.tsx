@@ -469,8 +469,8 @@ const Index = () => {
                   <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="gemini-api-key" className="flex items-center gap-2">Gemini API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Gemini verified" />}</Label>
-                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} className="border-border bg-surface" />
+                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">OpenAI API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />}</Label>
+                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
@@ -481,7 +481,7 @@ const Index = () => {
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
                 <Button disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret} type="button" variant="terminal" onClick={saveUpstoxSettings}>Save Upstox</Button>
-                <Button disabled={isBusy || !settings.geminiApiKey} type="submit" variant="trading">Save Gemini</Button>
+                <Button disabled={isBusy || !settings.openaiApiKey} type="submit" variant="trading">Save OpenAI</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
