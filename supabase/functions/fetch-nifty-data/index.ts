@@ -51,7 +51,7 @@ async function getOptionChainPcr(headers: HeadersInit) {
   const expiry = expiries.find((value: string) => value >= new Date().toISOString().slice(0, 10)) ?? expiries[0] ?? nextThursdayIso();
   const response = await fetch(`https://api.upstox.com/v2/option/chain?instrument_key=${encoded}&expiry_date=${expiry}`, { headers });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) return { pcr: null, raw: payload, error: `Option chain HTTP ${response.status}` };
+  if (!response.ok) return { pcr: null, raw: payload, error: `Option chain HTTP ${response.status}`, expiry };
   const rows = Array.isArray(payload?.data) ? payload.data : [];
   const totals = rows.reduce((sum: { callOi: number; putOi: number }, row: any) => {
     sum.callOi += numberFrom(row?.call_options?.market_data?.oi, row?.call_options?.market_data?.open_interest, row?.ce_oi) ?? 0;
