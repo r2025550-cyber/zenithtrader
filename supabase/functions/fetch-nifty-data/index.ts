@@ -10,6 +10,7 @@ const CONTEXT_INSTRUMENTS = {
 
 function numberFrom(...values: unknown[]) {
   for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
     const num = Number(value);
     if (Number.isFinite(num)) return num;
   }
@@ -86,6 +87,16 @@ async function getQuote(instrumentKey: string, headers: HeadersInit) {
   return { quote: { ...ohlcQuote, ...fullQuote, ltp: ltpQuote.ltp ?? fullQuote.ltp ?? ohlcQuote.ltp, volume: ltpQuote.volume ?? fullQuote.volume ?? ohlcQuote.volume }, raw: { ltp: ltpPayload, ohlc: ohlcPayload, quote: quotePayload } };
 }
 
+async function getFundsAndMargin(headers: HeadersInit) {
+  const response = await fetch("https://api.upstox.com/v2/user/get-funds-and-margin?segment=SEC", { headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return { availableCash: null, usedMargin: null, raw: payload, error: `Funds HTTP ${response.status}` };
+  const equity = payload?.data?.equity ?? payload?.data?.SEC ?? payload?.data ?? {};
+  const availableCash = numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net);
+  const usedMargin = numberFrom(equity?.used_margin, equity?.usedMargin, equity?.utilised_margin, equity?.utilized_margin);
+  return { availableCash, usedMargin, raw: payload, error: null };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -107,10 +118,11 @@ serve(async (req) => {
       return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
     }
 
-    const [bankNifty, indiaVix, optionChain, ...heavyweights] = await Promise.allSettled([
+    const [bankNifty, indiaVix, optionChain, margin, ...heavyweights] = await Promise.allSettled([
       getQuote(CONTEXT_INSTRUMENTS.bankNifty, headers),
       getQuote(CONTEXT_INSTRUMENTS.indiaVix, headers),
       getOptionChainPcr(headers),
+      getFundsAndMargin(headers),
       ...CONTEXT_INSTRUMENTS.heavyweights.map((key) => getQuote(key, headers)),
     ]);
 
@@ -131,6 +143,9 @@ serve(async (req) => {
         volumeSource: nifty.quote.volume !== null ? "upstox_quote" : optionChain.status === "fulfilled" && optionChain.value.totalVolume !== null ? "upstox_option_chain" : null,
         volumeStatus: nifty.quote.volume !== null || (optionChain.status === "fulfilled" && optionChain.value.totalVolume !== null) ? "available" : "unavailable",
         optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, totalVolume: optionChain.value.totalVolume, expiry: optionChain.value.expiry, error: optionChain.value.error } : { pcr: null, totalVolume: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
+        account: {
+          margin: margin.status === "fulfilled" ? { availableCash: margin.value.availableCash, usedMargin: margin.value.usedMargin, error: margin.value.error } : { availableCash: null, usedMargin: null, error: String(margin.reason?.message ?? margin.reason) },
+        },
         context: {
           bankNifty: contextQuote(bankNifty),
           indiaVix: contextQuote(indiaVix),
