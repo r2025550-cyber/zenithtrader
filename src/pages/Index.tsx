@@ -189,6 +189,18 @@ const Index = () => {
     return data;
   };
 
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string) => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
+  };
+
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
     try {
@@ -328,7 +340,7 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     await fetchLiveNifty();
-    const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity });
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "Gemini analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
 
@@ -336,7 +348,7 @@ const Index = () => {
     setIsBusy(true);
     try {
       await fetchLiveNifty(true);
-      const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true });
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "Gemini analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
     } catch (error) {
