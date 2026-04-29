@@ -192,6 +192,7 @@ const Index = () => {
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
       toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   const showRetryToast = (message: string) => {
