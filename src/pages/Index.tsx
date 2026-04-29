@@ -472,13 +472,29 @@ const Index = () => {
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
+        if (!hasLivePrice) {
+          toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
+          return;
+        }
+        if (availableCash <= 0) {
+          toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
+          return;
+        }
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: latestLtp, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
+        const targetPoints = Number(userTargetPoints) || 40;
+        const slPoints = Number(userSlPoints) || 20;
+        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: latestLtp, target: latestLtp + targetPoints, stopLoss: latestLtp - slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
+        setActiveTradePlan(plan);
         localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
         localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
+        toast({ title: "LIVE ORDER PLACED", description: `${liveOrder.instrument.tradingSymbol} · ${liveOrder.quantity} qty sent to Upstox.` });
+        return;
       }
-      toast({ title: "Execute cycle sent", description: `${ai.signal.effectiveLotSize ?? normalizedTradingLotSize} lot(s) / ${ai.signal.effectiveTradingQuantity ?? totalTradingQuantity} qty applied for this AI cycle.` });
+      toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
     } finally {
@@ -491,7 +507,9 @@ const Index = () => {
     try {
       await invokeFunction("emergency-exit", { lockForDay });
       setActiveTrade(false);
+      setActiveTradePlan(null);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
+      localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
       if (lockForDay) {
         const today = todayKey();
         setKillSwitchDate(today);
