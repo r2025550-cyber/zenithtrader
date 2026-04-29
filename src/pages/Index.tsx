@@ -606,10 +606,13 @@ const Index = () => {
     setIsBusy(true);
     try {
       await invokeFunction("emergency-exit", { lockForDay });
+      const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      setCooldownUntil(nextCooldown);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
       localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
+      localStorage.setItem(COOLDOWN_UNTIL_STORAGE_KEY, String(nextCooldown));
       if (lockForDay) {
         const today = todayKey();
         setKillSwitchDate(today);
@@ -617,7 +620,7 @@ const Index = () => {
         localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
         localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
       }
-      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox." });
+      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox. New entries are blocked for 15 minutes." });
     } catch (error) {
       toast({ title: "Emergency exit failed", description: error instanceof Error ? error.message : "Please check Upstox and retry.", variant: "destructive" });
     } finally {
@@ -627,7 +630,7 @@ const Index = () => {
 
   const toggleAiTrading = async (checked: boolean) => {
     if (checked && tradingBlocked) {
-      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI entry blocked for ${cooldownRemainingMinutes} more minutes.` : "AI trading is disabled for the rest of the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
       return;
     }
     setIsBusy(true);
