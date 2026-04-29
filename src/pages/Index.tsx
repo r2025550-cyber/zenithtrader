@@ -42,6 +42,8 @@ const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
 const TRADING_QUANTITY_STORAGE_KEY = "zenith-trading-quantity";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+const UPSTOX_POLL_INTERVAL_MS = 5_000;
+const AI_REASONING_INTERVAL_MS = 30_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -63,12 +65,13 @@ type NiftyData = { ltp?: number | string | null; open_price?: number | string | 
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
-type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
+type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const marketIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const aiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -78,7 +81,7 @@ const Index = () => {
   const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
+  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
@@ -154,7 +157,7 @@ const Index = () => {
     if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
     if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
     if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: fetching Nifty data every 1 minute and waiting for volume confirmation.";
+    return "AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.";
   }, [aiEnabled, latestSignal, riskMode]);
 
   const signIn = async (event: FormEvent) => {
@@ -202,7 +205,7 @@ const Index = () => {
     try {
       await invokeFunction("save-trading-settings", { provider: "upstox", upstoxApiKey: settings.upstoxApiKey, upstoxApiSecret: settings.upstoxApiSecret, redirectUri: settings.redirectUri });
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
-      toast({ title: "Upstox keys saved", description: "Existing Gemini settings were left unchanged. Complete OAuth if the token needs reconnecting." });
+      toast({ title: "Upstox keys saved", description: "Existing OpenAI settings were left unchanged. Complete OAuth if the token needs reconnecting." });
       await retestUpstox(false).catch(() => null);
     } catch (error) {
       toast({ title: "Unable to save Upstox", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -211,16 +214,16 @@ const Index = () => {
     }
   };
 
-  const saveGeminiSettings = async (event: FormEvent) => {
+  const saveOpenAISettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { provider: "gemini", openaiApiKey: settings.geminiApiKey });
-      setSettings((prev) => ({ ...prev, geminiApiKey: "" }));
-      const status = await retestGemini(false).catch(() => null);
-      toast({ title: status?.gemini.ok ? "Gemini verified" : "Gemini key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
+      await invokeFunction("save-trading-settings", { provider: "openai", openaiApiKey: settings.openaiApiKey });
+      setSettings((prev) => ({ ...prev, openaiApiKey: "" }));
+      const status = await retestOpenAI(false).catch(() => null);
+      toast({ title: status?.gemini.ok ? "OpenAI verified" : "OpenAI key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
     } catch (error) {
-      toast({ title: "Unable to save Gemini", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({ title: "Unable to save OpenAI", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }
@@ -283,7 +286,7 @@ const Index = () => {
         const failures = [status.upstox, status.gemini].filter((item) => !item.ok).map((item) => item.message).join(" ");
         toast({
           title: status.ready ? "System ready for market open" : "Connection needs attention",
-          description: status.ready ? "Upstox and Gemini both verified successfully." : failures,
+          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
           variant: status.ready ? "default" : "destructive",
         });
       }
@@ -303,7 +306,7 @@ const Index = () => {
     try {
       const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
       setSystemStatus((prev) => {
-        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test Gemini to confirm Gemini API status." };
+        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
         return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
       });
       if (showToast) toast({ title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth", description: status.upstox.message, variant: status.upstox.ok ? "default" : "destructive" });
@@ -316,18 +319,18 @@ const Index = () => {
     }
   };
 
-  const retestGemini = async (showToast = true) => {
+  const retestOpenAI = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
+      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
       setSystemStatus((prev) => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
         return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
-      if (showToast) toast({ title: status.gemini.ok ? "Gemini connected" : "Gemini still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
+      if (showToast) toast({ title: status.gemini.ok ? "OpenAI connected" : "OpenAI still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
       return status;
     } catch (error) {
-      if (showToast) toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      if (showToast) toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
       throw error;
     } finally {
       setIsCheckingStatus(false);
@@ -336,7 +339,7 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     await fetchLiveNifty();
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "Gemini analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
 
@@ -344,7 +347,7 @@ const Index = () => {
     setIsBusy(true);
     try {
       await fetchLiveNifty(true);
-      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "Gemini analysis timed out; execution cycle will retry.");
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
     } catch (error) {
@@ -361,7 +364,7 @@ const Index = () => {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
       if (checked) await runTradingCycle();
-      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Server-side Nifty fetch and AI analysis will run every minute while this page is open." : "Automation is paused." });
+      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
@@ -371,17 +374,23 @@ const Index = () => {
   };
 
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+    if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session) {
-      intervalRef.current = setInterval(() => {
-        const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
-        refresh.catch((error) => {
-          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
-        });
-      }, 60_000);
+      marketIntervalRef.current = setInterval(() => {
+        fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
+      }, UPSTOX_POLL_INTERVAL_MS);
+      if (aiEnabled) {
+        aiIntervalRef.current = setInterval(() => {
+          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+            .then((ai) => setLatestSignal(ai.signal))
+            .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
+        }, AI_REASONING_INTERVAL_MS);
+      }
     }
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+      if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, aiEnabled, normalizedTradingQuantity]);
@@ -449,7 +458,7 @@ const Index = () => {
               <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
               <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={saveGeminiSettings} className="space-y-5">
+            <form onSubmit={saveOpenAISettings} className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
@@ -460,8 +469,8 @@ const Index = () => {
                   <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="gemini-api-key" className="flex items-center gap-2">Gemini API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Gemini verified" />}</Label>
-                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} className="border-border bg-surface" />
+                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">OpenAI API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />}</Label>
+                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
@@ -472,7 +481,7 @@ const Index = () => {
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
                 <Button disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret} type="button" variant="terminal" onClick={saveUpstoxSettings}>Save Upstox</Button>
-                <Button disabled={isBusy || !settings.geminiApiKey} type="submit" variant="trading">Save Gemini</Button>
+                <Button disabled={isBusy || !settings.openaiApiKey} type="submit" variant="trading">Save OpenAI</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
@@ -521,13 +530,13 @@ const Index = () => {
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                    <span>Gemini 1.5 Flash Status</span>
+                    <span>OpenAI GPT-4o Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestGemini()}>
-                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestOpenAI()}>
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
                   </Button>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small Gemini 1.5 Flash response test using the saved key."}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small OpenAI GPT-4o response test using the saved key."}</p>
               </div>
             </div>
             {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
