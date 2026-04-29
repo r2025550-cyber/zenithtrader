@@ -157,7 +157,7 @@ const Index = () => {
     if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
     if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
     if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: fetching Nifty data every 1 minute and waiting for volume confirmation.";
+    return "AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.";
   }, [aiEnabled, latestSignal, riskMode]);
 
   const signIn = async (event: FormEvent) => {
@@ -205,7 +205,7 @@ const Index = () => {
     try {
       await invokeFunction("save-trading-settings", { provider: "upstox", upstoxApiKey: settings.upstoxApiKey, upstoxApiSecret: settings.upstoxApiSecret, redirectUri: settings.redirectUri });
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
-      toast({ title: "Upstox keys saved", description: "Existing Gemini settings were left unchanged. Complete OAuth if the token needs reconnecting." });
+      toast({ title: "Upstox keys saved", description: "Existing OpenAI settings were left unchanged. Complete OAuth if the token needs reconnecting." });
       await retestUpstox(false).catch(() => null);
     } catch (error) {
       toast({ title: "Unable to save Upstox", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -286,7 +286,7 @@ const Index = () => {
         const failures = [status.upstox, status.gemini].filter((item) => !item.ok).map((item) => item.message).join(" ");
         toast({
           title: status.ready ? "System ready for market open" : "Connection needs attention",
-          description: status.ready ? "Upstox and Gemini both verified successfully." : failures,
+          description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
           variant: status.ready ? "default" : "destructive",
         });
       }
@@ -306,7 +306,7 @@ const Index = () => {
     try {
       const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
       setSystemStatus((prev) => {
-        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test Gemini to confirm Gemini API status." };
+        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
         return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
       });
       if (showToast) toast({ title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth", description: status.upstox.message, variant: status.upstox.ok ? "default" : "destructive" });
@@ -339,7 +339,7 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     await fetchLiveNifty();
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "Gemini analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
 
@@ -347,7 +347,7 @@ const Index = () => {
     setIsBusy(true);
     try {
       await fetchLiveNifty(true);
-      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "Gemini analysis timed out; execution cycle will retry.");
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
     } catch (error) {
@@ -364,7 +364,7 @@ const Index = () => {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
       if (checked) await runTradingCycle();
-      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Server-side Nifty fetch and AI analysis will run every minute while this page is open." : "Automation is paused." });
+      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
