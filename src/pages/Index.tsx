@@ -246,7 +246,25 @@ const Index = () => {
     }
   };
 
-  const retestGemini = async () => {
+  const retestUpstox = async (showToast = true) => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
+      setSystemStatus((prev) => {
+        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test Gemini to confirm Gemini API status." };
+        return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
+      });
+      if (showToast) toast({ title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth", description: status.upstox.message, variant: status.upstox.ok ? "default" : "destructive" });
+      return status;
+    } catch (error) {
+      if (showToast) toast({ title: "Upstox re-test failed", description: error instanceof Error ? error.message : "Unable to test Upstox.", variant: "destructive" });
+      throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const retestGemini = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
       const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
@@ -254,13 +272,11 @@ const Index = () => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
         return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
-      toast({
-        title: status.gemini.ok ? "Gemini connected" : "Gemini still failing",
-        description: status.gemini.message,
-        variant: status.gemini.ok ? "default" : "destructive",
-      });
+      if (showToast) toast({ title: status.gemini.ok ? "Gemini connected" : "Gemini still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
+      return status;
     } catch (error) {
-      toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      if (showToast) toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      throw error;
     } finally {
       setIsCheckingStatus(false);
     }
