@@ -54,7 +54,7 @@ async function getOptionChainPcr(headers: HeadersInit) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) return { pcr: null, raw: payload, error: `Option chain HTTP ${response.status}`, expiry };
   const rows = Array.isArray(payload?.data) ? payload.data : [];
-  const totals = rows.reduce((sum: { callOi: number; putOi: number }, row: any) => {
+  const totals = rows.reduce((sum: { callOi: number; putOi: number; callVolume: number; putVolume: number }, row: any) => {
     sum.callOi += numberFrom(row?.call_options?.market_data?.oi, row?.call_options?.market_data?.open_interest, row?.ce_oi) ?? 0;
     sum.putOi += numberFrom(row?.put_options?.market_data?.oi, row?.put_options?.market_data?.open_interest, row?.pe_oi) ?? 0;
     sum.callVolume += numberFrom(row?.call_options?.market_data?.volume, row?.call_options?.market_data?.volume_traded, row?.call_options?.market_data?.totalTradedVolume, row?.ce_volume) ?? 0;
