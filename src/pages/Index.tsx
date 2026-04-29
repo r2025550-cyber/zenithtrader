@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -63,10 +64,19 @@ const isWithinMarketHours = (date = new Date()) => {
 const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 const todayKey = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
+const toNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+const formatMoney = (value: unknown) => {
+  const parsed = toNumber(value);
+  return parsed === null ? "—" : `₹${parsed.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+};
+const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
-type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
+type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null } }; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
@@ -122,14 +132,18 @@ const Index = () => {
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
+  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
+  const pcrValue = toNumber(latestSignal?.ruleContext?.rules?.pcr ?? latestData?.raw_payload?.optionChain?.pcr);
+  const vixValue = toNumber(latestData?.raw_payload?.context?.indiaVix?.ltp);
+  const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(1, latestSignal.effectiveTradingQuantity ?? Math.floor(normalizedTradingQuantity / 2)) : normalizedTradingQuantity;
+  const aiPanelTone = latestSignal?.action === "BUY" ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]" : latestSignal?.action === "WAIT" ? "border-warning/70" : highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25";
+  const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
   const dailyPnl = history.reduce((sum, trade) => sum + parseCurrency(trade.pnl), 0);
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = Math.max(0, Number.parseInt(maxDailyLoss, 10) || 0);
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || (normalizedMaxDailyLoss > 0 && dailyPnl <= -normalizedMaxDailyLoss);
   const tradingBlocked = targetAchieved || hardKillActive;
-
-  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -391,7 +405,7 @@ const Index = () => {
       await fetchLiveNifty(true);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
-      toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
+      toast({ title: "Execute cycle sent", description: `Trading quantity ${ai.signal.effectiveTradingQuantity ?? normalizedTradingQuantity} was applied for this AI cycle.` });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
     } finally {
@@ -479,6 +493,14 @@ const Index = () => {
                 <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
             </div>
+              <div className="rounded-md border border-border bg-surface px-4 py-3">
+                <p className="text-xs uppercase text-muted-foreground">Available Cash</p>
+                <p className="mt-1 text-2xl font-bold text-profit">{formatMoney(latestData?.raw_payload?.account?.margin?.availableCash)}</p>
+              </div>
+              <div className="rounded-md border border-border bg-surface px-4 py-3">
+                <p className="text-xs uppercase text-muted-foreground">Used Margin</p>
+                <p className="mt-1 text-2xl font-bold text-warning">{formatMoney(latestData?.raw_payload?.account?.margin?.usedMargin)}</p>
+              </div>
           </div>
           {session && (
             <Button type="button" variant="terminal" className="md:w-auto" onClick={() => setSettingsOpen(true)}>
@@ -611,6 +633,7 @@ const Index = () => {
               <div className="space-y-5">
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Server-side loop control</p></div><Switch disabled={!session || isBusy || tradingBlocked} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
                 <div className="space-y-2"><Label htmlFor="trading-quantity" className="text-sm font-medium text-muted-foreground">Trading Quantity</Label><Input id="trading-quantity" type="number" min="1" step="1" inputMode="numeric" value={tradingQuantity} onChange={(event) => setTradingQuantity(event.target.value)} className="border-border bg-surface" /></div>
+                {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="max-daily-loss" className="text-sm font-medium text-muted-foreground">Max Daily Loss</Label><Input id="max-daily-loss" type="number" min="0" step="500" inputMode="numeric" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} className="border-border bg-surface" /></div></div>
                 {(targetAchieved || hardKillActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
@@ -619,7 +642,7 @@ const Index = () => {
               </div>
             </section>
 
-            <section className={`rounded-lg border bg-panel p-5 shadow-market ${highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25"}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground"}`}>{reasoning}</p></section>
+            <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
           </aside>
         </div>
 

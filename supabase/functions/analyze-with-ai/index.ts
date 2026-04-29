@@ -54,6 +54,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const heavyMoves = heavyweights.map((quote) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
   const divergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
   const pcr = num(latest?.raw_payload?.optionChain?.pcr);
+  const effectiveVolume = volume ?? num(latest?.raw_payload?.optionChain?.totalVolume);
+  const volumeSource = volume !== null ? latest?.raw_payload?.volumeSource ?? "upstox_quote" : effectiveVolume !== null ? "upstox_option_chain" : null;
   const chronological = [...history].reverse();
   const prices = chronological.map((row) => num(row?.ltp)).filter((value): value is number => value !== null);
   const ema9 = ema(prices, 9);
@@ -70,9 +72,9 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
 
   return {
-    rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
     guidance: [
-      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${latest?.raw_payload?.volumeSource ?? "Upstox live feed"}.` : volume !== null ? "Volume received from Upstox but awaiting enough history for +20% comparison; treat as neutral, not failed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
+      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixSizeCut ? `India VIX rising ${vixMovePct?.toFixed(2)}%: reduce position size by 50%.` : vixRising ? "India VIX rising but below 5% size-cut threshold." : "India VIX not rising or unavailable.",
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
@@ -146,6 +148,7 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
+    const effectiveTradingQuantity = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingQuantity ?? 1) / 2)) : tradingQuantity;
     const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
@@ -154,11 +157,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext, executionIntent, tradingQuantity }),
+      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext, executionIntent, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, conviction, highProbability, ruleContext, raw_text: text } });
+    return json({ success: true, signal: { ...data, conviction, highProbability, ruleContext, raw_text: text, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
