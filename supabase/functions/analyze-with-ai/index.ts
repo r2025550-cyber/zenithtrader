@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { generateGeminiText } from "../_shared/gemini.ts";
+import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 function num(value: unknown) {
@@ -103,7 +103,7 @@ Execution payload:\n${JSON.stringify({ executionIntent, tradingQuantity })}
 
 Latest market data:\n${JSON.stringify(latest)}`;
 
-    const result = await generateGeminiText(settings.openai_api_key, prompt, 700);
+    const result = await generateOpenAIText(settings.openai_api_key, prompt, 700);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
