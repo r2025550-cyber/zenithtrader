@@ -353,21 +353,21 @@ const Index = () => {
       intervalRef.current = setInterval(() => {
         const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
         refresh.catch((error) => {
-          if (aiEnabled) setAiEnabled(false);
-          toast({ title: aiEnabled ? "AI loop paused" : "Live Nifty refresh failed", description: error instanceof Error ? error.message : "Unable to fetch Upstox market data.", variant: "destructive" });
+          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
         });
       }, 60_000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [session, aiEnabled]);
+  }, [session, aiEnabled, normalizedTradingQuantity]);
 
   useEffect(() => {
     if (!session) return;
     checkSystemStatus(false).catch(() => {
       // Connection Pulse will show missing setup after a manual check.
     });
+    if (aiEnabled && !marketIsOpen) setAiEnabled(false);
     fetchLiveNifty().catch(() => {
       // Keep the dashboard usable until Upstox OAuth is connected.
     });
