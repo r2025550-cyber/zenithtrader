@@ -47,17 +47,19 @@ const TRADE_COUNT_STORAGE_KEY = "zenith-trade-count-date";
 const ACTIVE_TRADE_STORAGE_KEY = "zenith-active-trade-date";
 const ACTIVE_TRADE_PLAN_STORAGE_KEY = "zenith-active-trade-plan-date";
 const KILL_SWITCH_STORAGE_KEY = "zenith-kill-switch-date";
+const COOLDOWN_UNTIL_STORAGE_KEY = "zenith-cooldown-until";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_TARGET_POINTS = 40;
-const DEFAULT_SL_POINTS = 20;
-const TSL_STEP_POINTS = 10;
-const EXTENDED_TARGET_POINTS = 20;
+const DEFAULT_PREMIUM_TARGET_POINTS = 25;
+const DEFAULT_PREMIUM_SL_POINTS = 15;
+const PREMIUM_TSL_STEP = 5;
+const COOLDOWN_MS = 15 * 60 * 1000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -107,15 +109,15 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
-type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; extendedTargetActive?: boolean; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; quantity: number; availableCash: number; requiredCash: number };
+type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string };
 
 const calculateVolatilityPoints = (points: MarketPoint[]) => {
   const recent = points.slice(-12).map((point) => point.value);
-  if (recent.length < 4) return { targetPoints: DEFAULT_TARGET_POINTS, slPoints: DEFAULT_SL_POINTS };
+  if (recent.length < 4) return { targetPoints: DEFAULT_PREMIUM_TARGET_POINTS, slPoints: DEFAULT_PREMIUM_SL_POINTS };
   const range = Math.max(...recent) - Math.min(...recent);
-  const targetPoints = Math.max(DEFAULT_TARGET_POINTS, Math.ceil(range / TSL_STEP_POINTS) * TSL_STEP_POINTS);
-  const slPoints = Math.max(DEFAULT_SL_POINTS, Math.ceil((targetPoints / 2) / TSL_STEP_POINTS) * TSL_STEP_POINTS);
+  const targetPoints = Math.max(DEFAULT_PREMIUM_TARGET_POINTS, Math.ceil(range / 20) * 5);
+  const slPoints = Math.max(DEFAULT_PREMIUM_SL_POINTS, Math.ceil(targetPoints * 0.6));
   return { targetPoints, slPoints };
 };
 
