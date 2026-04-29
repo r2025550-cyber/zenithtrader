@@ -185,7 +185,7 @@ const Index = () => {
       const today = todayKey();
       setKillSwitchDate(today);
       localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
-      if (activeTrade) emergencyExit(true);
+      emergencyExit(true);
     }
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
