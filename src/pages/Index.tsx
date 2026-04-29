@@ -556,7 +556,7 @@ const Index = () => {
     setIsBusy(true);
     try {
       if (tradingBlocked) {
-        toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
+        toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
         return;
       }
       const liveMarket = await fetchLiveNifty(true);
@@ -576,15 +576,12 @@ const Index = () => {
         const volatilityPoints = calculateVolatilityPoints(marketHistory);
         const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
         const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
-        const isCallBias = ai.signal.action === "BUY";
-        const target = isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints;
-        const stopLoss = isCallBias ? liveSpot - slPoints : liveSpot + slPoints;
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPoints, slPoints, target, stopLoss });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
         if (!liveOrder.success) {
           toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
           return;
         }
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target, stopLoss, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints };
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
         setUserTargetPoints(String(targetPoints));
         setUserSlPoints(String(slPoints));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
@@ -594,7 +591,7 @@ const Index = () => {
         localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
         localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
-        toast({ title: "LIVE ORDER PLACED", description: `${liveOrder.instrument.tradingSymbol} · ${liveOrder.quantity} qty sent to Upstox.` });
+        toast({ title: "LIVE ORDER + SERVER SL PLACED", description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.` });
         return;
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
