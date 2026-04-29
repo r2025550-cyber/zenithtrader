@@ -143,6 +143,7 @@ const Index = () => {
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
   const [maxDailyLoss, setMaxDailyLoss] = useState(() => storedValue(MAX_DAILY_LOSS_STORAGE_KEY, String(DAILY_STOP_LOSS)));
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
+  const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
@@ -192,8 +193,10 @@ const Index = () => {
   const maxTradesHit = executedTrades >= MAX_TRADES_PER_DAY;
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
-  const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
-  const currentTradePnlPoints = activeTradePlan && hasLivePrice ? (activeTradePlan.action === "BUY" ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp) : 0;
+  const cooldownActive = cooldownUntil > Date.now();
+  const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
+  const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason);
 
