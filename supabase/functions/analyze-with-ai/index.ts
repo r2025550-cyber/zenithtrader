@@ -88,6 +88,9 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const tradingQuantity = Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
     const executionIntent = body?.executionIntent === true;
+    const dailyPnl = num(body?.dailyPnl) ?? 0;
+    const dailyProfitTarget = num(body?.dailyProfitTarget) ?? 0;
+    const maxDailyLoss = num(body?.maxDailyLoss) ?? 0;
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
@@ -102,6 +105,12 @@ serve(async (req) => {
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
 
     const ruleContext = buildRuleContext(latest, history ?? []);
+    const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
+    const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
+    if (dailyTargetHit || maxDailyLossHit) {
+      const reason = dailyTargetHit ? "Target Achieved: daily profit target reached. AI trading stopped for the day." : "Hard Kill-Switch Active: max daily loss reached. Trading disabled for the day.";
+      return json({ success: true, signal: { action: "WAIT", strike: "WAIT", reason, conviction: "LOW", highProbability: false, ruleContext, raw_text: `ACTION: WAIT\nSTRIKE: WAIT\nCONVICTION: LOW\nREASON: ${reason}` } });
+    }
 
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
@@ -126,7 +135,7 @@ REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
-Execution payload:\n${JSON.stringify({ executionIntent, tradingQuantity })}
+Execution payload:\n${JSON.stringify({ executionIntent, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss })}
 
 Latest market data:\n${JSON.stringify(latest)}`;
 
