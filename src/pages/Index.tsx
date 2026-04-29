@@ -330,6 +330,12 @@ const Index = () => {
   }, [exitAlertActive]);
 
   useEffect(() => {
+    if (!exitFlashUntil) return;
+    const timeout = setTimeout(() => setExitFlashUntil(0), Math.max(0, exitFlashUntil - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [exitFlashUntil]);
+
+  useEffect(() => {
     if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
     const pollPremium = () => {
       invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
