@@ -326,6 +326,29 @@ const Index = () => {
     };
   }, [exitAlertActive]);
 
+  useEffect(() => {
+    if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
+    const pollPremium = () => {
+      invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
+        .then(({ premium }) => {
+          const nextPlan = { ...activeTradePlan, currentPremium: premium };
+          setActiveTradePlan(nextPlan);
+          localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+        })
+        .catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to refresh option premium."));
+    };
+    pollPremium();
+    const timer = setInterval(pollPremium, UPSTOX_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTradePlan?.instrumentToken, activeTradePlan?.exitAlertReason]);
+
+  useEffect(() => {
+    if (!activeTrade || getIndiaMarketMinute(marketClock) < AUTO_SQUAREOFF_MINUTE) return;
+    emergencyExit(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrade, marketClock]);
+
   const showRetryToast = (message: string) => {
     const now = Date.now();
     if (now - retryToastRef.current < 20_000) return;
