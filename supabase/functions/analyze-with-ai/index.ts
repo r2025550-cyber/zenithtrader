@@ -18,6 +18,10 @@ function ema(values: number[], period: number) {
   return values.slice(1).reduce((avg, value) => value * multiplier + avg * (1 - multiplier), values[0]);
 }
 
+function atmStrike(price: number | null) {
+  return price === null ? null : Math.round(price / 50) * 50;
+}
+
 const NIFTY_LOT_SIZE = 65;
 
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
@@ -75,6 +79,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
 
   return {
     rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
+    atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixSizeCut ? `India VIX rising ${vixMovePct?.toFixed(2)}%: reduce position size by 50%.` : vixRising ? "India VIX rising but below 5% size-cut threshold." : "India VIX not rising or unavailable.",
@@ -138,9 +143,11 @@ serve(async (req) => {
 - Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
 - Divergence Guard: if Nifty disagrees with Bank Nifty or top heavyweights, label Low Conviction.
 
+Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, explicitly write the tradable ATM option phrase: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
+
 Respond exactly with:
 ACTION: BUY/SELL/WAIT
-STRIKE: Current ATM or WAIT
+STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
 REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
