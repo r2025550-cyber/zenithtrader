@@ -22,14 +22,36 @@ function firstNode(payload: Record<string, unknown>) {
 
 function quoteFrom(node: any) {
   const ohlc = node?.ohlc ?? node ?? {};
+  const depth = node?.depth ?? {};
   return {
     ltp: numberFrom(node?.last_price, node?.ltp, node?.lastPrice),
     open: numberFrom(ohlc.open, ohlc.o),
     high: numberFrom(ohlc.high, ohlc.h),
     low: numberFrom(ohlc.low, ohlc.l),
     close: numberFrom(ohlc.close, ohlc.c, node?.close_price),
-    volume: numberFrom(node?.volume, node?.volume_traded, node?.totalTradedVolume, ohlc.volume),
+    volume: numberFrom(node?.volume, node?.volume_traded, node?.totalTradedVolume, node?.total_traded_volume, node?.volumeTradedToday, ohlc.volume, depth?.total_buy_quantity, depth?.total_sell_quantity),
   };
+}
+
+function nextThursdayIso(date = new Date()) {
+  const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const daysUntilThursday = (4 - utc.getUTCDay() + 7) % 7;
+  utc.setUTCDate(utc.getUTCDate() + daysUntilThursday);
+  return utc.toISOString().slice(0, 10);
+}
+
+async function getOptionChainPcr(headers: HeadersInit) {
+  const encoded = encodeURIComponent(INSTRUMENT_KEY);
+  const response = await fetch(`https://api.upstox.com/v2/option/chain?instrument_key=${encoded}&expiry_date=${nextThursdayIso()}`, { headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return { pcr: null, raw: payload, error: `Option chain HTTP ${response.status}` };
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const totals = rows.reduce((sum: { callOi: number; putOi: number }, row: any) => {
+    sum.callOi += numberFrom(row?.call_options?.market_data?.oi, row?.call_options?.market_data?.open_interest, row?.ce_oi) ?? 0;
+    sum.putOi += numberFrom(row?.put_options?.market_data?.oi, row?.put_options?.market_data?.open_interest, row?.pe_oi) ?? 0;
+    return sum;
+  }, { callOi: 0, putOi: 0 });
+  return { pcr: totals.callOi > 0 ? Number((totals.putOi / totals.callOi).toFixed(3)) : null, raw: payload, error: null };
 }
 
 function isInvalidUpstoxToken(error: unknown) {
@@ -73,9 +95,10 @@ serve(async (req) => {
       return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
     }
 
-    const [bankNifty, indiaVix, ...heavyweights] = await Promise.allSettled([
+    const [bankNifty, indiaVix, optionChain, ...heavyweights] = await Promise.allSettled([
       getQuote(CONTEXT_INSTRUMENTS.bankNifty, headers),
       getQuote(CONTEXT_INSTRUMENTS.indiaVix, headers),
+      getOptionChainPcr(headers),
       ...CONTEXT_INSTRUMENTS.heavyweights.map((key) => getQuote(key, headers)),
     ]);
 
@@ -93,6 +116,8 @@ serve(async (req) => {
       raw_payload: {
         ...nifty.raw,
         volume: nifty.quote.volume,
+        volumeStatus: nifty.quote.volume === null ? "unavailable" : "available",
+        optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, error: optionChain.value.error } : { pcr: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
         context: {
           bankNifty: contextQuote(bankNifty),
           indiaVix: contextQuote(indiaVix),
