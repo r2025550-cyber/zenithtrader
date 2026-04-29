@@ -73,7 +73,7 @@ const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true");
+  const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
   const [riskMode, setRiskMode] = useState("moderate");
   const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
   const [maxTrades, setMaxTrades] = useState(6);
@@ -124,10 +124,6 @@ const Index = () => {
     const clock = setInterval(() => setMarketClock(new Date()), 30_000);
     return () => clearInterval(clock);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(AI_ARMED_STORAGE_KEY, String(aiEnabled));
-  }, [aiEnabled]);
 
   useEffect(() => {
     localStorage.setItem(TRADING_QUANTITY_STORAGE_KEY, tradingQuantity);
@@ -360,6 +356,7 @@ const Index = () => {
 
   const toggleAiTrading = async (checked: boolean) => {
     setIsBusy(true);
+    localStorage.setItem(AI_ARMED_STORAGE_KEY, String(checked));
     try {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
