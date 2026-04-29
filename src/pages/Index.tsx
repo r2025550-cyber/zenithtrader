@@ -483,6 +483,10 @@ const Index = () => {
           return;
         }
         const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
+        if (!liveOrder.success) {
+          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
+          return;
+        }
         const targetPoints = Number(userTargetPoints) || 40;
         const slPoints = Number(userSlPoints) || 20;
         const isCallBias = ai.signal.action === "BUY";
@@ -755,7 +759,7 @@ const Index = () => {
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
                 <Button disabled={!session || isBusy || tradingBlocked} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
                 <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
-                {activeTradePlan && <div className={`rounded-md border p-3 text-sm font-semibold ${exitAlertActive ? "border-loss bg-loss text-loss-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}>{exitAlertActive ? "TARGET / STOP LOSS HIT — EXIT NOW" : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty · T ${activeTradePlan.target.toFixed(2)} / SL ${activeTradePlan.stopLoss.toFixed(2)}`}</div>}
+                {activeTradePlan && <div className={`rounded-md border p-3 text-sm font-semibold ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}>{exitAlertActive ? "TARGET / STOP LOSS HIT — EXIT NOW" : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty · T ${activeTradePlan.target.toFixed(2)} / SL ${activeTradePlan.stopLoss.toFixed(2)}`}</div>}
               </div>
             </section>
 
