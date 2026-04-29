@@ -631,7 +631,7 @@ const Index = () => {
   const emergencyExit = async (lockForDay = false) => {
     setIsBusy(true);
     try {
-      await invokeFunction("emergency-exit", { lockForDay });
+      await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
       const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
       setActiveTradePlan(null);
