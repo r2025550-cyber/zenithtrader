@@ -177,7 +177,7 @@ const Index = () => {
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
-  const exitAlertActive = Boolean(activeTradePlan && hasLivePrice && (latestLtp >= activeTradePlan.target || latestLtp <= activeTradePlan.stopLoss));
+  const exitAlertActive = Boolean(activeTradePlan && hasLivePrice && (activeTradePlan.action === "BUY" ? latestLtp >= activeTradePlan.target || latestLtp <= activeTradePlan.stopLoss : latestLtp <= activeTradePlan.target || latestLtp >= activeTradePlan.stopLoss));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -477,14 +477,16 @@ const Index = () => {
           toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
           return;
         }
-        if (availableCash <= 0) {
+        const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
+        if (liveAvailableCash <= 0) {
           toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
           return;
         }
         const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
         const targetPoints = Number(userTargetPoints) || 40;
         const slPoints = Number(userSlPoints) || 20;
-        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveSpot + targetPoints, stopLoss: liveSpot - slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
+        const isCallBias = ai.signal.action === "BUY";
+        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints, stopLoss: isCallBias ? liveSpot - slPoints : liveSpot + slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
