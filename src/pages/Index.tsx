@@ -248,6 +248,12 @@ const Index = () => {
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       return;
     }
+    if (targetHit && activeTradePlan.extendedTargetActive) {
+      const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
+      setActiveTradePlan(nextPlan);
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      return;
+    }
     if (targetHit) {
       const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
       const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
@@ -270,6 +276,20 @@ const Index = () => {
       }
     }
   }, [activeTradePlan, hasLivePrice, latestLtp, toast]);
+
+  useEffect(() => {
+    if (!activeTradePlan || activeTradePlan.exitAlertReason) return;
+    const targetPoints = Number(userTargetPoints);
+    const slPoints = Number(userSlPoints);
+    if (!Number.isFinite(targetPoints) || !Number.isFinite(slPoints) || targetPoints <= 0 || slPoints < 0) return;
+    const isBuy = activeTradePlan.action === "BUY";
+    const nextTarget = isBuy ? activeTradePlan.entry + targetPoints : activeTradePlan.entry - targetPoints;
+    const nextStopLoss = isBuy ? activeTradePlan.entry - slPoints : activeTradePlan.entry + slPoints;
+    if (Math.abs(nextTarget - activeTradePlan.target) < 0.01 && Math.abs(nextStopLoss - activeTradePlan.stopLoss) < 0.01) return;
+    const nextPlan = { ...activeTradePlan, target: nextTarget, stopLoss: nextStopLoss };
+    setActiveTradePlan(nextPlan);
+    localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+  }, [activeTradePlan, userSlPoints, userTargetPoints]);
 
   const playAlertTone = () => {
     const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
