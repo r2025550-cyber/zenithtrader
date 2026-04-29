@@ -132,6 +132,7 @@ const Index = () => {
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
+  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
   const pcrValue = toNumber(latestSignal?.ruleContext?.rules?.pcr ?? latestData?.raw_payload?.optionChain?.pcr);
   const vixValue = toNumber(latestData?.raw_payload?.context?.indiaVix?.ltp);
   const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(1, latestSignal.effectiveTradingQuantity ?? Math.floor(normalizedTradingQuantity / 2)) : normalizedTradingQuantity;
@@ -143,8 +144,6 @@ const Index = () => {
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || (normalizedMaxDailyLoss > 0 && dailyPnl <= -normalizedMaxDailyLoss);
   const tradingBlocked = targetAchieved || hardKillActive;
-
-  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
