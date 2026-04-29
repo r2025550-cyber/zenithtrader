@@ -37,6 +37,7 @@ const history = [
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
+const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 
 type RuleContext = { rules?: { volumeValid?: boolean; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
@@ -135,6 +136,8 @@ const Index = () => {
     if (error) {
       const message = error.message.includes(UPSTOX_INVALID_CODE_ERROR)
         ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
+        : error.message.includes(UPSTOX_INVALID_TOKEN_ERROR) || error.message.toLowerCase().includes("upstox oauth reconnect required")
+          ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
         : error.message;
       throw new Error(message);
     }
@@ -262,6 +265,7 @@ const Index = () => {
       if (checked) await runTradingCycle();
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Server-side Nifty fetch and AI analysis will run every minute while this page is open." : "Automation is paused." });
     } catch (error) {
+      setAiEnabled(false);
       toast({ title: "AI trading update failed", description: error instanceof Error ? error.message : "Check credentials and OAuth status.", variant: "destructive" });
     } finally {
       setIsBusy(false);
