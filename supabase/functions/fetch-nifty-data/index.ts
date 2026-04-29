@@ -32,6 +32,11 @@ function quoteFrom(node: any) {
   };
 }
 
+function isInvalidUpstoxToken(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("UDAPI100050") || message.toLowerCase().includes("invalid token");
+}
+
 async function getQuote(instrumentKey: string, headers: HeadersInit) {
   const encoded = encodeURIComponent(instrumentKey);
   const [ltpResponse, ohlcResponse] = await Promise.all([
@@ -57,7 +62,13 @@ serve(async (req) => {
 
     const headers = { Authorization: `Bearer ${settings.upstox_access_token}`, Accept: "application/json" };
     const nifty = await getQuote(INSTRUMENT_KEY, headers).catch((error) => ({ error }));
-    if ("error" in nifty) return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
+    if ("error" in nifty) {
+      if (isInvalidUpstoxToken(nifty.error)) {
+        await auth.adminClient.from("trading_api_settings").update({ upstox_access_token: null, upstox_refresh_token: null, token_expires_at: null }).eq("user_id", auth.user.id);
+        return json({ error: "Upstox OAuth reconnect required", details: "The saved Upstox access token is invalid or expired. Open API Settings, tap Get Code, complete login, then paste a fresh code and Connect." }, 401);
+      }
+      return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
+    }
 
     const [bankNifty, indiaVix, ...heavyweights] = await Promise.allSettled([
       getQuote(CONTEXT_INSTRUMENTS.bankNifty, headers),
