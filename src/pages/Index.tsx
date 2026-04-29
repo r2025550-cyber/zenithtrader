@@ -258,7 +258,6 @@ const Index = () => {
       const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
       const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
       setActiveTradePlan(nextPlan);
-      setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
       setUserTargetPoints(String(Math.abs(nextPlan.target - nextPlan.entry)));
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       toast({ title: "Trailing target extended", description: `Initial target converted to TSL. New extended target: ${nextTarget.toFixed(2)}.` });
@@ -271,7 +270,6 @@ const Index = () => {
       if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       }
     }
@@ -558,16 +556,18 @@ const Index = () => {
           toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
           return;
         }
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
-        if (!liveOrder.success) {
-          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
-          return;
-        }
         const volatilityPoints = calculateVolatilityPoints(marketHistory);
         const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
         const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
         const isCallBias = ai.signal.action === "BUY";
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints, stopLoss: isCallBias ? liveSpot - slPoints : liveSpot + slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints };
+        const target = isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints;
+        const stopLoss = isCallBias ? liveSpot - slPoints : liveSpot + slPoints;
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPoints, slPoints, target, stopLoss });
+        if (!liveOrder.success) {
+          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
+          return;
+        }
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target, stopLoss, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints };
         setUserTargetPoints(String(targetPoints));
         setUserSlPoints(String(slPoints));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
