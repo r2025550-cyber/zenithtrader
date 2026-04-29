@@ -530,13 +530,13 @@ const Index = () => {
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                    <span>Gemini 1.5 Flash Status</span>
+                    <span>OpenAI GPT-4o Status</span>
                   </div>
                   <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestGemini()}>
-                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
                   </Button>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small Gemini 1.5 Flash response test using the saved key."}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small OpenAI GPT-4o response test using the saved key."}</p>
               </div>
             </div>
             {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
