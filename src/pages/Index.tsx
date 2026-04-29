@@ -38,6 +38,24 @@ const history = [
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
+const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
+const TRADING_QUANTITY_STORAGE_KEY = "zenith-trading-quantity";
+const MARKET_OPEN_MINUTE = 9 * 60 + 15;
+const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+
+const getIndiaMarketMinute = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  return hour * 60 + minute;
+};
+
+const isWithinMarketHours = (date = new Date()) => {
+  const minute = getIndiaMarketMinute(date);
+  return minute >= MARKET_OPEN_MINUTE && minute <= MARKET_CLOSE_MINUTE;
+};
+
+const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 
 type RuleContext = { rules?: { volumeValid?: boolean; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
@@ -51,11 +69,13 @@ type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 const Index = () => {
   const { toast } = useToast();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true");
   const [riskMode, setRiskMode] = useState("moderate");
+  const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
@@ -69,6 +89,7 @@ const Index = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [marketClock, setMarketClock] = useState(() => new Date());
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
@@ -85,10 +106,13 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
-  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
-  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
+  const marketIsOpen = isWithinMarketHours(marketClock);
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
+  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
+  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
+
+  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
