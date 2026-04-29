@@ -38,6 +38,24 @@ const history = [
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
+const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
+const TRADING_QUANTITY_STORAGE_KEY = "zenith-trading-quantity";
+const MARKET_OPEN_MINUTE = 9 * 60 + 15;
+const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+
+const getIndiaMarketMinute = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  return hour * 60 + minute;
+};
+
+const isWithinMarketHours = (date = new Date()) => {
+  const minute = getIndiaMarketMinute(date);
+  return minute >= MARKET_OPEN_MINUTE && minute <= MARKET_CLOSE_MINUTE;
+};
+
+const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 
 type RuleContext = { rules?: { volumeValid?: boolean; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
@@ -51,11 +69,13 @@ type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 const Index = () => {
   const { toast } = useToast();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
   const [riskMode, setRiskMode] = useState("moderate");
+  const [tradingQuantity, setTradingQuantity] = useState(() => storedValue(TRADING_QUANTITY_STORAGE_KEY, "25"));
   const [maxTrades, setMaxTrades] = useState(6);
   const [stopLoss, setStopLoss] = useState(2500);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
@@ -69,6 +89,7 @@ const Index = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [marketClock, setMarketClock] = useState(() => new Date());
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
@@ -85,16 +106,35 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? "System Ready (Market Closed)" : "Action Required";
-  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? "text-primary" : "text-loss";
-  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? "bg-primary" : "bg-loss";
+  const marketIsOpen = isWithinMarketHours(marketClock);
+  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
+  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
+  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
+
+  const normalizedTradingQuantity = Math.max(1, Number.parseInt(tradingQuantity, 10) || 1);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const clock = setInterval(() => setMarketClock(new Date()), 30_000);
+    return () => clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(TRADING_QUANTITY_STORAGE_KEY, tradingQuantity);
+  }, [tradingQuantity]);
+
+  const showRetryToast = (message: string) => {
+    const now = Date.now();
+    if (now - retryToastRef.current < 20_000) return;
+    retryToastRef.current = now;
+    toast({ title: "Retrying Connection...", description: message });
+  };
 
   const reasoning = useMemo(() => {
     if (latestSignal) {
@@ -143,6 +183,18 @@ const Index = () => {
       throw new Error(message);
     }
     return data;
+  };
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string) => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   };
 
   const saveUpstoxSettings = async () => {
@@ -211,8 +263,8 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async () => {
-    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data");
+  const fetchLiveNifty = async (executionIntent = false) => {
+    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingQuantity: normalizedTradingQuantity, executionIntent });
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
     if (Number.isFinite(value)) {
@@ -284,20 +336,35 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     await fetchLiveNifty();
-    const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "Gemini analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
+  };
+
+  const executeTradingSignal = async () => {
+    setIsBusy(true);
+    try {
+      await fetchLiveNifty(true);
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true }), 25_000, "Gemini analysis timed out; execution cycle will retry.");
+      setLatestSignal(ai.signal);
+      toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
+    } catch (error) {
+      showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const toggleAiTrading = async (checked: boolean) => {
     setIsBusy(true);
+    localStorage.setItem(AI_ARMED_STORAGE_KEY, String(checked));
     try {
-      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode });
+      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
       if (checked) await runTradingCycle();
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Server-side Nifty fetch and AI analysis will run every minute while this page is open." : "Automation is paused." });
     } catch (error) {
-      setAiEnabled(false);
-      toast({ title: "AI trading update failed", description: error instanceof Error ? error.message : "Check credentials and OAuth status.", variant: "destructive" });
+      if (checked) setAiEnabled(true);
+      showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
     } finally {
       setIsBusy(false);
     }
@@ -309,24 +376,26 @@ const Index = () => {
       intervalRef.current = setInterval(() => {
         const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
         refresh.catch((error) => {
-          if (aiEnabled) setAiEnabled(false);
-          toast({ title: aiEnabled ? "AI loop paused" : "Live Nifty refresh failed", description: error instanceof Error ? error.message : "Unable to fetch Upstox market data.", variant: "destructive" });
+          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
         });
       }, 60_000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [session, aiEnabled]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, aiEnabled, normalizedTradingQuantity]);
 
   useEffect(() => {
     if (!session) return;
     checkSystemStatus(false).catch(() => {
       // Connection Pulse will show missing setup after a manual check.
     });
+    if (aiEnabled && !marketIsOpen) setAiEnabled(false);
     fetchLiveNifty().catch(() => {
       // Keep the dashboard usable until Upstox OAuth is connected.
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   return (
@@ -485,8 +554,10 @@ const Index = () => {
               <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p><h2 className="text-xl font-semibold">Autonomy Settings</h2></div><Bot className="h-6 w-6 text-primary" /></div>
               <div className="space-y-5">
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Server-side loop control</p></div><Switch disabled={!session || isBusy} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
+                <div className="space-y-2"><Label htmlFor="trading-quantity" className="text-sm font-medium text-muted-foreground">Trading Quantity</Label><Input id="trading-quantity" type="number" min="1" step="1" inputMode="numeric" value={tradingQuantity} onChange={(event) => setTradingQuantity(event.target.value)} className="border-border bg-surface" /></div>
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
-                <Button disabled={!session || isBusy} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "AI Trading Active" : "Arm AI Trading"}</Button>
+                <Button disabled={!session || isBusy} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
+                <Button disabled={!session || isBusy} variant="terminal" className="w-full" onClick={executeTradingSignal}>Execute</Button>
               </div>
             </section>
 
