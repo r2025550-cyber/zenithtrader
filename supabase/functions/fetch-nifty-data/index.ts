@@ -55,6 +55,9 @@ async function getQuote(instrumentKey: string, headers: HeadersInit) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    const body = await req.json().catch(() => ({}));
+    const tradingQuantity = Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
+    const executionIntent = body?.executionIntent === true;
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
@@ -95,6 +98,7 @@ serve(async (req) => {
           indiaVix: contextQuote(indiaVix),
           heavyweights: heavyweights.map(contextQuote).filter(Boolean),
         },
+        execution: { intent: executionIntent, tradingQuantity },
       },
       source_timestamp: new Date().toISOString(),
     };
