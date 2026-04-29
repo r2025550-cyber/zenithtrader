@@ -12,6 +12,8 @@ const BodySchema = z.object({
   effectiveLotSize: z.number().int().positive().optional(),
 });
 
+type UpstoxRecord = Record<string, unknown>;
+
 function numberFrom(...values: unknown[]) {
   for (const value of values) {
     if (value === null || value === undefined || value === "") continue;
@@ -22,7 +24,7 @@ function numberFrom(...values: unknown[]) {
 }
 
 function firstNode(payload: Record<string, unknown>) {
-  return Object.values(payload?.data ?? {})[0] as any;
+  return Object.values((payload?.data as Record<string, unknown> | undefined) ?? {})[0] as UpstoxRecord | undefined;
 }
 
 async function getAvailableCash(headers: HeadersInit) {
@@ -41,16 +43,16 @@ async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action:
   const contractPayload = await contractResponse.json().catch(() => ({}));
   if (!contractResponse.ok) throw new Error(`Option contract HTTP ${contractResponse.status}: ${JSON.stringify(contractPayload)}`);
 
-  const rows = Array.isArray(contractPayload?.data) ? contractPayload.data : [];
+  const rows = (Array.isArray(contractPayload?.data) ? contractPayload.data : []) as UpstoxRecord[];
   const today = new Date().toISOString().slice(0, 10);
-  const expiries = rows.map((row: any) => String(row?.expiry ?? row?.expiry_date ?? "")).filter(Boolean).sort();
+  const expiries = rows.map((row) => String(row?.expiry ?? row?.expiry_date ?? "")).filter(Boolean).sort();
   const expiry = expiries.find((value: string) => value >= today) ?? expiries[0];
-  const candidates = rows.filter((row: any) => {
+  const candidates = rows.filter((row) => {
     const rowExpiry = String(row?.expiry ?? row?.expiry_date ?? "");
     const rowType = String(row?.instrument_type ?? row?.option_type ?? row?.optionType ?? "").toUpperCase();
     return rowExpiry === expiry && rowType.includes(optionType);
   });
-  const selected = candidates.reduce((best: any, row: any) => {
+  const selected = candidates.reduce<UpstoxRecord | null>((best, row) => {
     const strike = numberFrom(row?.strike_price, row?.strikePrice, row?.strike);
     if (strike === null) return best;
     if (!best) return row;
