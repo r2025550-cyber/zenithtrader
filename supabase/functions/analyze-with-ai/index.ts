@@ -70,12 +70,14 @@ function buildRuleContext(latest: any, history: any[]) {
     rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${latest?.raw_payload?.volumeSource ?? "Upstox live feed"}.` : volume !== null ? "Volume received from Upstox but awaiting enough history for +20% comparison; treat as neutral, not failed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
-      vixRising ? "India VIX rising: reduce position size alert." : "India VIX not rising or unavailable.",
+      vixSizeCut ? `India VIX rising ${vixMovePct?.toFixed(2)}%: reduce position size by 50%.` : vixRising ? "India VIX rising but below 5% size-cut threshold." : "India VIX not rising or unavailable.",
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
       noTradeRange ? "No-Trade Zone: 60-minute range is under 40 points." : "Range filter clear or awaiting more history.",
       divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
       pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
+      emaAligned ? `9/21 EMA crossover aligns ${emaTrend} with price action.` : `9/21 EMA alignment pending/failed: EMA=${emaTrend}, price=${priceAction}.`,
+      multiTimeframeAligned ? `15-minute ${trend15} trend confirms 1-minute ${entry1m} entry.` : `15-minute trend does not confirm 1-minute entry: 15m=${trend15}, 1m=${entry1m}.`,
     ],
   };
 }
@@ -104,14 +106,16 @@ serve(async (req) => {
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
 - Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
-- If India VIX is rising, reduce position size in the reason.
+- Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
 - 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
 - If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
 - PCR > 1.3 is Overbought; PCR < 0.7 is Oversold. If PCR is unavailable, state unavailable.
 - No-Trade Zone if the last 60 minutes remain inside a 40-point range.
+- Multi-timeframe rule: 15-minute trend must confirm the 1-minute entry direction before BUY/SELL; otherwise WAIT or LOW conviction.
+- Smart indicator rule: 9 EMA / 21 EMA crossover must align with price action for HIGH Conviction; if not aligned, cap conviction below HIGH.
 - Entry must wait for minor retracement: dip for CALL, bounce for PUT.
 - Risk reward must be strict 1:2.
-- TSL: at 50% target, move SL to entry; every 10 points additional gain trails SL by 5 points.
+- Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
 - Divergence Guard: if Nifty disagrees with Bank Nifty or top heavyweights, label Low Conviction.
 
 Respond exactly with:
@@ -130,7 +134,7 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
