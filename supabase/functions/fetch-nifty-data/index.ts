@@ -42,7 +42,14 @@ function nextThursdayIso(date = new Date()) {
 
 async function getOptionChainPcr(headers: HeadersInit) {
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
-  const response = await fetch(`https://api.upstox.com/v2/option/chain?instrument_key=${encoded}&expiry_date=${nextThursdayIso()}`, { headers });
+  const contractResponse = await fetch(`https://api.upstox.com/v2/option/contract?instrument_key=${encoded}`, { headers });
+  const contractPayload = await contractResponse.json().catch(() => ({}));
+  const expiries = (Array.isArray(contractPayload?.data) ? contractPayload.data : [])
+    .map((row: any) => String(row?.expiry ?? row?.expiry_date ?? ""))
+    .filter(Boolean)
+    .sort();
+  const expiry = expiries.find((value: string) => value >= new Date().toISOString().slice(0, 10)) ?? expiries[0] ?? nextThursdayIso();
+  const response = await fetch(`https://api.upstox.com/v2/option/chain?instrument_key=${encoded}&expiry_date=${expiry}`, { headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) return { pcr: null, raw: payload, error: `Option chain HTTP ${response.status}` };
   const rows = Array.isArray(payload?.data) ? payload.data : [];
@@ -51,7 +58,7 @@ async function getOptionChainPcr(headers: HeadersInit) {
     sum.putOi += numberFrom(row?.put_options?.market_data?.oi, row?.put_options?.market_data?.open_interest, row?.pe_oi) ?? 0;
     return sum;
   }, { callOi: 0, putOi: 0 });
-  return { pcr: totals.callOi > 0 ? Number((totals.putOi / totals.callOi).toFixed(3)) : null, raw: payload, error: null };
+  return { pcr: totals.callOi > 0 ? Number((totals.putOi / totals.callOi).toFixed(3)) : null, raw: payload, error: null, expiry };
 }
 
 function isInvalidUpstoxToken(error: unknown) {
@@ -117,7 +124,7 @@ serve(async (req) => {
         ...nifty.raw,
         volume: nifty.quote.volume,
         volumeStatus: nifty.quote.volume === null ? "unavailable" : "available",
-        optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, error: optionChain.value.error } : { pcr: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
+        optionChain: optionChain.status === "fulfilled" ? { pcr: optionChain.value.pcr, expiry: optionChain.value.expiry, error: optionChain.value.error } : { pcr: null, error: String(optionChain.reason?.message ?? optionChain.reason) },
         context: {
           bankNifty: contextQuote(bankNifty),
           indiaVix: contextQuote(indiaVix),
