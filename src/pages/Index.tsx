@@ -241,7 +241,6 @@ const Index = () => {
     return () => {
       if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exitAlertActive]);
 
   const showRetryToast = (message: string) => {
