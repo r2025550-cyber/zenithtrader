@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { GEMINI_API_VERSION, generateGeminiText } from "../_shared/gemini.ts";
+import { OPENAI_MODEL, generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.ts";
 
 const ok = (message: string, details?: Record<string, unknown>) => ({ ok: true, message, details });
@@ -27,14 +27,14 @@ async function clearUpstoxToken(adminClient: any, userId: string) {
     .eq("user_id", userId);
 }
 
-async function checkGemini(apiKey?: string | null) {
-  if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
+async function checkOpenAI(apiKey?: string | null) {
+  if (!apiKey) return fail("OpenAI API key is missing. Save it in API Settings.");
 
   try {
-    const result = await generateGeminiText(apiKey, "Reply with only OK.", 5);
-    return ok("Gemini Flash responded successfully with the saved API key.", { model: result.modelName, apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
+    const result = await generateOpenAIText(apiKey, "Reply with only OK.", 5);
+    return ok("OpenAI GPT-4o responded successfully with the saved API key.", { model: result.modelName, endpoint: "v1/chat/completions" });
   } catch (error) {
-    return fail(error instanceof Error ? error.message : "Gemini Flash verification failed.", { apiVersion: GEMINI_API_VERSION, sdk: "@google/generative-ai", endpoint: "stable" });
+    return fail(error instanceof Error ? error.message : "OpenAI GPT-4o verification failed.", { model: OPENAI_MODEL, endpoint: "v1/chat/completions" });
   }
 }
 
@@ -42,7 +42,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const target = body?.target === "gemini" || body?.target === "upstox" ? body.target : "all";
+    const target = body?.target === "openai" || body?.target === "gemini" || body?.target === "upstox" ? body.target : "all";
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error ?? json({ error: "Please sign in before checking system status." }, 401);
 
@@ -54,8 +54,8 @@ serve(async (req) => {
 
     if (error) throw error;
 
-    if (target === "gemini") {
-      const gemini = await checkGemini(settings?.openai_api_key);
+    if (target === "openai" || target === "gemini") {
+      const gemini = await checkOpenAI(settings?.openai_api_key);
       return json({ gemini, checkedAt: new Date().toISOString() });
     }
 
@@ -65,7 +65,7 @@ serve(async (req) => {
       return json({ upstox, checkedAt: new Date().toISOString() });
     }
 
-    const [upstox, gemini] = await Promise.all([checkUpstox(settings?.upstox_access_token), checkGemini(settings?.openai_api_key)]);
+    const [upstox, gemini] = await Promise.all([checkUpstox(settings?.upstox_access_token), checkOpenAI(settings?.openai_api_key)]);
     if (!upstox.ok && JSON.stringify(upstox.details ?? {}).includes("UDAPI100050")) await clearUpstoxToken(auth.adminClient, auth.user.id);
 
     return json({ ready: upstox.ok && gemini.ok, upstox, gemini, checkedAt: new Date().toISOString() });
