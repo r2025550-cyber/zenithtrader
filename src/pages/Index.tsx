@@ -54,6 +54,10 @@ const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
+const DEFAULT_TARGET_POINTS = 40;
+const DEFAULT_SL_POINTS = 20;
+const TSL_STEP_POINTS = 10;
+const EXTENDED_TARGET_POINTS = 20;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -103,8 +107,17 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
-type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number } | null;
+type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; extendedTargetActive?: boolean; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
 type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; quantity: number; availableCash: number; requiredCash: number };
+
+const calculateVolatilityPoints = (points: MarketPoint[]) => {
+  const recent = points.slice(-12).map((point) => point.value);
+  if (recent.length < 4) return { targetPoints: DEFAULT_TARGET_POINTS, slPoints: DEFAULT_SL_POINTS };
+  const range = Math.max(...recent) - Math.min(...recent);
+  const targetPoints = Math.max(DEFAULT_TARGET_POINTS, Math.ceil(range / TSL_STEP_POINTS) * TSL_STEP_POINTS);
+  const slPoints = Math.max(DEFAULT_SL_POINTS, Math.ceil((targetPoints / 2) / TSL_STEP_POINTS) * TSL_STEP_POINTS);
+  return { targetPoints, slPoints };
+};
 
 const Index = () => {
   const { toast } = useToast();
