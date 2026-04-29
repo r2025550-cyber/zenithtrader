@@ -45,6 +45,7 @@ const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
 const TRADE_COUNT_STORAGE_KEY = "zenith-trade-count-date";
 const ACTIVE_TRADE_STORAGE_KEY = "zenith-active-trade-date";
+const ACTIVE_TRADE_PLAN_STORAGE_KEY = "zenith-active-trade-plan-date";
 const KILL_SWITCH_STORAGE_KEY = "zenith-kill-switch-date";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
@@ -73,6 +74,17 @@ const datedStorageValue = (key: string, fallback = "0") => {
   return date === todayKey() ? value || fallback : fallback;
 };
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
+const parseActiveTradePlan = () => {
+  try {
+    const stored = storedValue(ACTIVE_TRADE_PLAN_STORAGE_KEY);
+    const separator = stored.indexOf(":");
+    const date = separator >= 0 ? stored.slice(0, separator) : "";
+    const payload = separator >= 0 ? stored.slice(separator + 1) : "";
+    return date === todayKey() && payload ? JSON.parse(payload) : null;
+  } catch {
+    return null;
+  }
+};
 const toNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -91,11 +103,15 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
+type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number } | null;
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; quantity: number; availableCash: number; requiredCash: number };
 
 const Index = () => {
   const { toast } = useToast();
   const marketIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const aiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -105,6 +121,7 @@ const Index = () => {
   const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
   const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
+  const [activeTradePlan, setActiveTradePlan] = useState<ActiveTradePlan>(() => parseActiveTradePlan());
   const [userTargetPoints, setUserTargetPoints] = useState("");
   const [userSlPoints, setUserSlPoints] = useState("");
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
@@ -152,6 +169,7 @@ const Index = () => {
   const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
   const dailyPnl = upstoxTodayPnl ?? 0;
+  const availableCash = toNumber(latestData?.raw_payload?.account?.margin?.availableCash) ?? 0;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
   const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
@@ -159,6 +177,7 @@ const Index = () => {
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
+  const exitAlertActive = Boolean(activeTradePlan && hasLivePrice && (activeTradePlan.action === "BUY" ? latestLtp >= activeTradePlan.target || latestLtp <= activeTradePlan.stopLoss : latestLtp <= activeTradePlan.target || latestLtp >= activeTradePlan.stopLoss));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -194,6 +213,35 @@ const Index = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+
+  const playAlertTone = () => {
+    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+    const context = audioContextRef.current ?? new AudioCtor();
+    audioContextRef.current = context;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.42);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.45);
+  };
+
+  useEffect(() => {
+    if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+    if (exitAlertActive) {
+      playAlertTone();
+      alertIntervalRef.current = setInterval(playAlertTone, 900);
+    }
+    return () => {
+      if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+    };
+  }, [exitAlertActive]);
 
   const showRetryToast = (message: string) => {
     const now = Date.now();
@@ -419,17 +467,40 @@ const Index = () => {
         toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
         return;
       }
-      await fetchLiveNifty(true);
+      const liveMarket = await fetchLiveNifty(true);
+      const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
+        if (!Number.isFinite(liveSpot)) {
+          toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
+          return;
+        }
+        const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
+        if (liveAvailableCash <= 0) {
+          toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
+          return;
+        }
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
+        if (!liveOrder.success) {
+          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
+          return;
+        }
+        const targetPoints = Number(userTargetPoints) || 40;
+        const slPoints = Number(userSlPoints) || 20;
+        const isCallBias = ai.signal.action === "BUY";
+        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints, stopLoss: isCallBias ? liveSpot - slPoints : liveSpot + slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
+        setActiveTradePlan(plan);
         localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
         localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
+        toast({ title: "LIVE ORDER PLACED", description: `${liveOrder.instrument.tradingSymbol} · ${liveOrder.quantity} qty sent to Upstox.` });
+        return;
       }
-      toast({ title: "Execute cycle sent", description: `${ai.signal.effectiveLotSize ?? normalizedTradingLotSize} lot(s) / ${ai.signal.effectiveTradingQuantity ?? totalTradingQuantity} qty applied for this AI cycle.` });
+      toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
     } finally {
@@ -442,7 +513,9 @@ const Index = () => {
     try {
       await invokeFunction("emergency-exit", { lockForDay });
       setActiveTrade(false);
+      setActiveTradePlan(null);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
+      localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
       if (lockForDay) {
         const today = todayKey();
         setKillSwitchDate(today);
@@ -514,7 +587,7 @@ const Index = () => {
   }, [session]);
 
   return (
-    <main className="min-h-screen overflow-hidden bg-terminal text-foreground">
+    <main className={`min-h-screen overflow-hidden bg-terminal text-foreground ${exitAlertActive ? "animate-pulse bg-loss" : ""}`}>
       <div className="pointer-events-none fixed inset-0 noise-overlay opacity-30" />
       <section className="relative mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-4 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 rounded-lg border border-border bg-panel/80 p-4 shadow-panel backdrop-blur md:flex-row md:items-center md:justify-between">
@@ -684,7 +757,8 @@ const Index = () => {
                 {(targetAchieved || hardKillActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
                 <Button disabled={!session || isBusy || tradingBlocked} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
-                <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-14 text-lg font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "EMERGENCY EXIT" : "Execute"}</Button>
+                <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
+                {activeTradePlan && <div className={`rounded-md border p-3 text-sm font-semibold ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}>{exitAlertActive ? "TARGET / STOP LOSS HIT — EXIT NOW" : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty · T ${activeTradePlan.target.toFixed(2)} / SL ${activeTradePlan.stopLoss.toFixed(2)}`}</div>}
               </div>
             </section>
 
