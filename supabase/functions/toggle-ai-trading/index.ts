@@ -5,6 +5,7 @@ import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.t
 const BodySchema = z.object({
   isActive: z.boolean(),
   riskMode: z.enum(["conservative", "moderate", "aggressive"]),
+  tradingQuantity: z.number().int().positive().optional(),
 });
 
 serve(async (req) => {
