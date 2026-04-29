@@ -10,8 +10,8 @@ const BodySchema = z.object({
   spotPrice: z.number().positive(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
-  targetPremium: z.number().positive().optional(),
-  stopLossPremium: z.number().positive().optional(),
+  targetPremiumPoints: z.number().positive().optional(),
+  stopLossPremiumPoints: z.number().positive().optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
@@ -103,8 +103,10 @@ serve(async (req) => {
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
     const option = await resolveAtmOption(headers, parsed.data.spotPrice, parsed.data.action);
     const optionLtp = await getOptionLtp(headers, option.instrumentToken);
-    const targetPremium = parsed.data.targetPremium ?? optionLtp + 25;
-    const stopLossPremium = parsed.data.stopLossPremium ?? Math.max(0.05, optionLtp - 15);
+    const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
+    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
+    const targetPremium = optionLtp + targetPremiumPoints;
+    const stopLossPremium = Math.max(0.05, optionLtp - stopLossPremiumPoints);
     const requiredCash = optionLtp * quantity;
     const availableCash = await getAvailableCash(headers);
     if (requiredCash > availableCash) {
@@ -140,7 +142,7 @@ serve(async (req) => {
     };
     const slOrderResult = await placeOrder(headers, slOrderPayload);
 
-    return json({ success: true, order: orderResult, slOrder: slOrderResult, slOrderId: readOrderId(slOrderResult), instrument: option, instrumentToken: option.instrumentToken, quantity, availableCash, requiredCash, optionLtp, entryPremium: optionLtp, targetPremium, stopLossPremium });
+    return json({ success: true, order: orderResult, slOrder: slOrderResult, slOrderId: readOrderId(slOrderResult), instrument: option, instrumentToken: option.instrumentToken, quantity, availableCash, requiredCash, optionLtp, entryPremium: optionLtp, targetPremium, stopLossPremium, targetPremiumPoints, stopLossPremiumPoints });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Live order placement failed" }, 500);
   }
