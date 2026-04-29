@@ -60,6 +60,9 @@ function buildRuleContext(latest: any, history: any[]) {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
+    const body = await req.json().catch(() => ({}));
+    const tradingQuantity = Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? body.tradingQuantity : null;
+    const executionIntent = body?.executionIntent === true;
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
@@ -96,6 +99,8 @@ REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
+Execution payload:\n${JSON.stringify({ executionIntent, tradingQuantity })}
+
 Latest market data:\n${JSON.stringify(latest)}`;
 
     const result = await generateGeminiText(settings.openai_api_key, prompt, 700);
@@ -110,7 +115,7 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext }),
+      raw_response: JSON.stringify({ text, model: result.modelName, conviction, highProbability, ruleContext, executionIntent, tradingQuantity }),
     }).select("*").single();
     if (error) throw error;
 
