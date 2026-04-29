@@ -437,9 +437,14 @@ const Index = () => {
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className={`rounded-md border p-4 ${systemStatus?.upstox?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
-                <div className="mb-2 flex items-center gap-2 font-semibold">
-                  {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                  <span>Upstox API Status</span>
+                <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>Upstox API Status</span>
+                  </div>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestUpstox()}>
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Upstox
+                  </Button>
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}</p>
               </div>
@@ -449,7 +454,7 @@ const Index = () => {
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
                     <span>Gemini 1.5 Flash Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestGemini}>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestGemini()}>
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
                   </Button>
                 </div>
