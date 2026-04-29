@@ -46,6 +46,7 @@ type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
+type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -144,16 +145,30 @@ const Index = () => {
     return data;
   };
 
-  const saveSettings = async (event: FormEvent) => {
+  const saveUpstoxSettings = async () => {
+    setIsBusy(true);
+    try {
+      await invokeFunction("save-trading-settings", { provider: "upstox", upstoxApiKey: settings.upstoxApiKey, upstoxApiSecret: settings.upstoxApiSecret, redirectUri: settings.redirectUri });
+      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
+      toast({ title: "Upstox keys saved", description: "Existing Gemini settings were left unchanged. Complete OAuth if the token needs reconnecting." });
+      await retestUpstox(false).catch(() => null);
+    } catch (error) {
+      toast({ title: "Unable to save Upstox", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const saveGeminiSettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { ...settings, openaiApiKey: settings.geminiApiKey });
-      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "" }));
-      const status = await checkSystemStatus(false).catch(() => null);
-      toast({ title: status?.ready ? "System Ready (Market Closed)" : "Settings secured", description: status?.ready ? "Upstox and Gemini 1.5 Flash are both verified." : "API credentials were stored in the protected backend table." });
+      await invokeFunction("save-trading-settings", { provider: "gemini", openaiApiKey: settings.geminiApiKey });
+      setSettings((prev) => ({ ...prev, geminiApiKey: "" }));
+      const status = await retestGemini(false).catch(() => null);
+      toast({ title: status?.gemini.ok ? "Gemini verified" : "Gemini key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
     } catch (error) {
-      toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({ title: "Unable to save Gemini", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }
