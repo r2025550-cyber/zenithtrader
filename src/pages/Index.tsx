@@ -59,7 +59,7 @@ const isWithinMarketHours = (date = new Date()) => {
 
 const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 
-type RuleContext = { rules?: { volumeValid?: boolean; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
@@ -363,7 +363,7 @@ const Index = () => {
     try {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
-      if (checked) await runTradingCycle();
+      if (checked) await fetchLiveNifty();
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
@@ -547,7 +547,7 @@ const Index = () => {
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
               <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Real-time Upstox feed</p><h2 className="text-xl font-semibold">NIFTY 50 · 1m Live Price</h2></div>
-              <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "WAIT"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: {latestSignal?.ruleContext?.rules?.volumeValid ? "Valid +20%" : "Filtering"}</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">VIX: {latestData?.raw_payload?.context?.indiaVix?.ltp ?? "—"}</span></div>
+              <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "WAIT"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: {latestSignal?.ruleContext?.rules?.volumeValid === true ? "Valid +20%" : latestSignal?.ruleContext?.rules?.volumeValid === false ? "Below +20%" : "Pending"}</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">VIX: {latestData?.raw_payload?.context?.indiaVix?.ltp ?? "—"}</span></div>
             </div>
             <div className="market-grid relative h-[360px] p-5">
               <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">{chartLevels.map((level, index) => <span key={`${level}-${index}`}>{marketHistory.length ? level.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}</span>)}</div>
