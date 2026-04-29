@@ -246,45 +246,37 @@ const Index = () => {
   }, [activeTrade, latestSignal, marketHistory]);
 
   useEffect(() => {
-    if (!activeTradePlan || !hasLivePrice || activeTradePlan.exitAlertReason) return;
-    const isBuy = activeTradePlan.action === "BUY";
-    const profitPoints = isBuy ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp;
-    const stopHit = isBuy ? latestLtp <= activeTradePlan.stopLoss : latestLtp >= activeTradePlan.stopLoss;
-    const targetHit = isBuy ? latestLtp >= activeTradePlan.target : latestLtp <= activeTradePlan.target;
+    if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
+    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
+    const stopHit = activeTradePlan.currentPremium <= (activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss);
+    const targetHit = activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target);
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setActiveTradePlan(nextPlan);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-      return;
-    }
-    if (targetHit && activeTradePlan.extendedTargetActive) {
-      const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
-      setActiveTradePlan(nextPlan);
-      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      emergencyExit(false);
       return;
     }
     if (targetHit) {
-      const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
-      const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
+      const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
       setActiveTradePlan(nextPlan);
-      setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
-      setUserTargetPoints(String(Math.abs(nextPlan.target - nextPlan.entry)));
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-      toast({ title: "Trailing target extended", description: `Initial target converted to TSL. New extended target: ${nextTarget.toFixed(2)}.` });
+      emergencyExit(false);
       return;
     }
-    if (profitPoints >= TSL_STEP_POINTS) {
-      const lockedSteps = Math.floor(profitPoints / TSL_STEP_POINTS);
-      const candidateStop = isBuy ? activeTradePlan.entry + (lockedSteps - 1) * TSL_STEP_POINTS : activeTradePlan.entry - (lockedSteps - 1) * TSL_STEP_POINTS;
-      const shouldTrail = isBuy ? candidateStop > activeTradePlan.stopLoss : candidateStop < activeTradePlan.stopLoss;
-      if (shouldTrail) {
-        const nextPlan = { ...activeTradePlan, stopLoss: candidateStop };
+    if (premiumProfit >= PREMIUM_TSL_STEP) {
+      const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
+      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
+      if (candidateStop > (activeTradePlan.stopLossPremium ?? 0)) {
+        const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
+        setUserSlPoints(String(Math.max(0, nextPlan.entryPremium - candidateStop)));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+        syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
     }
-  }, [activeTradePlan, hasLivePrice, latestLtp, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTradePlan]);
 
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
