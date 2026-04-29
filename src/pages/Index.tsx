@@ -45,6 +45,7 @@ const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
 const TRADE_COUNT_STORAGE_KEY = "zenith-trade-count-date";
 const ACTIVE_TRADE_STORAGE_KEY = "zenith-active-trade-date";
+const ACTIVE_TRADE_PLAN_STORAGE_KEY = "zenith-active-trade-plan-date";
 const KILL_SWITCH_STORAGE_KEY = "zenith-kill-switch-date";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
@@ -73,6 +74,14 @@ const datedStorageValue = (key: string, fallback = "0") => {
   return date === todayKey() ? value || fallback : fallback;
 };
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
+const parseActiveTradePlan = () => {
+  try {
+    const [date, payload] = storedValue(ACTIVE_TRADE_PLAN_STORAGE_KEY).split(":", 2);
+    return date === todayKey() && payload ? JSON.parse(payload) : null;
+  } catch {
+    return null;
+  }
+};
 const toNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -91,11 +100,15 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
+type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number } | null;
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; quantity: number; availableCash: number; requiredCash: number };
 
 const Index = () => {
   const { toast } = useToast();
   const marketIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const aiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -105,6 +118,7 @@ const Index = () => {
   const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
   const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
+  const [activeTradePlan, setActiveTradePlan] = useState<ActiveTradePlan>(() => parseActiveTradePlan());
   const [userTargetPoints, setUserTargetPoints] = useState("");
   const [userSlPoints, setUserSlPoints] = useState("");
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
