@@ -155,6 +155,7 @@ const Index = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
 
   const latestLtp = Number(latestData?.ltp);
@@ -198,7 +199,7 @@ const Index = () => {
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
   const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
-  const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason);
+  const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -252,6 +253,7 @@ const Index = () => {
     const targetHit = activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target);
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
+      setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       emergencyExit(false);
@@ -259,6 +261,7 @@ const Index = () => {
     }
     if (targetHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
+      setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
       emergencyExit(false);
