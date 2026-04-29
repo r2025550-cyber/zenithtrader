@@ -380,18 +380,18 @@ const Index = () => {
               <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
               <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={saveSettings} className="space-y-5">
+            <form onSubmit={saveGeminiSettings} className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-key">Upstox API Key</Label>
+                  <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
                   <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-secret">Upstox API Secret</Label>
+                  <Label htmlFor="upstox-api-secret" className="flex items-center gap-2">Upstox API Secret {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
                   <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="gemini-api-key">Gemini API Key</Label>
+                  <Label htmlFor="gemini-api-key" className="flex items-center gap-2">Gemini API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Gemini verified" />}</Label>
                   <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} required className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -402,7 +402,8 @@ const Index = () => {
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
-                <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
+                <Button disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret} type="button" variant="terminal" onClick={saveUpstoxSettings}>Save Upstox</Button>
+                <Button disabled={isBusy || !settings.geminiApiKey} type="submit" variant="trading">Save Gemini</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
