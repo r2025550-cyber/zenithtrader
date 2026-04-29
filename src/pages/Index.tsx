@@ -190,7 +190,9 @@ const Index = () => {
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
-  const exitAlertActive = Boolean(activeTradePlan && hasLivePrice && (activeTradePlan.action === "BUY" ? latestLtp >= activeTradePlan.target || latestLtp <= activeTradePlan.stopLoss : latestLtp <= activeTradePlan.target || latestLtp >= activeTradePlan.stopLoss));
+  const currentTradePnlPoints = activeTradePlan && hasLivePrice ? (activeTradePlan.action === "BUY" ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp) : 0;
+  const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
+  const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -226,6 +228,48 @@ const Index = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+
+  useEffect(() => {
+    if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || activeTrade) return;
+    const { targetPoints, slPoints } = calculateVolatilityPoints(marketHistory);
+    if (!userTargetPoints) setUserTargetPoints(String(targetPoints));
+    if (!userSlPoints) setUserSlPoints(String(slPoints));
+  }, [activeTrade, latestSignal, marketHistory, userSlPoints, userTargetPoints]);
+
+  useEffect(() => {
+    if (!activeTradePlan || !hasLivePrice || activeTradePlan.exitAlertReason) return;
+    const isBuy = activeTradePlan.action === "BUY";
+    const profitPoints = isBuy ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp;
+    const stopHit = isBuy ? latestLtp <= activeTradePlan.stopLoss : latestLtp >= activeTradePlan.stopLoss;
+    const targetHit = isBuy ? latestLtp >= activeTradePlan.target : latestLtp <= activeTradePlan.target;
+    if (stopHit) {
+      const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
+      setActiveTradePlan(nextPlan);
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      return;
+    }
+    if (targetHit) {
+      const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
+      const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
+      setActiveTradePlan(nextPlan);
+      setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
+      setUserTargetPoints(String(Math.abs(nextPlan.target - nextPlan.entry)));
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      toast({ title: "Trailing target extended", description: `Initial target converted to TSL. New extended target: ${nextTarget.toFixed(2)}.` });
+      return;
+    }
+    if (profitPoints >= TSL_STEP_POINTS) {
+      const lockedSteps = Math.floor(profitPoints / TSL_STEP_POINTS);
+      const candidateStop = isBuy ? activeTradePlan.entry + (lockedSteps - 1) * TSL_STEP_POINTS : activeTradePlan.entry - (lockedSteps - 1) * TSL_STEP_POINTS;
+      const shouldTrail = isBuy ? candidateStop > activeTradePlan.stopLoss : candidateStop < activeTradePlan.stopLoss;
+      if (shouldTrail) {
+        const nextPlan = { ...activeTradePlan, stopLoss: candidateStop };
+        setActiveTradePlan(nextPlan);
+        setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      }
+    }
+  }, [activeTradePlan, hasLivePrice, latestLtp, toast]);
 
   const playAlertTone = () => {
     const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
