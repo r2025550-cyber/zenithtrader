@@ -151,7 +151,7 @@ const Index = () => {
   const aiPanelTone = latestSignal?.action === "BUY" ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]" : latestSignal?.action === "WAIT" ? "border-warning/70" : highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25";
   const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
-  const dailyPnl = upstoxTodayPnl ?? history.reduce((sum, trade) => sum + parseCurrency(trade.pnl), 0);
+  const dailyPnl = upstoxTodayPnl ?? 0;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
   const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
