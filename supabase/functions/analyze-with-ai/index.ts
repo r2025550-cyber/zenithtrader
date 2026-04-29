@@ -21,11 +21,12 @@ function buildRuleContext(latest: any, history: any[]) {
   const volume = num(latest?.raw_payload?.volume);
   const volumes = history.map((row) => num(row?.raw_payload?.volume)).filter((value): value is number => value !== null).slice(0, 5);
   const avg5Volume = volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
-  const volumeValid = volume !== null && avg5Volume !== null ? volume >= avg5Volume * 1.2 : false;
+  const volumeAvailable = volume !== null && avg5Volume !== null && volumes.length >= 2;
+  const volumeValid = volumeAvailable ? volume >= avg5Volume * 1.2 : null;
   const previous = history[1];
   const previousHigh = num(previous?.high_price);
   const previousLow = num(previous?.low_price);
-  const fakeBreakout = volumeValid ? false : Boolean((ltp !== null && previousHigh !== null && ltp > previousHigh) || (ltp !== null && previousLow !== null && ltp < previousLow));
+  const fakeBreakout = volumeAvailable && volumeValid === false ? Boolean((ltp !== null && previousHigh !== null && ltp > previousHigh) || (ltp !== null && previousLow !== null && ltp < previousLow)) : false;
   const movePct = pctMove(ltp, open ?? close);
   const overextended = movePct !== null && Math.abs(movePct) > 1.5;
   const created = new Date(latest?.source_timestamp ?? latest?.created_at ?? Date.now());
@@ -46,13 +47,13 @@ function buildRuleContext(latest: any, history: any[]) {
   return {
     rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral" },
     guidance: [
-      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : "Volume/trap filter evaluated.",
+      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? "Volume +20% filter confirmed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixRising ? "India VIX rising: reduce position size alert." : "India VIX not rising or unavailable.",
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
       noTradeRange ? "No-Trade Zone: 60-minute range is under 40 points." : "Range filter clear or awaiting more history.",
       divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
-      pcr === null ? "PCR unavailable from current Upstox payload; do not infer option-chain bias." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
+      pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
     ],
   };
 }
@@ -80,7 +81,7 @@ serve(async (req) => {
 
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
-- Valid signal requires current volume at least 20% above the 5-period average.
+- Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
 - If India VIX is rising, reduce position size in the reason.
 - 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
 - If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
@@ -107,7 +108,7 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
