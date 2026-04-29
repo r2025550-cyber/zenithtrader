@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { z } from "https://esm.sh/zod@3.25.76";
 import { corsHeaders, getAuthenticatedClients, json } from "../_shared/trading.ts";
 
-const BodySchema = z.discriminatedUnion("provider", [
+const BodySchema = z.union([
   z.object({
     provider: z.literal("upstox"),
     upstoxApiKey: z.string().trim().min(8).max(500),
@@ -10,7 +10,11 @@ const BodySchema = z.discriminatedUnion("provider", [
     redirectUri: z.string().trim().url().max(1000).optional(),
   }),
   z.object({
-    provider: z.union([z.literal("openai"), z.literal("gemini")]),
+    provider: z.literal("openai"),
+    openaiApiKey: z.string().trim().min(8).max(1000),
+  }),
+  z.object({
+    provider: z.literal("gemini"),
     openaiApiKey: z.string().trim().min(8).max(1000),
   }),
 ]);
