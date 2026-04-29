@@ -91,7 +91,7 @@ serve(async (req) => {
     const requiredCash = optionLtp * quantity;
     const availableCash = await getAvailableCash(headers);
     if (requiredCash > availableCash) {
-      return json({ error: "Low Margin", details: `Required approx ₹${requiredCash.toFixed(0)} for ${quantity} qty, available ₹${availableCash.toFixed(0)}.` }, 400);
+      return json({ success: false, error: "Low Margin", details: `Required approx ₹${requiredCash.toFixed(0)} for ${quantity} qty, available ₹${availableCash.toFixed(0)}.`, quantity, availableCash, requiredCash, optionLtp, instrument: option });
     }
 
     const orderPayload = {
