@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -64,9 +65,9 @@ const storedValue = (key: string, fallback = "") => (typeof window === "undefine
 const todayKey = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
-type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
+type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null } }; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
