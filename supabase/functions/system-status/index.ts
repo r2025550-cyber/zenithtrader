@@ -20,6 +20,13 @@ async function checkUpstox(accessToken?: string | null) {
   return ok("Access token is valid and ready for tomorrow's market open.", { status: response.status });
 }
 
+async function clearUpstoxToken(adminClient: any, userId: string) {
+  await adminClient
+    .from("trading_api_settings")
+    .update({ upstox_access_token: null, upstox_refresh_token: null, token_expires_at: null })
+    .eq("user_id", userId);
+}
+
 async function checkGemini(apiKey?: string | null) {
   if (!apiKey) return fail("Gemini API key is missing. Save it in API Settings.");
 
@@ -53,6 +60,7 @@ serve(async (req) => {
     }
 
     const [upstox, gemini] = await Promise.all([checkUpstox(settings?.upstox_access_token), checkGemini(settings?.openai_api_key)]);
+    if (!upstox.ok && JSON.stringify(upstox.details ?? {}).includes("UDAPI100050")) await clearUpstoxToken(auth.adminClient, auth.user.id);
 
     return json({ ready: upstox.ok && gemini.ok, upstox, gemini, checkedAt: new Date().toISOString() });
   } catch (error) {
