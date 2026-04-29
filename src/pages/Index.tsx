@@ -47,17 +47,19 @@ const TRADE_COUNT_STORAGE_KEY = "zenith-trade-count-date";
 const ACTIVE_TRADE_STORAGE_KEY = "zenith-active-trade-date";
 const ACTIVE_TRADE_PLAN_STORAGE_KEY = "zenith-active-trade-plan-date";
 const KILL_SWITCH_STORAGE_KEY = "zenith-kill-switch-date";
+const COOLDOWN_UNTIL_STORAGE_KEY = "zenith-cooldown-until";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
+const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_TARGET_POINTS = 40;
-const DEFAULT_SL_POINTS = 20;
-const TSL_STEP_POINTS = 10;
-const EXTENDED_TARGET_POINTS = 20;
+const DEFAULT_PREMIUM_TARGET_POINTS = 25;
+const DEFAULT_PREMIUM_SL_POINTS = 15;
+const PREMIUM_TSL_STEP = 5;
+const COOLDOWN_MS = 15 * 60 * 1000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -107,15 +109,15 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
-type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; extendedTargetActive?: boolean; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; quantity: number; availableCash: number; requiredCash: number };
+type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string };
 
 const calculateVolatilityPoints = (points: MarketPoint[]) => {
   const recent = points.slice(-12).map((point) => point.value);
-  if (recent.length < 4) return { targetPoints: DEFAULT_TARGET_POINTS, slPoints: DEFAULT_SL_POINTS };
+  if (recent.length < 4) return { targetPoints: DEFAULT_PREMIUM_TARGET_POINTS, slPoints: DEFAULT_PREMIUM_SL_POINTS };
   const range = Math.max(...recent) - Math.min(...recent);
-  const targetPoints = Math.max(DEFAULT_TARGET_POINTS, Math.ceil(range / TSL_STEP_POINTS) * TSL_STEP_POINTS);
-  const slPoints = Math.max(DEFAULT_SL_POINTS, Math.ceil((targetPoints / 2) / TSL_STEP_POINTS) * TSL_STEP_POINTS);
+  const targetPoints = Math.max(DEFAULT_PREMIUM_TARGET_POINTS, Math.ceil(range / 20) * 5);
+  const slPoints = Math.max(DEFAULT_PREMIUM_SL_POINTS, Math.ceil(targetPoints * 0.6));
   return { targetPoints, slPoints };
 };
 
@@ -141,6 +143,7 @@ const Index = () => {
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
   const [maxDailyLoss, setMaxDailyLoss] = useState(() => storedValue(MAX_DAILY_LOSS_STORAGE_KEY, String(DAILY_STOP_LOSS)));
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
+  const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
@@ -152,6 +155,7 @@ const Index = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
 
   const latestLtp = Number(latestData?.ltp);
@@ -190,10 +194,12 @@ const Index = () => {
   const maxTradesHit = executedTrades >= MAX_TRADES_PER_DAY;
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
-  const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
-  const currentTradePnlPoints = activeTradePlan && hasLivePrice ? (activeTradePlan.action === "BUY" ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp) : 0;
+  const cooldownActive = cooldownUntil > Date.now();
+  const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
+  const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
-  const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason);
+  const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -225,13 +231,13 @@ const Index = () => {
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
-      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI trading paused for ${cooldownRemainingMinutes} more minutes.` : targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+  }, [activeTrade, aiEnabled, cooldownActive, cooldownRemainingMinutes, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   useEffect(() => {
-    if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || activeTrade) return;
+    if (!latestSignal || latestSignal.action !== "BUY" || activeTrade) return;
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
@@ -241,51 +247,45 @@ const Index = () => {
   }, [activeTrade, latestSignal, marketHistory]);
 
   useEffect(() => {
-    if (!activeTradePlan || !hasLivePrice || activeTradePlan.exitAlertReason) return;
-    const isBuy = activeTradePlan.action === "BUY";
-    const profitPoints = isBuy ? latestLtp - activeTradePlan.entry : activeTradePlan.entry - latestLtp;
-    const stopHit = isBuy ? latestLtp <= activeTradePlan.stopLoss : latestLtp >= activeTradePlan.stopLoss;
-    const targetHit = isBuy ? latestLtp >= activeTradePlan.target : latestLtp <= activeTradePlan.target;
+    if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
+    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
+    const stopHit = activeTradePlan.currentPremium <= (activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss);
+    const targetHit = activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target);
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
+      setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-      return;
-    }
-    if (targetHit && activeTradePlan.extendedTargetActive) {
-      const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
-      setActiveTradePlan(nextPlan);
-      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      emergencyExit(false);
       return;
     }
     if (targetHit) {
-      const nextTarget = isBuy ? activeTradePlan.target + EXTENDED_TARGET_POINTS : activeTradePlan.target - EXTENDED_TARGET_POINTS;
-      const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.target, target: nextTarget, extendedTargetActive: true };
+      const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
+      setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
-      setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
-      setUserTargetPoints(String(Math.abs(nextPlan.target - nextPlan.entry)));
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-      toast({ title: "Trailing target extended", description: `Initial target converted to TSL. New extended target: ${nextTarget.toFixed(2)}.` });
+      emergencyExit(false);
       return;
     }
-    if (profitPoints >= TSL_STEP_POINTS) {
-      const lockedSteps = Math.floor(profitPoints / TSL_STEP_POINTS);
-      const candidateStop = isBuy ? activeTradePlan.entry + (lockedSteps - 1) * TSL_STEP_POINTS : activeTradePlan.entry - (lockedSteps - 1) * TSL_STEP_POINTS;
-      const shouldTrail = isBuy ? candidateStop > activeTradePlan.stopLoss : candidateStop < activeTradePlan.stopLoss;
-      if (shouldTrail) {
-        const nextPlan = { ...activeTradePlan, stopLoss: candidateStop };
+    if (premiumProfit >= PREMIUM_TSL_STEP) {
+      const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
+      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
+      if (candidateStop > (activeTradePlan.stopLossPremium ?? 0)) {
+        const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.abs(nextPlan.entry - nextPlan.stopLoss)));
+        setUserSlPoints(String(Math.max(0, nextPlan.entryPremium - candidateStop)));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+        syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
     }
-  }, [activeTradePlan, hasLivePrice, latestLtp, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTradePlan]);
 
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
-    const nextPlan = { ...activeTradePlan, target: activeTradePlan.action === "BUY" ? activeTradePlan.entry + points : activeTradePlan.entry - points, extendedTargetActive: false };
+    const nextPlan = { ...activeTradePlan, targetPremium: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, target: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
   };
@@ -294,9 +294,10 @@ const Index = () => {
     setUserSlPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
-    const nextPlan = { ...activeTradePlan, stopLoss: activeTradePlan.action === "BUY" ? activeTradePlan.entry - points : activeTradePlan.entry + points };
+    const nextPlan = { ...activeTradePlan, stopLossPremium: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), stopLoss: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
   };
 
   const playAlertTone = () => {
@@ -327,6 +328,38 @@ const Index = () => {
       if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
     };
   }, [exitAlertActive]);
+
+  useEffect(() => {
+    if (!exitFlashUntil) return;
+    const timeout = setTimeout(() => setExitFlashUntil(0), Math.max(0, exitFlashUntil - Date.now()));
+    return () => clearTimeout(timeout);
+  }, [exitFlashUntil]);
+
+  useEffect(() => {
+    if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
+    const pollPremium = () => {
+      invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
+        .then(({ premium }) => {
+          setActiveTradePlan((current) => {
+            if (!current) return current;
+            const nextPlan = { ...current, currentPremium: premium };
+            localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+            return nextPlan;
+          });
+        })
+        .catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to refresh option premium."));
+    };
+    pollPremium();
+    const timer = setInterval(pollPremium, UPSTOX_POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTradePlan?.instrumentToken, activeTradePlan?.exitAlertReason]);
+
+  useEffect(() => {
+    if (!activeTrade || getIndiaMarketMinute(marketClock) < AUTO_SQUAREOFF_MINUTE) return;
+    emergencyExit(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrade, marketClock]);
 
   const showRetryToast = (message: string) => {
     const now = Date.now();
@@ -399,6 +432,15 @@ const Index = () => {
     } finally {
       clearTimeout(timeoutId!);
     }
+  };
+
+  const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
+    if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
+    await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
+    const nextPlan = { ...plan, lastSyncedStopLossPremium: plan.stopLossPremium };
+    setActiveTradePlan(nextPlan);
+    localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
   };
 
   const saveUpstoxSettings = async () => {
@@ -549,7 +591,7 @@ const Index = () => {
     setIsBusy(true);
     try {
       if (tradingBlocked) {
-        toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
+        toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
         return;
       }
       const liveMarket = await fetchLiveNifty(true);
@@ -569,15 +611,12 @@ const Index = () => {
         const volatilityPoints = calculateVolatilityPoints(marketHistory);
         const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
         const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
-        const isCallBias = ai.signal.action === "BUY";
-        const target = isCallBias ? liveSpot + targetPoints : liveSpot - targetPoints;
-        const stopLoss = isCallBias ? liveSpot - slPoints : liveSpot + slPoints;
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPoints, slPoints, target, stopLoss });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
         if (!liveOrder.success) {
           toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
           return;
         }
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target, stopLoss, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints };
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
         setUserTargetPoints(String(targetPoints));
         setUserSlPoints(String(slPoints));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
@@ -587,7 +626,7 @@ const Index = () => {
         localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
         localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
-        toast({ title: "LIVE ORDER PLACED", description: `${liveOrder.instrument.tradingSymbol} · ${liveOrder.quantity} qty sent to Upstox.` });
+        toast({ title: "LIVE ORDER + SERVER SL PLACED", description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.` });
         return;
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
@@ -601,11 +640,14 @@ const Index = () => {
   const emergencyExit = async (lockForDay = false) => {
     setIsBusy(true);
     try {
-      await invokeFunction("emergency-exit", { lockForDay });
+      await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
+      const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      setCooldownUntil(nextCooldown);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
       localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
+      localStorage.setItem(COOLDOWN_UNTIL_STORAGE_KEY, String(nextCooldown));
       if (lockForDay) {
         const today = todayKey();
         setKillSwitchDate(today);
@@ -613,7 +655,7 @@ const Index = () => {
         localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
         localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
       }
-      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox." });
+      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox. New entries are blocked for 15 minutes." });
     } catch (error) {
       toast({ title: "Emergency exit failed", description: error instanceof Error ? error.message : "Please check Upstox and retry.", variant: "destructive" });
     } finally {
@@ -623,7 +665,7 @@ const Index = () => {
 
   const toggleAiTrading = async (checked: boolean) => {
     if (checked && tradingBlocked) {
-      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI entry blocked for ${cooldownRemainingMinutes} more minutes.` : "AI trading is disabled for the rest of the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
       return;
     }
     setIsBusy(true);
@@ -842,13 +884,13 @@ const Index = () => {
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
                 <div className="space-y-2"><Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">Trading Lot Size</Label><Input id="trading-lot-size" type="number" min="1" step="1" inputMode="numeric" value={tradingLotSize} onChange={(event) => setTradingLotSize(event.target.value)} className="border-border bg-surface" /><p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p></div>
                 {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
-                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Target Point</Label><Input id="user-target-points" type="number" min="0" step="1" inputMode="numeric" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Loss Point / TSL</Label><Input id="user-sl-points" type="number" min="0" step="1" inputMode="numeric" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
+                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Points</Label><Input id="user-target-points" type="number" min="0" step="1" inputMode="numeric" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Points</Label><Input id="user-sl-points" type="number" min="0" step="1" inputMode="numeric" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
-                {(targetAchieved || hardKillActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
+                {(targetAchieved || hardKillActive || cooldownActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{cooldownActive ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.` : targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
                 <Button disabled={!session || isBusy || tradingBlocked} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
                 <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
-                {activeTradePlan && <div className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm font-semibold">{exitAlertActive ? (activeTradePlan.exitAlertReason === "FINAL_TARGET" ? "FINAL TARGET HIT — EXIT NOW" : "TRAILING SL HIT — EXIT NOW") : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}</span><div className="text-left sm:text-right"><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p><span className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</span></div></div><p className="mt-2 text-xs font-semibold text-muted-foreground">T {activeTradePlan.target.toFixed(2)} / TSL {activeTradePlan.stopLoss.toFixed(2)} · P/L {currentTradePnlPoints.toFixed(2)} pts{activeTradePlan.extendedTargetActive ? " · Extended target active" : ""}</p></div>}
+                {activeTradePlan && <div className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm font-semibold">{exitAlertActive ? (activeTradePlan.exitAlertReason === "FINAL_TARGET" ? "FINAL TARGET HIT — EXIT NOW" : "TRAILING SL HIT — EXIT NOW") : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}</span><div className="text-left sm:text-right"><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p><span className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</span></div></div><p className="mt-2 text-xs font-semibold text-muted-foreground">Premium ₹{activeTradePlan.currentPremium?.toFixed(2) ?? activeTradePlan.entryPremium?.toFixed(2) ?? "—"} · Target ₹{(activeTradePlan.targetPremium ?? activeTradePlan.target).toFixed(2)} / Server TSL ₹{(activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss).toFixed(2)} · P/L ₹{currentTradePnlPoints.toFixed(2)}</p></div>}
               </div>
             </section>
 
@@ -864,7 +906,7 @@ const Index = () => {
 
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
             <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Daily Limit</p><h2 className="text-xl font-semibold">Risk Guardrails</h2></div><ShieldCheck className="h-6 w-6 text-primary" /></div>
-            <div className="space-y-5"><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Max Trades</p><p className="mt-1 text-sm font-semibold text-foreground">Trades Remaining: {tradesRemaining}/4</p></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="mt-1 text-sm font-semibold text-loss">Hard lock at -₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Trailing Stop Loss</p><p className="mt-1 text-sm font-semibold text-foreground">Moves every 10 favorable points; target becomes TSL, then extends +20 points.</p></div><div className="grid grid-cols-2 gap-3"><div className="rounded-md border border-border bg-surface p-3"><Gauge className="mb-2 h-5 w-5 text-warning" /><p className="text-xs text-muted-foreground">Used Today</p><p className="font-bold">{executedTrades} / {MAX_TRADES_PER_DAY}</p></div><div className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}><IndianRupee className="mb-2 h-5 w-5 text-loss" /><p className="text-xs text-muted-foreground">Today's P&L</p><p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>₹{dailyPnl.toLocaleString("en-IN")}</p></div></div></div>
+            <div className="space-y-5"><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Max Trades</p><p className="mt-1 text-sm font-semibold text-foreground">Trades Remaining: {tradesRemaining}/4</p></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="mt-1 text-sm font-semibold text-loss">Hard lock at -₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Premium Server TSL</p><p className="mt-1 text-sm font-semibold text-foreground">Server SL-M is placed immediately and modified every ₹5 favorable premium move.</p></div><div className="grid grid-cols-2 gap-3"><div className="rounded-md border border-border bg-surface p-3"><Gauge className="mb-2 h-5 w-5 text-warning" /><p className="text-xs text-muted-foreground">Used Today</p><p className="font-bold">{executedTrades} / {MAX_TRADES_PER_DAY}</p></div><div className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}><IndianRupee className="mb-2 h-5 w-5 text-loss" /><p className="text-xs text-muted-foreground">Today's P&L</p><p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>₹{dailyPnl.toLocaleString("en-IN")}</p></div></div></div>
           </section>
         </div>
       </section>

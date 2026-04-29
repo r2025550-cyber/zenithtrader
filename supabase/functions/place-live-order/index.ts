@@ -10,6 +10,8 @@ const BodySchema = z.object({
   spotPrice: z.number().positive(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
+  targetPremiumPoints: z.number().positive().optional(),
+  stopLossPremiumPoints: z.number().positive().optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
@@ -75,6 +77,17 @@ async function getOptionLtp(headers: HeadersInit, instrumentToken: string) {
   return numberFrom(firstNode(payload)?.last_price, firstNode(payload)?.ltp, firstNode(payload)?.lastPrice) ?? 0;
 }
 
+async function placeOrder(headers: HeadersInit, orderPayload: Record<string, unknown>) {
+  const orderResponse = await fetch("https://api.upstox.com/v2/order/place", { method: "POST", headers, body: JSON.stringify(orderPayload) });
+  const orderResult = await orderResponse.json().catch(() => ({}));
+  if (!orderResponse.ok) throw new Error(`Order HTTP ${orderResponse.status}: ${JSON.stringify(orderResult)}`);
+  return orderResult;
+}
+
+function readOrderId(payload: Record<string, unknown>) {
+  return String(payload?.data?.order_id ?? payload?.data?.orderId ?? payload?.order_id ?? payload?.orderId ?? "");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -90,6 +103,10 @@ serve(async (req) => {
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
     const option = await resolveAtmOption(headers, parsed.data.spotPrice, parsed.data.action);
     const optionLtp = await getOptionLtp(headers, option.instrumentToken);
+    const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
+    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
+    const targetPremium = optionLtp + targetPremiumPoints;
+    const stopLossPremium = Math.max(0.05, optionLtp - stopLossPremiumPoints);
     const requiredCash = optionLtp * quantity;
     const availableCash = await getAvailableCash(headers);
     if (requiredCash > availableCash) {
@@ -109,11 +126,23 @@ serve(async (req) => {
       trigger_price: 0,
       is_amo: false,
     };
-    const orderResponse = await fetch("https://api.upstox.com/v2/order/place", { method: "POST", headers, body: JSON.stringify(orderPayload) });
-    const orderResult = await orderResponse.json().catch(() => ({}));
-    if (!orderResponse.ok) throw new Error(`Order HTTP ${orderResponse.status}: ${JSON.stringify(orderResult)}`);
+    const orderResult = await placeOrder(headers, orderPayload);
+    const slOrderPayload = {
+      quantity,
+      product: "D",
+      validity: "DAY",
+      price: 0,
+      tag: "zenith-server-sl",
+      instrument_token: option.instrumentToken,
+      order_type: "SL-M",
+      transaction_type: "SELL",
+      disclosed_quantity: 0,
+      trigger_price: Number(stopLossPremium.toFixed(2)),
+      is_amo: false,
+    };
+    const slOrderResult = await placeOrder(headers, slOrderPayload);
 
-    return json({ success: true, order: orderResult, instrument: option, quantity, availableCash, requiredCash, optionLtp });
+    return json({ success: true, order: orderResult, slOrder: slOrderResult, slOrderId: readOrderId(slOrderResult), instrument: option, instrumentToken: option.instrumentToken, quantity, availableCash, requiredCash, optionLtp, entryPremium: optionLtp, targetPremium, stopLossPremium, targetPremiumPoints, stopLossPremiumPoints });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Live order placement failed" }, 500);
   }
