@@ -331,9 +331,12 @@ const Index = () => {
     const pollPremium = () => {
       invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
         .then(({ premium }) => {
-          const nextPlan = { ...activeTradePlan, currentPremium: premium };
-          setActiveTradePlan(nextPlan);
-          localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+          setActiveTradePlan((current) => {
+            if (!current) return current;
+            const nextPlan = { ...current, currentPremium: premium };
+            localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+            return nextPlan;
+          });
         })
         .catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to refresh option premium."));
     };
