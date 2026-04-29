@@ -405,7 +405,7 @@ const Index = () => {
       await fetchLiveNifty(true);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
-      toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
+      toast({ title: "Execute cycle sent", description: `Trading quantity ${ai.signal.effectiveTradingQuantity ?? normalizedTradingQuantity} was applied for this AI cycle.` });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
     } finally {
