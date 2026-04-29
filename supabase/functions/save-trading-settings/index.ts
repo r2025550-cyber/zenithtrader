@@ -53,10 +53,6 @@ serve(async (req) => {
         token_expires_at: existing?.token_expires_at,
       };
 
-    if (!row.upstox_api_key || !row.upstox_api_secret || !row.openai_api_key) {
-      return json({ error: "Save the missing provider credentials first before updating this field independently." }, 400);
-    }
-
     const { error } = await auth.adminClient.from("trading_api_settings").upsert(row, { onConflict: "user_id" });
 
     if (error) throw error;
