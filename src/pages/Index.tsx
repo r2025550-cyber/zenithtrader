@@ -214,13 +214,13 @@ const Index = () => {
     }
   };
 
-  const saveGeminiSettings = async (event: FormEvent) => {
+  const saveOpenAISettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
     try {
       await invokeFunction("save-trading-settings", { provider: "openai", openaiApiKey: settings.openaiApiKey });
       setSettings((prev) => ({ ...prev, openaiApiKey: "" }));
-      const status = await retestGemini(false).catch(() => null);
+      const status = await retestOpenAI(false).catch(() => null);
       toast({ title: status?.gemini.ok ? "OpenAI verified" : "OpenAI key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
     } catch (error) {
       toast({ title: "Unable to save OpenAI", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
@@ -319,7 +319,7 @@ const Index = () => {
     }
   };
 
-  const retestGemini = async (showToast = true) => {
+  const retestOpenAI = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
       const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
@@ -458,7 +458,7 @@ const Index = () => {
               <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
               <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={saveGeminiSettings} className="space-y-5">
+            <form onSubmit={saveOpenAISettings} className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
@@ -532,7 +532,7 @@ const Index = () => {
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
                     <span>OpenAI GPT-4o Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestGemini()}>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestOpenAI()}>
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
                   </Button>
                 </div>
