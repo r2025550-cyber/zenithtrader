@@ -46,6 +46,7 @@ type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type GeminiStatus = { gemini: PulseCheck; checkedAt: string };
+type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 
 const Index = () => {
   const { toast } = useToast();
@@ -144,16 +145,30 @@ const Index = () => {
     return data;
   };
 
-  const saveSettings = async (event: FormEvent) => {
+  const saveUpstoxSettings = async () => {
+    setIsBusy(true);
+    try {
+      await invokeFunction("save-trading-settings", { provider: "upstox", upstoxApiKey: settings.upstoxApiKey, upstoxApiSecret: settings.upstoxApiSecret, redirectUri: settings.redirectUri });
+      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
+      toast({ title: "Upstox keys saved", description: "Existing Gemini settings were left unchanged. Complete OAuth if the token needs reconnecting." });
+      await retestUpstox(false).catch(() => null);
+    } catch (error) {
+      toast({ title: "Unable to save Upstox", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const saveGeminiSettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { ...settings, openaiApiKey: settings.geminiApiKey });
-      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "", geminiApiKey: "" }));
-      const status = await checkSystemStatus(false).catch(() => null);
-      toast({ title: status?.ready ? "System Ready (Market Closed)" : "Settings secured", description: status?.ready ? "Upstox and Gemini 1.5 Flash are both verified." : "API credentials were stored in the protected backend table." });
+      await invokeFunction("save-trading-settings", { provider: "gemini", openaiApiKey: settings.geminiApiKey });
+      setSettings((prev) => ({ ...prev, geminiApiKey: "" }));
+      const status = await retestGemini(false).catch(() => null);
+      toast({ title: status?.gemini.ok ? "Gemini verified" : "Gemini key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
     } catch (error) {
-      toast({ title: "Unable to save settings", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({ title: "Unable to save Gemini", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }
@@ -231,7 +246,25 @@ const Index = () => {
     }
   };
 
-  const retestGemini = async () => {
+  const retestUpstox = async (showToast = true) => {
+    setIsCheckingStatus(true);
+    try {
+      const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
+      setSystemStatus((prev) => {
+        const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test Gemini to confirm Gemini API status." };
+        return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
+      });
+      if (showToast) toast({ title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth", description: status.upstox.message, variant: status.upstox.ok ? "default" : "destructive" });
+      return status;
+    } catch (error) {
+      if (showToast) toast({ title: "Upstox re-test failed", description: error instanceof Error ? error.message : "Unable to test Upstox.", variant: "destructive" });
+      throw error;
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  const retestGemini = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
       const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
@@ -239,13 +272,11 @@ const Index = () => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
         return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
-      toast({
-        title: status.gemini.ok ? "Gemini connected" : "Gemini still failing",
-        description: status.gemini.message,
-        variant: status.gemini.ok ? "default" : "destructive",
-      });
+      if (showToast) toast({ title: status.gemini.ok ? "Gemini connected" : "Gemini still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
+      return status;
     } catch (error) {
-      toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      if (showToast) toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      throw error;
     } finally {
       setIsCheckingStatus(false);
     }
@@ -349,19 +380,19 @@ const Index = () => {
               <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
               <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={saveSettings} className="space-y-5">
+            <form onSubmit={saveGeminiSettings} className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-key">Upstox API Key</Label>
-                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
+                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-secret">Upstox API Secret</Label>
-                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} required className="border-border bg-surface" />
+                  <Label htmlFor="upstox-api-secret" className="flex items-center gap-2">Upstox API Secret {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
+                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="gemini-api-key">Gemini API Key</Label>
-                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} required className="border-border bg-surface" />
+                  <Label htmlFor="gemini-api-key" className="flex items-center gap-2">Gemini API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Gemini verified" />}</Label>
+                  <Input id="gemini-api-key" type="text" autoComplete="off" placeholder="Enter Gemini API Key" value={settings.geminiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, geminiApiKey: event.target.value }))} className="border-border bg-surface" />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
@@ -371,7 +402,8 @@ const Index = () => {
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
-                <Button disabled={isBusy} type="submit" variant="trading">Save Keys Securely</Button>
+                <Button disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret} type="button" variant="terminal" onClick={saveUpstoxSettings}>Save Upstox</Button>
+                <Button disabled={isBusy || !settings.geminiApiKey} type="submit" variant="trading">Save Gemini</Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
@@ -405,9 +437,14 @@ const Index = () => {
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className={`rounded-md border p-4 ${systemStatus?.upstox?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
-                <div className="mb-2 flex items-center gap-2 font-semibold">
-                  {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
-                  <span>Upstox API Status</span>
+                <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    <span>Upstox API Status</span>
+                  </div>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestUpstox()}>
+                    <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Upstox
+                  </Button>
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}</p>
               </div>
@@ -417,7 +454,7 @@ const Index = () => {
                     {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
                     <span>Gemini 1.5 Flash Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={retestGemini}>
+                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestGemini()}>
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Gemini
                   </Button>
                 </div>
