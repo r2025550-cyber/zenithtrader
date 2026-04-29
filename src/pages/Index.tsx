@@ -399,6 +399,15 @@ const Index = () => {
     }
   };
 
+  const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
+    if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
+    await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
+    const nextPlan = { ...plan, lastSyncedStopLossPremium: plan.stopLossPremium };
+    setActiveTradePlan(nextPlan);
+    localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+  };
+
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
     try {
