@@ -120,6 +120,26 @@ const Index = () => {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const clock = setInterval(() => setMarketClock(new Date()), 30_000);
+    return () => clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(AI_ARMED_STORAGE_KEY, String(aiEnabled));
+  }, [aiEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem(TRADING_QUANTITY_STORAGE_KEY, tradingQuantity);
+  }, [tradingQuantity]);
+
+  const showRetryToast = (message: string) => {
+    const now = Date.now();
+    if (now - retryToastRef.current < 20_000) return;
+    retryToastRef.current = now;
+    toast({ title: "Retrying Connection...", description: message });
+  };
+
   const reasoning = useMemo(() => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
@@ -308,20 +328,20 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     await fetchLiveNifty();
-    const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai");
+    const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity });
     setLatestSignal(ai.signal);
   };
 
   const toggleAiTrading = async (checked: boolean) => {
     setIsBusy(true);
     try {
-      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode });
+      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingQuantity: normalizedTradingQuantity });
       setAiEnabled(checked);
       if (checked) await runTradingCycle();
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Server-side Nifty fetch and AI analysis will run every minute while this page is open." : "Automation is paused." });
     } catch (error) {
-      setAiEnabled(false);
-      toast({ title: "AI trading update failed", description: error instanceof Error ? error.message : "Check credentials and OAuth status.", variant: "destructive" });
+      if (checked) setAiEnabled(true);
+      showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
     } finally {
       setIsBusy(false);
     }
