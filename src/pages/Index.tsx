@@ -185,13 +185,14 @@ const Index = () => {
       const today = todayKey();
       setKillSwitchDate(today);
       localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
+      if (activeTrade) emergencyExit(true);
     }
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
       toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
     }
-  }, [aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+  }, [activeTrade, aiEnabled, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   const showRetryToast = (message: string) => {
     const now = Date.now();
@@ -458,7 +459,7 @@ const Index = () => {
 
   const toggleAiTrading = async (checked: boolean) => {
     if (checked && tradingBlocked) {
-      toast({ title: targetAchieved ? "Target Achieved" : "Hard Kill-Switch Active", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
+      toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "AI trading is disabled for the rest of the day.", variant: targetAchieved ? "default" : "destructive" });
       return;
     }
     setIsBusy(true);
