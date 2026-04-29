@@ -42,7 +42,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
-    const target = body?.target === "gemini" ? "gemini" : "all";
+    const target = body?.target === "gemini" || body?.target === "upstox" ? body.target : "all";
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error ?? json({ error: "Please sign in before checking system status." }, 401);
 
@@ -57,6 +57,12 @@ serve(async (req) => {
     if (target === "gemini") {
       const gemini = await checkGemini(settings?.openai_api_key);
       return json({ gemini, checkedAt: new Date().toISOString() });
+    }
+
+    if (target === "upstox") {
+      const upstox = await checkUpstox(settings?.upstox_access_token);
+      if (!upstox.ok && JSON.stringify(upstox.details ?? {}).includes("UDAPI100050")) await clearUpstoxToken(auth.adminClient, auth.user.id);
+      return json({ upstox, checkedAt: new Date().toISOString() });
     }
 
     const [upstox, gemini] = await Promise.all([checkUpstox(settings?.upstox_access_token), checkGemini(settings?.openai_api_key)]);
