@@ -76,7 +76,10 @@ const datedStorageValue = (key: string, fallback = "0") => {
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
 const parseActiveTradePlan = () => {
   try {
-    const [date, payload] = storedValue(ACTIVE_TRADE_PLAN_STORAGE_KEY).split(":", 2);
+    const stored = storedValue(ACTIVE_TRADE_PLAN_STORAGE_KEY);
+    const separator = stored.indexOf(":");
+    const date = separator >= 0 ? stored.slice(0, separator) : "";
+    const payload = separator >= 0 ? stored.slice(separator + 1) : "";
     return date === todayKey() && payload ? JSON.parse(payload) : null;
   } catch {
     return null;
@@ -166,6 +169,7 @@ const Index = () => {
   const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
   const dailyPnl = upstoxTodayPnl ?? 0;
+  const availableCash = toNumber(latestData?.raw_payload?.account?.margin?.availableCash) ?? 0;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
   const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
@@ -173,6 +177,7 @@ const Index = () => {
   const targetAchieved = normalizedDailyTarget > 0 && dailyPnl >= normalizedDailyTarget;
   const hardKillActive = killSwitchDate === todayKey() || dailyPnl <= -DAILY_STOP_LOSS;
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit;
+  const exitAlertActive = Boolean(activeTradePlan && hasLivePrice && (latestLtp >= activeTradePlan.target || latestLtp <= activeTradePlan.stopLoss));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
