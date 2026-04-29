@@ -10,7 +10,7 @@ const BodySchema = z.discriminatedUnion("provider", [
     redirectUri: z.string().trim().url().max(1000).optional(),
   }),
   z.object({
-    provider: z.literal("gemini"),
+    provider: z.union([z.literal("openai"), z.literal("gemini")]),
     openaiApiKey: z.string().trim().min(8).max(1000),
   }),
 ]);
