@@ -218,12 +218,12 @@ const Index = () => {
     event.preventDefault();
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { provider: "gemini", openaiApiKey: settings.geminiApiKey });
-      setSettings((prev) => ({ ...prev, geminiApiKey: "" }));
+      await invokeFunction("save-trading-settings", { provider: "openai", openaiApiKey: settings.openaiApiKey });
+      setSettings((prev) => ({ ...prev, openaiApiKey: "" }));
       const status = await retestGemini(false).catch(() => null);
-      toast({ title: status?.gemini.ok ? "Gemini verified" : "Gemini key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
+      toast({ title: status?.gemini.ok ? "OpenAI verified" : "OpenAI key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
     } catch (error) {
-      toast({ title: "Unable to save Gemini", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({ title: "Unable to save OpenAI", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }
@@ -322,15 +322,15 @@ const Index = () => {
   const retestGemini = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<GeminiStatus>("system-status", { target: "gemini" });
+      const status = await invokeFunction<OpenAIStatus>("system-status", { target: "openai" });
       setSystemStatus((prev) => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
         return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
-      if (showToast) toast({ title: status.gemini.ok ? "Gemini connected" : "Gemini still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
+      if (showToast) toast({ title: status.gemini.ok ? "OpenAI connected" : "OpenAI still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
       return status;
     } catch (error) {
-      if (showToast) toast({ title: "Gemini re-test failed", description: error instanceof Error ? error.message : "Unable to test Gemini.", variant: "destructive" });
+      if (showToast) toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
       throw error;
     } finally {
       setIsCheckingStatus(false);
