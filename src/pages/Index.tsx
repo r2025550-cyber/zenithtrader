@@ -468,11 +468,12 @@ const Index = () => {
         toast({ title: targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: "Trading activity is stopped for the day.", variant: targetAchieved ? "default" : "destructive" });
         return;
       }
-      await fetchLiveNifty(true);
+      const liveMarket = await fetchLiveNifty(true);
+      const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
-        if (!hasLivePrice) {
+        if (!Number.isFinite(liveSpot)) {
           toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
           return;
         }
@@ -480,10 +481,10 @@ const Index = () => {
           toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
           return;
         }
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: latestLtp, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize });
         const targetPoints = Number(userTargetPoints) || 40;
         const slPoints = Number(userSlPoints) || 20;
-        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: latestLtp, target: latestLtp + targetPoints, stopLoss: latestLtp - slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
+        const plan = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveSpot + targetPoints, stopLoss: liveSpot - slPoints, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity };
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
