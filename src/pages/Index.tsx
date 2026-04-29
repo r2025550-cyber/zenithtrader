@@ -255,8 +255,8 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async () => {
-    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data");
+  const fetchLiveNifty = async (executionIntent = false) => {
+    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingQuantity: normalizedTradingQuantity, executionIntent });
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
     if (Number.isFinite(value)) {
@@ -335,7 +335,9 @@ const Index = () => {
   const executeTradingSignal = async () => {
     setIsBusy(true);
     try {
-      await runTradingCycle();
+      await fetchLiveNifty(true);
+      const ai = await invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity, executionIntent: true });
+      setLatestSignal(ai.signal);
       toast({ title: "Execute cycle sent", description: `Trading quantity ${normalizedTradingQuantity} was included with the AI execution payload.` });
     } catch (error) {
       showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
