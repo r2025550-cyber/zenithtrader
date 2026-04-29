@@ -64,6 +64,15 @@ const isWithinMarketHours = (date = new Date()) => {
 const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
 const todayKey = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const parseCurrency = (value: string) => Number(value.replace(/[^0-9.-]/g, "")) || 0;
+const toNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+const formatMoney = (value: unknown) => {
+  const parsed = toNumber(value);
+  return parsed === null ? "—" : `₹${parsed.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+};
+const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
@@ -123,6 +132,11 @@ const Index = () => {
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
   const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
+  const pcrValue = toNumber(latestSignal?.ruleContext?.rules?.pcr ?? latestData?.raw_payload?.optionChain?.pcr);
+  const vixValue = toNumber(latestData?.raw_payload?.context?.indiaVix?.ltp);
+  const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(1, latestSignal.effectiveTradingQuantity ?? Math.floor(normalizedTradingQuantity / 2)) : normalizedTradingQuantity;
+  const aiPanelTone = latestSignal?.action === "BUY" ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]" : latestSignal?.action === "WAIT" ? "border-warning/70" : highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25";
+  const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
   const dailyPnl = history.reduce((sum, trade) => sum + parseCurrency(trade.pnl), 0);
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = Math.max(0, Number.parseInt(maxDailyLoss, 10) || 0);
