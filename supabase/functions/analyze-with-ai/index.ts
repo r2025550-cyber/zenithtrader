@@ -12,6 +12,12 @@ function pctMove(current: number | null, base: number | null) {
   return current !== null && base ? ((current - base) / base) * 100 : null;
 }
 
+function ema(values: number[], period: number) {
+  if (values.length < period) return null;
+  const multiplier = 2 / (period + 1);
+  return values.slice(1).reduce((avg, value) => value * multiplier + avg * (1 - multiplier), values[0]);
+}
+
 function buildRuleContext(latest: any, history: any[]) {
   const ltp = num(latest?.ltp);
   const open = num(latest?.open_price);
@@ -34,7 +40,9 @@ function buildRuleContext(latest: any, history: any[]) {
   const europeanOpenCaution = minutes >= 12 * 60 + 30 && minutes <= 13 * 60 + 30;
   const indiaVix = latest?.raw_payload?.context?.indiaVix;
   const prevVix = previous?.raw_payload?.context?.indiaVix;
-  const vixRising = num(indiaVix?.ltp) !== null && num(prevVix?.ltp) !== null ? Number(indiaVix.ltp) > Number(prevVix.ltp) : false;
+  const vixMovePct = pctMove(num(indiaVix?.ltp), num(prevVix?.ltp));
+  const vixRising = vixMovePct !== null ? vixMovePct > 0 : false;
+  const vixSizeCut = vixMovePct !== null && vixMovePct > 5;
   const sixtyMinuteRows = history.filter((row) => Date.now() - new Date(row.created_at).getTime() <= 60 * 60 * 1000);
   const rangeValues = sixtyMinuteRows.flatMap((row) => [num(row.high_price), num(row.low_price), num(row.ltp)]).filter((value): value is number => value !== null);
   const noTradeRange = rangeValues.length > 2 && Math.max(...rangeValues) - Math.min(...rangeValues) < 40;
@@ -43,9 +51,23 @@ function buildRuleContext(latest: any, history: any[]) {
   const heavyMoves = (latest?.raw_payload?.context?.heavyweights ?? []).map((quote: any) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
   const divergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
   const pcr = num(latest?.raw_payload?.optionChain?.pcr);
+  const chronological = [...history].reverse();
+  const prices = chronological.map((row) => num(row?.ltp)).filter((value): value is number => value !== null);
+  const ema9 = ema(prices, 9);
+  const ema21 = ema(prices, 21);
+  const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
+  const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
+  const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
+  const fifteenMinuteRows = history.filter((row) => Date.now() - new Date(row.created_at).getTime() <= 15 * 60 * 1000);
+  const oldest15 = fifteenMinuteRows[fifteenMinuteRows.length - 1];
+  const trend15MovePct = pctMove(ltp, num(oldest15?.ltp));
+  const trend15 = trend15MovePct === null ? "pending" : trend15MovePct > 0.08 ? "bullish" : trend15MovePct < -0.08 ? "bearish" : "flat";
+  const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
+  const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
+  const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
 
   return {
-    rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral" },
+    rules: { volumeValid, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${latest?.raw_payload?.volumeSource ?? "Upstox live feed"}.` : volume !== null ? "Volume received from Upstox but awaiting enough history for +20% comparison; treat as neutral, not failed." : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixRising ? "India VIX rising: reduce position size alert." : "India VIX not rising or unavailable.",
