@@ -374,17 +374,23 @@ const Index = () => {
   };
 
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+    if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session) {
-      intervalRef.current = setInterval(() => {
-        const refresh = aiEnabled ? runTradingCycle() : fetchLiveNifty();
-        refresh.catch((error) => {
-          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
-        });
-      }, 60_000);
+      marketIntervalRef.current = setInterval(() => {
+        fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
+      }, UPSTOX_POLL_INTERVAL_MS);
+      if (aiEnabled) {
+        aiIntervalRef.current = setInterval(() => {
+          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingQuantity: normalizedTradingQuantity }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+            .then((ai) => setLatestSignal(ai.signal))
+            .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
+        }, AI_REASONING_INTERVAL_MS);
+      }
     }
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+      if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, aiEnabled, normalizedTradingQuantity]);
