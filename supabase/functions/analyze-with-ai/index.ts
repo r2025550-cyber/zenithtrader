@@ -18,7 +18,9 @@ function ema(values: number[], period: number) {
   return values.slice(1).reduce((avg, value) => value * multiplier + avg * (1 - multiplier), values[0]);
 }
 
-function buildRuleContext(latest: any, history: any[]) {
+type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
+
+function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const ltp = num(latest?.ltp);
   const open = num(latest?.open_price);
   const high = num(latest?.high_price);
@@ -48,7 +50,8 @@ function buildRuleContext(latest: any, history: any[]) {
   const noTradeRange = rangeValues.length > 2 && Math.max(...rangeValues) - Math.min(...rangeValues) < 40;
   const bankMove = pctMove(num(latest?.raw_payload?.context?.bankNifty?.ltp), num(latest?.raw_payload?.context?.bankNifty?.open));
   const niftyMove = pctMove(ltp, open);
-  const heavyMoves = (latest?.raw_payload?.context?.heavyweights ?? []).map((quote: any) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
+  const heavyweights = ((latest?.raw_payload?.context as Record<string, unknown> | undefined)?.heavyweights ?? []) as Record<string, unknown>[];
+  const heavyMoves = heavyweights.map((quote) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
   const divergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
   const pcr = num(latest?.raw_payload?.optionChain?.pcr);
   const chronological = [...history].reverse();
