@@ -56,8 +56,8 @@ const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_PREMIUM_TARGET_POINTS = 40;
-const DEFAULT_PREMIUM_SL_POINTS = 20;
+const DEFAULT_PREMIUM_TARGET_POINTS = 25;
+const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 5;
 const COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -109,6 +109,11 @@ const parseSuggestedAction = (signal?: Signal | null) => {
   const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
   return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
 };
+const calculatePremiumExitPrices = (entryPremium: number) => ({
+  targetPremium: Number((entryPremium + DEFAULT_PREMIUM_TARGET_POINTS).toFixed(2)),
+  stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
+});
+const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
@@ -120,15 +125,6 @@ type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
 type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
-
-const calculateVolatilityPoints = (points: MarketPoint[]) => {
-  const recent = points.slice(-12).map((point) => point.value);
-  if (recent.length < 4) return { targetPoints: DEFAULT_PREMIUM_TARGET_POINTS, slPoints: DEFAULT_PREMIUM_SL_POINTS };
-  const range = Math.max(...recent) - Math.min(...recent);
-  const targetPoints = Math.max(DEFAULT_PREMIUM_TARGET_POINTS, Math.ceil(range / 20) * 5);
-  const slPoints = Math.max(DEFAULT_PREMIUM_SL_POINTS, Math.ceil(targetPoints * 0.6));
-  return { targetPoints, slPoints };
-};
 
 const Index = () => {
   const { toast } = useToast();
@@ -161,6 +157,7 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -208,7 +205,7 @@ const Index = () => {
   const cooldownActive = cooldownUntil > Date.now();
   const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
-  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? (activeTradePlan.action === "BUY" ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium) : 0;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
@@ -254,11 +251,13 @@ const Index = () => {
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
-    setUserTargetPoints(String(DEFAULT_PREMIUM_TARGET_POINTS));
-    setUserSlPoints(String(DEFAULT_PREMIUM_SL_POINTS));
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
-        toast({ title: "Premium points auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ${DEFAULT_PREMIUM_TARGET_POINTS} pts · SL ${DEFAULT_PREMIUM_SL_POINTS} pts.` });
+        const exits = calculatePremiumExitPrices(premium);
+        setSuggestedEntryPremium(premium);
+        setUserTargetPoints(formatPremiumInput(exits.targetPremium));
+        setUserSlPoints(formatPremiumInput(exits.stopLossPremium));
+        toast({ title: "Premium exit prices auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ₹${exits.targetPremium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)}.` });
       })
       .catch((error) => {
         toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
@@ -268,11 +267,11 @@ const Index = () => {
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
-    const isLongCall = activeTradePlan.action === "BUY";
     const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
-    const premiumProfit = isLongCall ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium;
-    const stopHit = isLongCall ? activeTradePlan.currentPremium <= currentStop : activeTradePlan.currentPremium >= currentStop;
-    const targetHit = isLongCall ? activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target) : activeTradePlan.currentPremium <= (activeTradePlan.targetPremium ?? activeTradePlan.target);
+    const currentTarget = activeTradePlan.targetPremium ?? activeTradePlan.target;
+    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
+    const stopHit = activeTradePlan.currentPremium <= currentStop;
+    const targetHit = activeTradePlan.currentPremium >= currentTarget;
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
@@ -291,14 +290,14 @@ const Index = () => {
     }
     if (premiumProfit >= PREMIUM_TSL_STEP) {
       const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop = isLongCall
-        ? activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP
-        : activeTradePlan.entryPremium + activeTradePlan.initialSlPoints - lockedSteps * PREMIUM_TSL_STEP;
-      const shouldTrail = isLongCall ? candidateStop > currentStop : candidateStop < currentStop;
+      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const candidateTarget = activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const shouldTrail = candidateStop > currentStop;
       if (shouldTrail) {
-        const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
+        const nextPlan = { ...activeTradePlan, targetPremium: candidateTarget, target: candidateTarget, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.max(0, Math.abs(nextPlan.entryPremium - candidateStop))));
+        setUserTargetPoints(formatPremiumInput(candidateTarget));
+        setUserSlPoints(formatPremiumInput(candidateStop));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
         syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
@@ -308,10 +307,10 @@ const Index = () => {
 
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
-    const points = Number(value);
-    if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
+    const targetPremium = Number(value);
+    if (!activeTradePlan || !Number.isFinite(targetPremium) || targetPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
-    const targetPremium = activeTradePlan.action === "BUY" ? entry + points : entry - points;
+    const points = Math.abs(targetPremium - entry);
     const nextPlan = { ...activeTradePlan, targetPremium, target: targetPremium, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
@@ -319,10 +318,10 @@ const Index = () => {
 
   const handleSlPointsChange = (value: string) => {
     setUserSlPoints(value);
-    const points = Number(value);
-    if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
+    const stopLossPremium = Number(value);
+    if (!activeTradePlan || !Number.isFinite(stopLossPremium) || stopLossPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
-    const stopLossPremium = Math.max(0.05, activeTradePlan.action === "BUY" ? entry - points : entry + points);
+    const points = Math.abs(entry - stopLossPremium);
     const nextPlan = { ...activeTradePlan, stopLossPremium, stopLoss: stopLossPremium, initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
@@ -661,18 +660,20 @@ const Index = () => {
           toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
           return;
         }
-        const volatilityPoints = calculateVolatilityPoints(marketHistory);
-        const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
-        const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
         const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS });
         if (!liveOrder.success) {
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
         }
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
-        setUserTargetPoints(String(targetPoints));
-        setUserSlPoints(String(slPoints));
+        const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
+        const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
+        const stopLossPremium = shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
+        const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
+        const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
+        setUserTargetPoints(formatPremiumInput(targetPremium));
+        setUserSlPoints(formatPremiumInput(stopLossPremium));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
@@ -948,7 +949,7 @@ const Index = () => {
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked || !upstoxReady} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
                 <div className="space-y-2"><Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">Trading Lot Size</Label><Input id="trading-lot-size" type="number" min="1" step="1" inputMode="numeric" value={tradingLotSize} onChange={(event) => setTradingLotSize(event.target.value)} className="border-border bg-surface" /><p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p></div>
                 {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
-                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Points</Label><Input id="user-target-points" type="number" min="0" step="1" inputMode="numeric" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Points</Label><Input id="user-sl-points" type="number" min="0" step="1" inputMode="numeric" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
+                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Price</Label><Input id="user-target-points" type="number" min="0" step="0.05" inputMode="decimal" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Price</Label><Input id="user-sl-points" type="number" min="0" step="0.05" inputMode="decimal" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
                 {(targetAchieved || hardKillActive || cooldownActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{cooldownActive ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.` : targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
