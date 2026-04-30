@@ -8,6 +8,11 @@ const BodySchema = z.object({
   triggerPrice: z.number().positive(),
 });
 
+function upstoxErrorMessage(prefix: string, status: number, payload: any) {
+  const reason = payload?.errors?.[0]?.message ?? payload?.errors?.[0]?.errorCode ?? payload?.message ?? payload?.error ?? payload?.status ?? JSON.stringify(payload);
+  return `${prefix} HTTP ${status}: ${reason}`;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -33,7 +38,7 @@ serve(async (req) => {
       }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`Modify SL HTTP ${response.status}: ${JSON.stringify(result)}`);
+    if (!response.ok) throw new Error(upstoxErrorMessage("Modify SL", response.status, result));
     return json({ success: true, result, triggerPrice: parsed.data.triggerPrice });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Stop loss modification failed" }, 500);

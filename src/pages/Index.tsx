@@ -56,8 +56,8 @@ const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_PREMIUM_TARGET_POINTS = 25;
-const DEFAULT_PREMIUM_SL_POINTS = 15;
+const DEFAULT_PREMIUM_TARGET_POINTS = 40;
+const DEFAULT_PREMIUM_SL_POINTS = 20;
 const PREMIUM_TSL_STEP = 5;
 const COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -100,6 +100,15 @@ const formatMoney = (value: unknown) => {
   return parsed === null ? "—" : `₹${parsed.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 };
 const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
+const parseSuggestedStrike = (strike?: string) => {
+  const match = strike?.match(/Nifty\s+(\d{4,6})\s+(CE|PE)/i);
+  return match ? Number(match[1]) : null;
+};
+const parseSuggestedAction = (signal?: Signal | null) => {
+  if (signal?.action === "BUY" || signal?.action === "SELL") return signal.action;
+  const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
+  return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
+};
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
@@ -110,7 +119,7 @@ type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; ch
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string };
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
 
 const calculateVolatilityPoints = (points: MarketPoint[]) => {
   const recent = points.slice(-12).map((point) => point.value);
@@ -239,14 +248,23 @@ const Index = () => {
   }, [activeTrade, aiEnabled, cooldownActive, cooldownRemainingMinutes, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   useEffect(() => {
-    if (!latestSignal || latestSignal.action !== "BUY" || activeTrade) return;
+    const strike = parseSuggestedStrike(latestSignal?.strike);
+    const action = parseSuggestedAction(latestSignal);
+    if (!latestSignal || !action || !strike || activeTrade) return;
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
-    const { targetPoints, slPoints } = calculateVolatilityPoints(marketHistory);
-    setUserTargetPoints(String(targetPoints));
-    setUserSlPoints(String(slPoints));
-  }, [activeTrade, latestSignal, marketHistory]);
+    setUserTargetPoints(String(DEFAULT_PREMIUM_TARGET_POINTS));
+    setUserSlPoints(String(DEFAULT_PREMIUM_SL_POINTS));
+    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
+      .then(({ premium, instrument }) => {
+        toast({ title: "Premium points auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ${DEFAULT_PREMIUM_TARGET_POINTS} pts · SL ${DEFAULT_PREMIUM_SL_POINTS} pts.` });
+      })
+      .catch((error) => {
+        toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrade, latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
@@ -423,11 +441,17 @@ const Index = () => {
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
     if (error) {
-      const message = error.message.includes(UPSTOX_INVALID_CODE_ERROR)
+      let serverMessage = error.message;
+      const context = (error as unknown as { context?: Response }).context;
+      if (context) {
+        const payload = await context.clone().json().catch(() => null);
+        serverMessage = [payload?.error, payload?.details].filter(Boolean).join(" — ") || serverMessage;
+      }
+      const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
         ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-        : error.message.includes(UPSTOX_INVALID_TOKEN_ERROR) || error.message.toLowerCase().includes("upstox oauth reconnect required")
+        : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
           ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
-        : error.message;
+        : serverMessage;
       throw new Error(message);
     }
     return data;
@@ -640,9 +664,10 @@ const Index = () => {
         const volatilityPoints = calculateVolatilityPoints(marketHistory);
         const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
         const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
+        const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
         if (!liveOrder.success) {
-          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
+          toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
         }
         const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
@@ -660,7 +685,7 @@ const Index = () => {
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
-      showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
+      toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }

@@ -8,6 +8,7 @@ const NIFTY_LOT_SIZE = 65;
 const BodySchema = z.object({
   action: z.enum(["BUY", "SELL"]),
   spotPrice: z.number().positive(),
+  strike: z.number().positive().optional(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
   targetPremiumPoints: z.number().positive().optional(),
@@ -29,6 +30,11 @@ function firstNode(payload: Record<string, unknown>) {
   return Object.values((payload?.data as Record<string, unknown> | undefined) ?? {})[0] as UpstoxRecord | undefined;
 }
 
+function upstoxErrorMessage(prefix: string, status: number, payload: any) {
+  const reason = payload?.errors?.[0]?.message ?? payload?.errors?.[0]?.errorCode ?? payload?.message ?? payload?.error ?? payload?.status ?? JSON.stringify(payload);
+  return `${prefix} HTTP ${status}: ${reason}`;
+}
+
 async function getAvailableCash(headers: HeadersInit) {
   const response = await fetch("https://api.upstox.com/v2/user/get-funds-and-margin?segment=SEC", { headers });
   const payload = await response.json().catch(() => ({}));
@@ -37,13 +43,14 @@ async function getAvailableCash(headers: HeadersInit) {
   return numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net) ?? 0;
 }
 
-async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL") {
+async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number) {
   const optionType = action === "BUY" ? "CE" : "PE";
   const atmStrike = Math.round(spotPrice / 50) * 50;
+  const targetStrike = requestedStrike ?? atmStrike;
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
   const contractResponse = await fetch(`https://api.upstox.com/v2/option/contract?instrument_key=${encoded}`, { headers });
   const contractPayload = await contractResponse.json().catch(() => ({}));
-  if (!contractResponse.ok) throw new Error(`Option contract HTTP ${contractResponse.status}: ${JSON.stringify(contractPayload)}`);
+  if (!contractResponse.ok) throw new Error(upstoxErrorMessage("Option contract", contractResponse.status, contractPayload));
 
   const rows = (Array.isArray(contractPayload?.data) ? contractPayload.data : []) as UpstoxRecord[];
   const today = new Date().toISOString().slice(0, 10);
@@ -57,11 +64,13 @@ async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action:
   const selected = candidates.reduce<UpstoxRecord | null>((best, row) => {
     const strike = numberFrom(row?.strike_price, row?.strikePrice, row?.strike);
     if (strike === null) return best;
+    if (requestedStrike && strike === targetStrike) return row;
     if (!best) return row;
-    const bestStrike = numberFrom(best?.strike_price, best?.strikePrice, best?.strike) ?? atmStrike;
-    return Math.abs(strike - atmStrike) < Math.abs(bestStrike - atmStrike) ? row : best;
+    const bestStrike = numberFrom(best?.strike_price, best?.strikePrice, best?.strike) ?? targetStrike;
+    return Math.abs(strike - targetStrike) < Math.abs(bestStrike - targetStrike) ? row : best;
   }, null);
-  if (!selected) throw new Error(`No ${optionType} option contract found for nearest expiry.`);
+  const selectedStrike = selected ? numberFrom(selected?.strike_price, selected?.strikePrice, selected?.strike) : null;
+  if (!selected || (requestedStrike && selectedStrike !== requestedStrike)) throw new Error(`Invalid Symbol: Nifty ${targetStrike} ${optionType} contract not found for nearest expiry.`);
 
   const strike = numberFrom(selected?.strike_price, selected?.strikePrice, selected?.strike) ?? atmStrike;
   const instrumentToken = selected?.instrument_key ?? selected?.instrumentKey ?? selected?.instrument_token ?? selected?.instrumentToken;
@@ -73,14 +82,14 @@ async function getOptionLtp(headers: HeadersInit, instrumentToken: string) {
   const encoded = encodeURIComponent(instrumentToken);
   const response = await fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Option LTP HTTP ${response.status}: ${JSON.stringify(payload)}`);
+  if (!response.ok) throw new Error(upstoxErrorMessage("Option LTP", response.status, payload));
   return numberFrom(firstNode(payload)?.last_price, firstNode(payload)?.ltp, firstNode(payload)?.lastPrice) ?? 0;
 }
 
 async function placeOrder(headers: HeadersInit, orderPayload: Record<string, unknown>) {
   const orderResponse = await fetch("https://api.upstox.com/v2/order/place", { method: "POST", headers, body: JSON.stringify(orderPayload) });
   const orderResult = await orderResponse.json().catch(() => ({}));
-  if (!orderResponse.ok) throw new Error(`Order HTTP ${orderResponse.status}: ${JSON.stringify(orderResult)}`);
+  if (!orderResponse.ok) throw new Error(upstoxErrorMessage("Order", orderResponse.status, orderResult));
   return orderResult;
 }
 
@@ -101,7 +110,7 @@ serve(async (req) => {
     const headers = { Authorization: `Bearer ${settings.upstox_access_token}`, Accept: "application/json", "Content-Type": "application/json" };
     const liveLotSize = parsed.data.effectiveLotSize ?? parsed.data.tradingLotSize;
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
-    const option = await resolveAtmOption(headers, parsed.data.spotPrice, parsed.data.action);
+    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike);
     const optionLtp = await getOptionLtp(headers, option.instrumentToken);
     const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
     const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
@@ -144,6 +153,7 @@ serve(async (req) => {
 
     return json({ success: true, order: orderResult, slOrder: slOrderResult, slOrderId: readOrderId(slOrderResult), instrument: option, instrumentToken: option.instrumentToken, quantity, availableCash, requiredCash, optionLtp, entryPremium: optionLtp, targetPremium, stopLossPremium, targetPremiumPoints, stopLossPremiumPoints });
   } catch (error) {
+    console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });
     return json({ error: error instanceof Error ? error.message : "Live order placement failed" }, 500);
   }
 });
