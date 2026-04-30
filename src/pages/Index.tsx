@@ -39,6 +39,7 @@ const history = [
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
+const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
 const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
 const TRADING_LOT_SIZE_STORAGE_KEY = "zenith-trading-lot-size";
 const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
@@ -51,7 +52,8 @@ const COOLDOWN_UNTIL_STORAGE_KEY = "zenith-cooldown-until";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
-const UPSTOX_POLL_INTERVAL_MS = 5_000;
+const UPSTOX_POLL_INTERVAL_MS = 1_000;
+const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
@@ -135,6 +137,9 @@ const Index = () => {
   const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
+  const lastUpstoxRequestAtRef = useRef(0);
+  const upstoxBackoffUntilRef = useRef(0);
+  const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastSignalAutofillRef = useRef("");
   const lastSignalAlertRef = useRef("");
   const previousSignalActionRef = useRef<string>("WAIT");
@@ -425,6 +430,7 @@ const Index = () => {
   useEffect(() => {
     if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
     const pollPremium = () => {
+      if (Date.now() < upstoxBackoffUntilRef.current) return;
       invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
         .then(({ premium }) => {
           setActiveTradePlan((current) => {
@@ -453,6 +459,28 @@ const Index = () => {
     if (now - retryToastRef.current < 20_000) return;
     retryToastRef.current = now;
     toast({ title: "Retrying Connection...", description: message });
+  };
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isUpstoxRateLimitError = (message: string) => message.includes(UPSTOX_RATE_LIMIT_ERROR) || message.toLowerCase().includes("too many requests");
+
+  const throttleUpstoxRequest = async () => {
+    upstoxRequestQueueRef.current = upstoxRequestQueueRef.current.catch(() => undefined).then(async () => {
+      const now = Date.now();
+      const waitForBackoff = Math.max(0, upstoxBackoffUntilRef.current - now);
+      if (waitForBackoff > 0) await delay(waitForBackoff);
+      const waitForThrottle = Math.max(0, UPSTOX_POLL_INTERVAL_MS - (Date.now() - lastUpstoxRequestAtRef.current));
+      if (waitForThrottle > 0) await delay(waitForThrottle);
+      lastUpstoxRequestAtRef.current = Date.now();
+    });
+    await upstoxRequestQueueRef.current;
+  };
+
+  const markUpstoxRateLimited = (message: string) => {
+    if (!isUpstoxRateLimitError(message)) return false;
+    upstoxBackoffUntilRef.current = Math.max(upstoxBackoffUntilRef.current, Date.now() + UPSTOX_RATE_LIMIT_BACKOFF_MS);
+    showRetryToast("Upstox rate limit hit (UDAPI10005). Waiting 5 seconds before retrying to avoid IP block.");
+    return true;
   };
 
   const reasoning = useMemo(() => {
@@ -484,7 +512,7 @@ const Index = () => {
     if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
     if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
     if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.";
+    return "AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.";
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved]);
 
   const signIn = async (event: FormEvent) => {
@@ -503,6 +531,8 @@ const Index = () => {
   };
 
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
+    const touchesUpstox = ["fetch-nifty-data", "fetch-option-premium", "system-status", "place-live-order", "modify-stop-loss-order", "emergency-exit"].includes(name);
+    if (touchesUpstox) await throttleUpstoxRequest();
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
     if (error) {
       let serverMessage = error.message;
@@ -516,6 +546,7 @@ const Index = () => {
         : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
           ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
         : serverMessage;
+      markUpstoxRateLimited(message);
       throw new Error(message);
     }
     return data;
@@ -809,7 +840,7 @@ const Index = () => {
         }
         await fetchLiveNifty(false, true);
       }
-      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
+      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
@@ -823,6 +854,7 @@ const Index = () => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session && upstoxReady) {
       marketIntervalRef.current = setInterval(() => {
+        if (Date.now() < upstoxBackoffUntilRef.current) return;
         fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
       }, UPSTOX_POLL_INTERVAL_MS);
       if (aiEnabled) {
