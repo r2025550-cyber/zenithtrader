@@ -199,7 +199,7 @@ const Index = () => {
   const cooldownActive = cooldownUntil > Date.now();
   const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
-  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? (activeTradePlan.action === "BUY" ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium) : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
@@ -292,7 +292,9 @@ const Index = () => {
     setUserTargetPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
-    const nextPlan = { ...activeTradePlan, targetPremium: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, target: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, initialTargetPoints: points };
+    const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
+    const targetPremium = activeTradePlan.action === "BUY" ? entry + points : entry - points;
+    const nextPlan = { ...activeTradePlan, targetPremium, target: targetPremium, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
   };
@@ -301,7 +303,9 @@ const Index = () => {
     setUserSlPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
-    const nextPlan = { ...activeTradePlan, stopLossPremium: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), stopLoss: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), initialSlPoints: points };
+    const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
+    const stopLossPremium = Math.max(0.05, activeTradePlan.action === "BUY" ? entry - points : entry + points);
+    const nextPlan = { ...activeTradePlan, stopLossPremium, stopLoss: stopLossPremium, initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
     syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
