@@ -318,10 +318,10 @@ const Index = () => {
 
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
-    const points = Number(value);
-    if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
+    const targetPremium = Number(value);
+    if (!activeTradePlan || !Number.isFinite(targetPremium) || targetPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
-    const targetPremium = activeTradePlan.action === "BUY" ? entry + points : entry - points;
+    const points = Math.abs(targetPremium - entry);
     const nextPlan = { ...activeTradePlan, targetPremium, target: targetPremium, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
@@ -329,10 +329,10 @@ const Index = () => {
 
   const handleSlPointsChange = (value: string) => {
     setUserSlPoints(value);
-    const points = Number(value);
-    if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
+    const stopLossPremium = Number(value);
+    if (!activeTradePlan || !Number.isFinite(stopLossPremium) || stopLossPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
-    const stopLossPremium = Math.max(0.05, activeTradePlan.action === "BUY" ? entry - points : entry + points);
+    const points = Math.abs(entry - stopLossPremium);
     const nextPlan = { ...activeTradePlan, stopLossPremium, stopLoss: stopLossPremium, initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
