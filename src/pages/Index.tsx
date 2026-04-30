@@ -188,6 +188,8 @@ const Index = () => {
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
   const dailyPnl = upstoxTodayPnl ?? 0;
   const availableCash = toNumber(latestData?.raw_payload?.account?.margin?.availableCash) ?? 0;
+  const upstoxReady = systemStatus?.upstox?.ok === true;
+  const upstoxNeedsSetup = session && systemStatus?.upstox?.ok === false;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
   const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
@@ -496,7 +498,7 @@ const Index = () => {
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
       await checkSystemStatus(false).catch(() => null);
-      await fetchLiveNifty();
+      await fetchLiveNifty(false, true);
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check the authorization code.";
@@ -509,7 +511,10 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async (executionIntent = false) => {
+  const fetchLiveNifty = async (executionIntent = false, skipReadyCheck = false) => {
+    if (!skipReadyCheck && !upstoxReady) {
+      throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
+    }
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
@@ -582,7 +587,11 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     if (tradingBlocked) return;
-    await fetchLiveNifty();
+    if (!upstoxReady) {
+      const status = await retestUpstox(true);
+      if (!status.upstox.ok) return;
+    }
+    await fetchLiveNifty(false, true);
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
@@ -590,11 +599,15 @@ const Index = () => {
   const executeTradingSignal = async () => {
     setIsBusy(true);
     try {
+      if (!upstoxReady) {
+        const status = await retestUpstox(true);
+        if (!status.upstox.ok) return;
+      }
       if (tradingBlocked) {
         toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
         return;
       }
-      const liveMarket = await fetchLiveNifty(true);
+      const liveMarket = await fetchLiveNifty(true, true);
       const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
@@ -673,7 +686,16 @@ const Index = () => {
     try {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity });
       setAiEnabled(checked);
-      if (checked) await fetchLiveNifty();
+      if (checked) {
+        const status = await retestUpstox(false);
+        if (!status.upstox.ok) {
+          setAiEnabled(false);
+          localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
+          toast({ title: "Upstox OAuth required", description: status.upstox.message, variant: "destructive" });
+          return;
+        }
+        await fetchLiveNifty(false, true);
+      }
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
@@ -686,7 +708,7 @@ const Index = () => {
   useEffect(() => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
-    if (session) {
+    if (session && upstoxReady) {
       marketIntervalRef.current = setInterval(() => {
         fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
       }, UPSTOX_POLL_INTERVAL_MS);
@@ -704,17 +726,17 @@ const Index = () => {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
+  }, [session, upstoxReady, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
 
   useEffect(() => {
     if (!session) return;
-    checkSystemStatus(false).catch(() => {
+    checkSystemStatus(false).then((status) => {
+      if (status.upstox.ok) return fetchLiveNifty(false, true);
+      return null;
+    }).catch(() => {
       // Connection Pulse will show missing setup after a manual check.
     });
     if (aiEnabled && !marketIsOpen) setAiEnabled(false);
-    fetchLiveNifty().catch(() => {
-      // Keep the dashboard usable until Upstox OAuth is connected.
-    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
@@ -881,15 +903,16 @@ const Index = () => {
             <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
               <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p><h2 className="text-xl font-semibold">Autonomy Settings</h2></div><Bot className="h-6 w-6 text-primary" /></div>
               <div className="space-y-5">
-                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
+                {upstoxNeedsSetup && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Upstox OAuth is not connected. Open API Settings, tap Get Code, then Connect before starting live data or orders.</div>}
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked || !upstoxReady} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
                 <div className="space-y-2"><Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">Trading Lot Size</Label><Input id="trading-lot-size" type="number" min="1" step="1" inputMode="numeric" value={tradingLotSize} onChange={(event) => setTradingLotSize(event.target.value)} className="border-border bg-surface" /><p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p></div>
                 {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Points</Label><Input id="user-target-points" type="number" min="0" step="1" inputMode="numeric" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Points</Label><Input id="user-sl-points" type="number" min="0" step="1" inputMode="numeric" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
                 {(targetAchieved || hardKillActive || cooldownActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{cooldownActive ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.` : targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
-                <Button disabled={!session || isBusy || tradingBlocked} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
-                <Button disabled={!session || isBusy || (tradingBlocked && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
+                <Button disabled={!session || isBusy || tradingBlocked || !upstoxReady} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
+                <Button disabled={!session || isBusy || ((tradingBlocked || !upstoxReady) && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
                 {activeTradePlan && <div className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm font-semibold">{exitAlertActive ? (activeTradePlan.exitAlertReason === "FINAL_TARGET" ? "FINAL TARGET HIT — EXIT NOW" : "TRAILING SL HIT — EXIT NOW") : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}</span><div className="text-left sm:text-right"><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p><span className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</span></div></div><p className="mt-2 text-xs font-semibold text-muted-foreground">Premium ₹{activeTradePlan.currentPremium?.toFixed(2) ?? activeTradePlan.entryPremium?.toFixed(2) ?? "—"} · Target ₹{(activeTradePlan.targetPremium ?? activeTradePlan.target).toFixed(2)} / Server TSL ₹{(activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss).toFixed(2)} · P/L ₹{currentTradePnlPoints.toFixed(2)}</p></div>}
               </div>
             </section>
