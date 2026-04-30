@@ -430,6 +430,7 @@ const Index = () => {
   useEffect(() => {
     if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
     const pollPremium = () => {
+      if (Date.now() < upstoxBackoffUntilRef.current) return;
       invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
         .then(({ premium }) => {
           setActiveTradePlan((current) => {
@@ -853,6 +854,7 @@ const Index = () => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session && upstoxReady) {
       marketIntervalRef.current = setInterval(() => {
+        if (Date.now() < upstoxBackoffUntilRef.current) return;
         fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
       }, UPSTOX_POLL_INTERVAL_MS);
       if (aiEnabled) {
