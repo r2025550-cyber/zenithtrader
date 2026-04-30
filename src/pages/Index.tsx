@@ -620,6 +620,12 @@ const Index = () => {
       throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
     }
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    setSystemStatus((prev) => ({
+      ready: prev?.gemini?.ok ? true : prev?.ready ?? true,
+      upstox: { ok: true, message: "Upstox token verified by live market data fetch." },
+      gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." },
+      checkedAt: new Date().toISOString(),
+    }));
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
     if (Number.isFinite(value)) {
