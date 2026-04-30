@@ -135,6 +135,7 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const lastSignalAutofillRef = useRef("");
+  const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -164,6 +165,26 @@ const Index = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
+
+  const applySniperSignal = (signal: Signal) => {
+    const locked = signalLockRef.current;
+    const now = Date.now();
+    if (locked && now < locked.lockedUntil) {
+      const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
+      const majorBreak = signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 || signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
+      if (signal.action === "WAIT" && !majorBreak) {
+        setLatestSignal(locked.signal);
+        return;
+      }
+      if (!fullReversal && signal.action !== locked.signal.action) {
+        setLatestSignal(locked.signal);
+        return;
+      }
+    }
+    if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
+    else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
+    setLatestSignal(signal);
+  };
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
