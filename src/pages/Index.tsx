@@ -56,8 +56,8 @@ const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_PREMIUM_TARGET_POINTS = 25;
-const DEFAULT_PREMIUM_SL_POINTS = 15;
+const DEFAULT_PREMIUM_TARGET_POINTS = 40;
+const DEFAULT_PREMIUM_SL_POINTS = 20;
 const PREMIUM_TSL_STEP = 5;
 const COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -100,6 +100,10 @@ const formatMoney = (value: unknown) => {
   return parsed === null ? "—" : `₹${parsed.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 };
 const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
+const parseSuggestedStrike = (strike?: string) => {
+  const match = strike?.match(/Nifty\s+(\d{4,6})\s+(CE|PE)/i);
+  return match ? Number(match[1]) : null;
+};
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
