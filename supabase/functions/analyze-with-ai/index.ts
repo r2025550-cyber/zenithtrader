@@ -47,8 +47,10 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const volume = num(latest?.raw_payload?.volume) ?? num(latest?.raw_payload?.quote?.data && Object.values(latest.raw_payload.quote.data)[0]?.volume) ?? num(latest?.raw_payload?.optionChain?.totalVolume);
   const volumes = history.map((row) => num(row?.raw_payload?.volume) ?? num(row?.raw_payload?.optionChain?.totalVolume)).filter((value): value is number => value !== null).slice(0, 5);
   const avg5Volume = volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
-  const volumeAvailable = volume !== null && avg5Volume !== null && volumes.length >= 2;
-  const volumeValid = volumeAvailable ? volume >= avg5Volume * 1.1 : null;
+  const fallbackAvgVolume = !avg5Volume && volumes.length >= 1 ? volumes.slice(0, 2).reduce((s, v) => s + v, 0) / Math.min(2, volumes.length) : null;
+  const effectiveAvgVolume = avg5Volume ?? fallbackAvgVolume;
+  const volumeAvailable = volume !== null && effectiveAvgVolume !== null;
+  const volumeValid = volumeAvailable ? volume >= effectiveAvgVolume * 1.05 : null;
   const previous = history[1];
   const previousHigh = num(previous?.high_price);
   const previousLow = num(previous?.low_price);
@@ -92,7 +94,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const trendMinuteCloses = latestMinuteCloses(history, 6);
   const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
   const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
-  const multiTimeframeAligned = trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m;
+  const ema1mFallbackAligned = ltp !== null && ema9 !== null && ((entry1m === "bullish" && ltp > ema9) || (entry1m === "bearish" && ltp < ema9));
+  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || (trend5 === "pending" && ema1mFallbackAligned);
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
@@ -150,7 +153,9 @@ serve(async (req) => {
 
     const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true && ruleContext.rules.trend5 === "bullish" && ruleContext.rules.multiTimeframeAligned === true;
     const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true && ruleContext.rules.trend5 === "bearish" && ruleContext.rules.multiTimeframeAligned === true;
-    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
+    const baseGateScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
+    const instantEmaBoost = (ruleContext.rules.priceAboveBothEmas || ruleContext.rules.priceBelowBothEmas) ? 40 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + Math.round(baseGateScore * 0.6)));
 
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
@@ -207,7 +212,9 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && sniperConfirmationScore >= 60 && (buySniperReady || sellSniperReady) && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const divergenceWarningOnly = sniperConfirmationScore > 60;
+    const divergenceBlocks = ruleContext.rules.divergence && !divergenceWarningOnly;
+    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= 60 && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !divergenceBlocks;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
