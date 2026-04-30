@@ -213,7 +213,7 @@ const Index = () => {
   const cooldownActive = cooldownUntil > Date.now();
   const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
-  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? (activeTradePlan.action === "BUY" ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium) : 0;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
@@ -274,12 +274,11 @@ const Index = () => {
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
-    const isLongCall = activeTradePlan.action === "BUY";
     const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
     const currentTarget = activeTradePlan.targetPremium ?? activeTradePlan.target;
-    const premiumProfit = isLongCall ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium;
-    const stopHit = isLongCall ? activeTradePlan.currentPremium <= currentStop : activeTradePlan.currentPremium >= currentStop;
-    const targetHit = isLongCall ? activeTradePlan.currentPremium >= currentTarget : activeTradePlan.currentPremium <= currentTarget;
+    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
+    const stopHit = activeTradePlan.currentPremium <= currentStop;
+    const targetHit = activeTradePlan.currentPremium >= currentTarget;
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
@@ -298,13 +297,9 @@ const Index = () => {
     }
     if (premiumProfit >= PREMIUM_TSL_STEP) {
       const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop = isLongCall
-        ? activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP
-        : activeTradePlan.entryPremium + activeTradePlan.initialSlPoints - lockedSteps * PREMIUM_TSL_STEP;
-      const candidateTarget = isLongCall
-        ? activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP
-        : activeTradePlan.entryPremium - activeTradePlan.initialTargetPoints - lockedSteps * PREMIUM_TSL_STEP;
-      const shouldTrail = isLongCall ? candidateStop > currentStop : candidateStop < currentStop;
+      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const candidateTarget = activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const shouldTrail = candidateStop > currentStop;
       if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, targetPremium: candidateTarget, target: candidateTarget, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
