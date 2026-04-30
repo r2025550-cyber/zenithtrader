@@ -70,7 +70,11 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const niftyMove = pctMove(ltp, open);
   const heavyweights = ((latest?.raw_payload?.context as Record<string, unknown> | undefined)?.heavyweights ?? []) as Record<string, unknown>[];
   const heavyMoves = heavyweights.map((quote) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
-  const divergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
+  const niftyMomentumOverride = (ruleAbove := (ltp !== null && ema9 !== null && ema21 !== null && ltp > ema9 && ltp > ema21)) || (ltp !== null && ema9 !== null && ema21 !== null && ltp < ema9 && ltp < ema21);
+  const priceAboveBothEmas = ltp !== null && ema9 !== null && ema21 !== null && ltp > ema9 && ltp > ema21;
+  const priceBelowBothEmas = ltp !== null && ema9 !== null && ema21 !== null && ltp < ema9 && ltp < ema21;
+  const niftyDrivenMomentum = priceAboveBothEmas || priceBelowBothEmas;
+  const divergence = !niftyDrivenMomentum && niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
   const pcr = num(latest?.raw_payload?.optionChain?.pcr);
   const effectiveVolume = volume ?? num(latest?.raw_payload?.optionChain?.totalVolume);
   const volumeSource = volume !== null ? latest?.raw_payload?.volumeSource ?? "upstox_quote" : effectiveVolume !== null ? "upstox_option_chain" : null;
