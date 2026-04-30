@@ -588,8 +588,8 @@ const Index = () => {
   const runTradingCycle = async () => {
     if (tradingBlocked) return;
     if (!upstoxReady) {
-      await retestUpstox(true);
-      if (systemStatus?.upstox?.ok !== true) return;
+      const status = await retestUpstox(true);
+      if (!status.upstox.ok) return;
     }
     await fetchLiveNifty(false, true);
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
@@ -607,7 +607,7 @@ const Index = () => {
         toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
         return;
       }
-      const liveMarket = await fetchLiveNifty(true);
+      const liveMarket = await fetchLiveNifty(true, true);
       const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       setLatestSignal(ai.signal);
@@ -694,7 +694,7 @@ const Index = () => {
           toast({ title: "Upstox OAuth required", description: status.upstox.message, variant: "destructive" });
           return;
         }
-        await fetchLiveNifty();
+        await fetchLiveNifty(false, true);
       }
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
