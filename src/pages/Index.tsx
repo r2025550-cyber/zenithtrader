@@ -199,7 +199,7 @@ const Index = () => {
   const cooldownActive = cooldownUntil > Date.now();
   const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
-  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
+  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? (activeTradePlan.action === "BUY" ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium) : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
 
@@ -250,9 +250,11 @@ const Index = () => {
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
-    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
-    const stopHit = activeTradePlan.currentPremium <= (activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss);
-    const targetHit = activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target);
+    const isLongCall = activeTradePlan.action === "BUY";
+    const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
+    const premiumProfit = isLongCall ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium;
+    const stopHit = isLongCall ? activeTradePlan.currentPremium <= currentStop : activeTradePlan.currentPremium >= currentStop;
+    const targetHit = isLongCall ? activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target) : activeTradePlan.currentPremium <= (activeTradePlan.targetPremium ?? activeTradePlan.target);
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
@@ -271,11 +273,14 @@ const Index = () => {
     }
     if (premiumProfit >= PREMIUM_TSL_STEP) {
       const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
-      if (candidateStop > (activeTradePlan.stopLossPremium ?? 0)) {
+      const candidateStop = isLongCall
+        ? activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP
+        : activeTradePlan.entryPremium + activeTradePlan.initialSlPoints - lockedSteps * PREMIUM_TSL_STEP;
+      const shouldTrail = isLongCall ? candidateStop > currentStop : candidateStop < currentStop;
+      if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.max(0, nextPlan.entryPremium - candidateStop)));
+        setUserSlPoints(String(Math.max(0, Math.abs(nextPlan.entryPremium - candidateStop))));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
         syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
@@ -287,7 +292,9 @@ const Index = () => {
     setUserTargetPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points <= 0) return;
-    const nextPlan = { ...activeTradePlan, targetPremium: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, target: (activeTradePlan.entryPremium ?? activeTradePlan.entry) + points, initialTargetPoints: points };
+    const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
+    const targetPremium = activeTradePlan.action === "BUY" ? entry + points : entry - points;
+    const nextPlan = { ...activeTradePlan, targetPremium, target: targetPremium, initialTargetPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
   };
@@ -296,7 +303,9 @@ const Index = () => {
     setUserSlPoints(value);
     const points = Number(value);
     if (!activeTradePlan || !Number.isFinite(points) || points < 0) return;
-    const nextPlan = { ...activeTradePlan, stopLossPremium: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), stopLoss: Math.max(0.05, (activeTradePlan.entryPremium ?? activeTradePlan.entry) - points), initialSlPoints: points };
+    const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
+    const stopLossPremium = Math.max(0.05, activeTradePlan.action === "BUY" ? entry - points : entry + points);
+    const nextPlan = { ...activeTradePlan, stopLossPremium, stopLoss: stopLossPremium, initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
     syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
@@ -439,9 +448,16 @@ const Index = () => {
   const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
     if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
     await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
-    const nextPlan = { ...plan, lastSyncedStopLossPremium: plan.stopLossPremium };
-    setActiveTradePlan(nextPlan);
-    localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    setActiveTradePlan((current) => {
+      if (!current || current.slOrderId !== plan.slOrderId) return current;
+      const currentStop = current.stopLossPremium ?? current.stopLoss;
+      const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
+      const sameStop = currentStop === syncedStop;
+      if (!sameStop) return current;
+      const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
+      return syncedPlan;
+    });
     toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
   };
 
