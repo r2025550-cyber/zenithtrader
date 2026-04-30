@@ -212,7 +212,9 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && sniperConfirmationScore >= 60 && (buySniperReady || sellSniperReady) && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const divergenceWarningOnly = sniperConfirmationScore > 60;
+    const divergenceBlocks = ruleContext.rules.divergence && !divergenceWarningOnly;
+    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= 60 && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !divergenceBlocks;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
