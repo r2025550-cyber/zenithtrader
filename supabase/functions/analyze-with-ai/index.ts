@@ -187,12 +187,12 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const result = await generateOpenAIText(settings.openai_api_key, prompt, 700);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
-    if (signal.action === "BUY" && !buySniperReady) {
+    if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore <= 80)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, and 3 rising 1m candles.`;
     }
-    if (signal.action === "SELL" && !sellSniperReady) {
+    if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore <= 80)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, and 3 falling 1m candles.`;
