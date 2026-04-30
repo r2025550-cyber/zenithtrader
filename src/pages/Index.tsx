@@ -352,23 +352,46 @@ const Index = () => {
     syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
   };
 
-  const playAlertTone = () => {
+  const unlockAudio = () => {
     const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) return;
+    if (!AudioCtor) return null;
     const context = audioContextRef.current ?? new AudioCtor();
     audioContextRef.current = context;
+    if (context.state === "suspended") context.resume().catch(() => undefined);
+    return context;
+  };
+
+  const playAlertTone = (tone: "exit" | "BUY" | "SELL" = "exit") => {
+    const context = unlockAudio();
+    if (!context) return;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    oscillator.type = "square";
-    oscillator.frequency.value = 880;
+    oscillator.type = tone === "BUY" ? "sine" : "square";
+    oscillator.frequency.value = tone === "BUY" ? 1320 : tone === "SELL" ? 220 : 880;
     gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.42);
+    gain.gain.exponentialRampToValueAtTime(tone === "SELL" ? 0.16 : 0.12, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (tone === "SELL" ? 0.55 : 0.42));
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.start();
-    oscillator.stop(context.currentTime + 0.45);
+    oscillator.stop(context.currentTime + (tone === "SELL" ? 0.58 : 0.45));
   };
+
+  const triggerSignalAlert = (signal: Signal) => {
+    if (!isTradeSignal(signal.action)) return;
+    playAlertTone(signal.action as "BUY" | "SELL");
+    if (navigator.vibrate) navigator.vibrate(signal.action === "BUY" ? [80, 40, 80] : [180]);
+  };
+
+  useEffect(() => {
+    const armAudio = () => unlockAudio();
+    window.addEventListener("pointerdown", armAudio, { passive: true });
+    window.addEventListener("keydown", armAudio);
+    return () => {
+      window.removeEventListener("pointerdown", armAudio);
+      window.removeEventListener("keydown", armAudio);
+    };
+  }, []);
 
   useEffect(() => {
     if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
