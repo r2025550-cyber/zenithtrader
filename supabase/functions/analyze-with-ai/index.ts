@@ -169,7 +169,9 @@ serve(async (req) => {
 - Risk reward must be strict 1:2.
 - Manual override: if User Target Points or User SL Points are provided, use those exact point values instead of AI-generated target/SL.
 - Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
-- Divergence Guard: if Nifty disagrees with Bank Nifty or top heavyweights, label Low Conviction.
+- Divergence Guard (relaxed): if Nifty 1m price is above BOTH 9 EMA and 21 EMA (or below both for bearish), Nifty momentum drives the signal — DO NOT downgrade for Bank Nifty / heavyweight divergence. Only flag divergence when Nifty itself is not in clear EMA-aligned momentum.
+- Sensitivity: trigger threshold lowered to 60% sniper score (was 80%). Volume filter relaxed to +10% above 5-period average (was +20%).
+- Strike freshness: always recompute the ATM strike from the latest spot every cycle so the option leg moves with the index instantly.
 
 Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, explicitly write the tradable ATM option phrase: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
