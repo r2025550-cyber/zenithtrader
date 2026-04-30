@@ -82,6 +82,11 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
   const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
   const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
+  const priceAboveBothEmas = ltp !== null && ema9 !== null && ema21 !== null && ltp > ema9 && ltp > ema21;
+  const priceBelowBothEmas = ltp !== null && ema9 !== null && ema21 !== null && ltp < ema9 && ltp < ema21;
+  const niftyDrivenMomentum = priceAboveBothEmas || priceBelowBothEmas;
+  const rawDivergence = niftyMove !== null && ((bankMove !== null && Math.sign(bankMove) !== Math.sign(niftyMove)) || heavyMoves.filter((move) => Math.sign(move) !== Math.sign(niftyMove)).length >= 2);
+  const divergence = niftyDrivenMomentum ? false : rawDivergence;
   const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
   const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
   const trendMinuteCloses = latestMinuteCloses(history, 6);
