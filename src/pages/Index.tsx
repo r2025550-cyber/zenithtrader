@@ -258,11 +258,12 @@ const Index = () => {
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
-    setUserTargetPoints(String(DEFAULT_PREMIUM_TARGET_POINTS));
-    setUserSlPoints(String(DEFAULT_PREMIUM_SL_POINTS));
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
-        toast({ title: "Premium points auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ${DEFAULT_PREMIUM_TARGET_POINTS} pts · SL ${DEFAULT_PREMIUM_SL_POINTS} pts.` });
+        const exits = calculatePremiumExitPrices(premium);
+        setUserTargetPoints(String(exits.targetPremium));
+        setUserSlPoints(String(exits.stopLossPremium));
+        toast({ title: "Premium exit prices auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ₹${exits.targetPremium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)}.` });
       })
       .catch((error) => {
         toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
@@ -274,9 +275,10 @@ const Index = () => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
     const isLongCall = activeTradePlan.action === "BUY";
     const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
+    const currentTarget = activeTradePlan.targetPremium ?? activeTradePlan.target;
     const premiumProfit = isLongCall ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium;
     const stopHit = isLongCall ? activeTradePlan.currentPremium <= currentStop : activeTradePlan.currentPremium >= currentStop;
-    const targetHit = isLongCall ? activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target) : activeTradePlan.currentPremium <= (activeTradePlan.targetPremium ?? activeTradePlan.target);
+    const targetHit = isLongCall ? activeTradePlan.currentPremium >= currentTarget : activeTradePlan.currentPremium <= currentTarget;
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
@@ -298,11 +300,15 @@ const Index = () => {
       const candidateStop = isLongCall
         ? activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP
         : activeTradePlan.entryPremium + activeTradePlan.initialSlPoints - lockedSteps * PREMIUM_TSL_STEP;
+      const candidateTarget = isLongCall
+        ? activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP
+        : activeTradePlan.entryPremium - activeTradePlan.initialTargetPoints - lockedSteps * PREMIUM_TSL_STEP;
       const shouldTrail = isLongCall ? candidateStop > currentStop : candidateStop < currentStop;
       if (shouldTrail) {
-        const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
+        const nextPlan = { ...activeTradePlan, targetPremium: candidateTarget, target: candidateTarget, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.max(0, Math.abs(nextPlan.entryPremium - candidateStop))));
+        setUserTargetPoints(String(Number(candidateTarget.toFixed(2))));
+        setUserSlPoints(String(Number(candidateStop.toFixed(2))));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
         syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
