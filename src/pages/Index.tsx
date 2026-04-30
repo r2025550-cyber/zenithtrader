@@ -422,6 +422,12 @@ const Index = () => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
       const triggered = [
+        "Sniper Mode active",
+        rules?.sustainedBullish1m && "3 bullish 1m candles",
+        rules?.sustainedBearish1m && "3 bearish 1m candles",
+        rules?.priceAboveEma21 && "Price > 21 EMA",
+        rules?.priceBelowEma21 && "Price < 21 EMA",
+        rules?.vixStable && "VIX stable",
         rules?.fakeBreakout && "POTENTIAL TRAP",
         rules?.vixRising && "VIX risk size-down",
         rules?.europeanOpenCaution && "European open caution",
@@ -434,7 +440,7 @@ const Index = () => {
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");
-      return `AI Suggestion: ${latestSignal.action} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Sniper Mode: ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
     }
     if (targetAchieved) return "Target Achieved: daily profit goal reached. AI trading is stopped for the day.";
     if (hardKillActive) return "Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.";
