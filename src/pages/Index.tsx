@@ -512,7 +512,7 @@ const Index = () => {
     if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
     if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
     if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.";
+    return "AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.";
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved]);
 
   const signIn = async (event: FormEvent) => {
@@ -840,7 +840,7 @@ const Index = () => {
         }
         await fetchLiveNifty(false, true);
       }
-      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
+      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
