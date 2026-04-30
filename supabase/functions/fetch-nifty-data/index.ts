@@ -77,12 +77,11 @@ function isInvalidUpstoxToken(error: unknown) {
 
 async function getQuote(instrumentKey: string, headers: HeadersInit) {
   const encoded = encodeURIComponent(instrumentKey);
-  const ohlcResponse = await fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers });
+  const quoteResponse = await fetch(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encoded}`, { headers });
   const quotePayload = await quoteResponse.json().catch(() => ({}));
   if (!quoteResponse.ok) throw new Error(upstoxErrorMessage("Upstox quote request failed", quoteResponse.status, quotePayload));
   const fullQuote = quoteFrom(firstNode(quotePayload));
-  const ohlcQuote = quoteFrom(firstNode(ohlcPayload));
-  return { quote: { ...ohlcQuote, ...fullQuote, ltp: fullQuote.ltp ?? ohlcQuote.ltp, volume: fullQuote.volume ?? ohlcQuote.volume }, raw: { ohlc: ohlcPayload, quote: quotePayload } };
+  return { quote: fullQuote, raw: { quote: quotePayload } };
 }
 
 async function getFundsAndMargin(headers: HeadersInit) {
