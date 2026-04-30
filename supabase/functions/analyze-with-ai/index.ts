@@ -99,7 +99,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
