@@ -731,7 +731,7 @@ const Index = () => {
   useEffect(() => {
     if (!session) return;
     checkSystemStatus(false).then((status) => {
-      if (status.upstox.ok) return fetchLiveNifty();
+      if (status.upstox.ok) return fetchLiveNifty(false, true);
       return null;
     }).catch(() => {
       // Connection Pulse will show missing setup after a manual check.
