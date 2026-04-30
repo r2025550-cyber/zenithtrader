@@ -440,8 +440,16 @@ const Index = () => {
     if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
     await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
     const nextPlan = { ...plan, lastSyncedStopLossPremium: plan.stopLossPremium };
-    setActiveTradePlan(nextPlan);
-    localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+    setActiveTradePlan((current) => {
+      if (!current || current.slOrderId !== plan.slOrderId) return current;
+      const currentStop = current.stopLossPremium ?? current.stopLoss;
+      const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
+      const sameStop = currentStop === syncedStop;
+      if (!sameStop) return current;
+      const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
+      return syncedPlan;
+    });
     toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
   };
 
