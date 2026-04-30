@@ -102,7 +102,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
     rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
-      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
+      fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +10% volume filter." : volumeValid === true ? `Volume +10% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +10% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
       vixSizeCut ? `India VIX rising ${vixMovePct?.toFixed(2)}%: reduce position size by 50%.` : vixRising ? "India VIX rising but below 5% size-cut threshold." : "India VIX not rising or unavailable.",
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
@@ -155,9 +155,9 @@ serve(async (req) => {
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
 - WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is at least 60% and every Sniper Mode gate is confirmed.
-- TREND ALIGNMENT: Use 1m execution plus 5m trend confirmation only. BUY requires Price > 21 EMA, VIX Stable, Volume > 20% average, sustained bullish 1m candles, and bullish 5m trend. SELL requires Price < 21 EMA, VIX Stable, Volume > 20% average, sustained bearish 1m candles, and bearish 5m trend. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
+- TREND ALIGNMENT: Use 1m execution plus 5m trend confirmation only. BUY requires Price > 21 EMA, VIX Stable, Volume > 10% average, sustained bullish 1m candles, and bullish 5m trend. SELL requires Price < 21 EMA, VIX Stable, Volume > 10% average, sustained bearish 1m candles, and bearish 5m trend. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
-- Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
+- Valid signal requires current volume at least 10% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
 - Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
 - 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
 - If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
@@ -193,12 +193,12 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, 3 rising 1m candles, and bullish 5m trend.`;
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +10% volume, 3 rising 1m candles, and bullish 5m trend.`;
     }
     if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, 3 falling 1m candles, and bearish 5m trend.`;
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +10% volume, 3 falling 1m candles, and bearish 5m trend.`;
     }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;
