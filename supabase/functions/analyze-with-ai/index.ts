@@ -153,7 +153,9 @@ serve(async (req) => {
 
     const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true && ruleContext.rules.trend5 === "bullish" && ruleContext.rules.multiTimeframeAligned === true;
     const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true && ruleContext.rules.trend5 === "bearish" && ruleContext.rules.multiTimeframeAligned === true;
-    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
+    const baseGateScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
+    const instantEmaBoost = (ruleContext.rules.priceAboveBothEmas || ruleContext.rules.priceBelowBothEmas) ? 40 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + Math.round(baseGateScore * 0.6)));
 
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
