@@ -3,6 +3,7 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_sha
 
 const INSTRUMENT_KEY = "NSE_INDEX|Nifty 50";
 const NIFTY_LOT_SIZE = 65;
+const RATE_LIMIT_RETRY_MS = 5_000;
 const CONTEXT_INSTRUMENTS = {
   bankNifty: "NSE_INDEX|Nifty Bank",
   indiaVix: "NSE_INDEX|India VIX",
@@ -25,6 +26,31 @@ function firstNode(payload: Record<string, unknown>) {
 function upstoxErrorMessage(prefix: string, status: number, payload: any) {
   const reason = payload?.errors?.[0]?.message ?? payload?.errors?.[0]?.errorCode ?? payload?.message ?? payload?.error ?? payload?.status ?? JSON.stringify(payload);
   return `${prefix} HTTP ${status}: ${reason}`;
+}
+
+function isUpstoxRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("UDAPI10005") || message.includes("HTTP 429") || message.toLowerCase().includes("too many request");
+}
+
+async function latestCachedMarketData(adminClient: any, userId: string, details: string) {
+  const { data } = await adminClient
+    .from("nifty_market_data")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return json({
+    success: true,
+    fallback: true,
+    rateLimited: true,
+    retryAfterMs: RATE_LIMIT_RETRY_MS,
+    error: "Upstox rate limit hit (UDAPI10005)",
+    details,
+    data: data ?? null,
+  });
 }
 
 function quoteFrom(node: any) {
@@ -75,13 +101,14 @@ function isInvalidUpstoxToken(error: unknown) {
   return message.includes("UDAPI100050") || message.toLowerCase().includes("invalid token");
 }
 
-async function getQuote(instrumentKey: string, headers: HeadersInit) {
-  const encoded = encodeURIComponent(instrumentKey);
+async function getQuotes(instrumentKeys: string[], headers: HeadersInit) {
+  const encoded = encodeURIComponent(instrumentKeys.join(","));
   const quoteResponse = await fetch(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encoded}`, { headers });
   const quotePayload = await quoteResponse.json().catch(() => ({}));
   if (!quoteResponse.ok) throw new Error(upstoxErrorMessage("Upstox quote request failed", quoteResponse.status, quotePayload));
-  const fullQuote = quoteFrom(firstNode(quotePayload));
-  return { quote: fullQuote, raw: { quote: quotePayload } };
+  const nodes = Object.values((quotePayload?.data as Record<string, unknown> | undefined) ?? {}) as any[];
+  const quoteFor = (instrumentKey: string) => quoteFrom(nodes.find((node) => node?.instrument_token === instrumentKey) ?? firstNode(quotePayload));
+  return { quoteFor, raw: { quote: quotePayload } };
 }
 
 async function getFundsAndMargin(headers: HeadersInit) {
