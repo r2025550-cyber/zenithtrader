@@ -113,6 +113,7 @@ const calculatePremiumExitPrices = (entryPremium: number) => ({
   targetPremium: Number((entryPremium + DEFAULT_PREMIUM_TARGET_POINTS).toFixed(2)),
   stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
 });
+const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
