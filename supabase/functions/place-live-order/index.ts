@@ -153,6 +153,7 @@ serve(async (req) => {
 
     return json({ success: true, order: orderResult, slOrder: slOrderResult, slOrderId: readOrderId(slOrderResult), instrument: option, instrumentToken: option.instrumentToken, quantity, availableCash, requiredCash, optionLtp, entryPremium: optionLtp, targetPremium, stopLossPremium, targetPremiumPoints, stopLossPremiumPoints });
   } catch (error) {
+    console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });
     return json({ error: error instanceof Error ? error.message : "Live order placement failed" }, 500);
   }
 });
