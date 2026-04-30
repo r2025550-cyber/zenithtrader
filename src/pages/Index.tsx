@@ -498,7 +498,7 @@ const Index = () => {
       setOauthCode("");
       setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
       await checkSystemStatus(false).catch(() => null);
-      await fetchLiveNifty();
+      await fetchLiveNifty(false, true);
       toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check the authorization code.";
@@ -511,8 +511,8 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async (executionIntent = false) => {
-    if (!upstoxReady) {
+  const fetchLiveNifty = async (executionIntent = false, skipReadyCheck = false) => {
+    if (!skipReadyCheck && !upstoxReady) {
       throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
     }
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
@@ -591,7 +591,7 @@ const Index = () => {
       await retestUpstox(true);
       if (systemStatus?.upstox?.ok !== true) return;
     }
-    await fetchLiveNifty();
+    await fetchLiveNifty(false, true);
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
   };
