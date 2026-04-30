@@ -126,15 +126,6 @@ type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
 type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
 
-const calculateVolatilityPoints = (points: MarketPoint[]) => {
-  const recent = points.slice(-12).map((point) => point.value);
-  if (recent.length < 4) return { targetPoints: DEFAULT_PREMIUM_TARGET_POINTS, slPoints: DEFAULT_PREMIUM_SL_POINTS };
-  const range = Math.max(...recent) - Math.min(...recent);
-  const targetPoints = Math.max(DEFAULT_PREMIUM_TARGET_POINTS, Math.ceil(range / 20) * 5);
-  const slPoints = Math.max(DEFAULT_PREMIUM_SL_POINTS, Math.ceil(targetPoints * 0.6));
-  return { targetPoints, slPoints };
-};
-
 const Index = () => {
   const { toast } = useToast();
   const marketIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
