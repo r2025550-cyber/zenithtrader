@@ -145,7 +145,14 @@ serve(async (req) => {
       return json({ success: true, signal: { action: "WAIT", strike: "WAIT", reason, conviction: "LOW", highProbability: false, ruleContext, raw_text: `ACTION: WAIT\nSTRIKE: WAIT\nCONVICTION: LOW\nREASON: ${reason}` } });
     }
 
+    const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true;
+    const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true;
+    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true].filter(Boolean).length / 5) * 100);
+
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
+- SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
+- WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is above 80% and every Sniper Mode gate is confirmed.
+- TREND ALIGNMENT: BUY requires Price > 21 EMA, VIX Stable, Volume > 20% average, and sustained bullish 1m candles. SELL requires Price < 21 EMA, VIX Stable, Volume > 20% average, and sustained bearish 1m candles. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
 - Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
 - Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
@@ -169,6 +176,8 @@ STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
 REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
+Computed Sniper Mode gates:\n${JSON.stringify({ buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: 80 })}
+
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
 Execution payload:\n${JSON.stringify({ executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss, userTargetPoints, userSlPoints })}
@@ -178,12 +187,22 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const result = await generateOpenAIText(settings.openai_api_key, prompt, 700);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
+    if (signal.action === "BUY" && !buySniperReady) {
+      signal.action = "WAIT";
+      signal.strike = "WAIT";
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, and 3 rising 1m candles.`;
+    }
+    if (signal.action === "SELL" && !sellSniperReady) {
+      signal.action = "WAIT";
+      signal.strike = "WAIT";
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, and 3 falling 1m candles.`;
+    }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && sniperConfirmationScore > 80 && (buySniperReady || sellSniperReady) && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
