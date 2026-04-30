@@ -8,6 +8,7 @@ const NIFTY_LOT_SIZE = 65;
 const BodySchema = z.object({
   action: z.enum(["BUY", "SELL"]),
   spotPrice: z.number().positive(),
+  strike: z.number().positive().optional(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
   targetPremiumPoints: z.number().positive().optional(),
@@ -42,9 +43,10 @@ async function getAvailableCash(headers: HeadersInit) {
   return numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net) ?? 0;
 }
 
-async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL") {
+async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number) {
   const optionType = action === "BUY" ? "CE" : "PE";
   const atmStrike = Math.round(spotPrice / 50) * 50;
+  const targetStrike = requestedStrike ?? atmStrike;
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
   const contractResponse = await fetch(`https://api.upstox.com/v2/option/contract?instrument_key=${encoded}`, { headers });
   const contractPayload = await contractResponse.json().catch(() => ({}));
@@ -62,11 +64,13 @@ async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action:
   const selected = candidates.reduce<UpstoxRecord | null>((best, row) => {
     const strike = numberFrom(row?.strike_price, row?.strikePrice, row?.strike);
     if (strike === null) return best;
+    if (requestedStrike && strike === targetStrike) return row;
     if (!best) return row;
-    const bestStrike = numberFrom(best?.strike_price, best?.strikePrice, best?.strike) ?? atmStrike;
-    return Math.abs(strike - atmStrike) < Math.abs(bestStrike - atmStrike) ? row : best;
+    const bestStrike = numberFrom(best?.strike_price, best?.strikePrice, best?.strike) ?? targetStrike;
+    return Math.abs(strike - targetStrike) < Math.abs(bestStrike - targetStrike) ? row : best;
   }, null);
-  if (!selected) throw new Error(`No ${optionType} option contract found for nearest expiry.`);
+  const selectedStrike = selected ? numberFrom(selected?.strike_price, selected?.strikePrice, selected?.strike) : null;
+  if (!selected || (requestedStrike && selectedStrike !== requestedStrike)) throw new Error(`Invalid Symbol: Nifty ${targetStrike} ${optionType} contract not found for nearest expiry.`);
 
   const strike = numberFrom(selected?.strike_price, selected?.strikePrice, selected?.strike) ?? atmStrike;
   const instrumentToken = selected?.instrument_key ?? selected?.instrumentKey ?? selected?.instrument_token ?? selected?.instrumentToken;
@@ -106,7 +110,7 @@ serve(async (req) => {
     const headers = { Authorization: `Bearer ${settings.upstox_access_token}`, Accept: "application/json", "Content-Type": "application/json" };
     const liveLotSize = parsed.data.effectiveLotSize ?? parsed.data.tradingLotSize;
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
-    const option = await resolveAtmOption(headers, parsed.data.spotPrice, parsed.data.action);
+    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike);
     const optionLtp = await getOptionLtp(headers, option.instrumentToken);
     const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
     const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
