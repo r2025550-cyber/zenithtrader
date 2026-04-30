@@ -104,6 +104,11 @@ const parseSuggestedStrike = (strike?: string) => {
   const match = strike?.match(/Nifty\s+(\d{4,6})\s+(CE|PE)/i);
   return match ? Number(match[1]) : null;
 };
+const parseSuggestedAction = (signal?: Signal | null) => {
+  if (signal?.action === "BUY" || signal?.action === "SELL") return signal.action;
+  const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
+  return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
+};
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
@@ -244,13 +249,14 @@ const Index = () => {
 
   useEffect(() => {
     const strike = parseSuggestedStrike(latestSignal?.strike);
-    if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || !strike || activeTrade) return;
+    const action = parseSuggestedAction(latestSignal);
+    if (!latestSignal || !action || !strike || activeTrade) return;
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
     setUserTargetPoints(String(DEFAULT_PREMIUM_TARGET_POINTS));
     setUserSlPoints(String(DEFAULT_PREMIUM_SL_POINTS));
-    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action: latestSignal.action })
+    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
         toast({ title: "Premium points auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ${DEFAULT_PREMIUM_TARGET_POINTS} pts · SL ${DEFAULT_PREMIUM_SL_POINTS} pts.` });
       })
