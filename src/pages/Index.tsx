@@ -675,8 +675,9 @@ const Index = () => {
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
         }
-        const targetPremium = Number(userTargetPoints) || liveOrder.targetPremium;
-        const stopLossPremium = Number(userSlPoints) || liveOrder.stopLossPremium;
+        const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
+        const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
+        const stopLossPremium = shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
         const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
         const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
         const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
