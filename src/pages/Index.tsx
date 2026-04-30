@@ -654,7 +654,7 @@ const Index = () => {
     }
     await fetchLiveNifty(false, true);
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
-    setLatestSignal(ai.signal);
+    applySniperSignal(ai.signal);
   };
 
   const executeTradingSignal = async () => {
@@ -671,7 +671,7 @@ const Index = () => {
       const liveMarket = await fetchLiveNifty(true, true);
       const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
-      setLatestSignal(ai.signal);
+      applySniperSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
         if (!Number.isFinite(liveSpot)) {
           toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
@@ -780,7 +780,7 @@ const Index = () => {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
           withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
-            .then((ai) => setLatestSignal(ai.signal))
+            .then((ai) => applySniperSignal(ai.signal))
             .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
         }, AI_REASONING_INTERVAL_MS);
       }
