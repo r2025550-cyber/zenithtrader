@@ -24,6 +24,18 @@ function atmStrike(price: number | null) {
 
 const NIFTY_LOT_SIZE = 65;
 
+function latestMinuteCloses(history: MarketRow[]) {
+  const byMinute = new Map<string, number>();
+  for (const row of history) {
+    const price = num(row?.ltp);
+    const stampedAt = row?.source_timestamp ?? row?.created_at;
+    if (price === null || !stampedAt) continue;
+    const minuteKey = new Date(stampedAt).toISOString().slice(0, 16);
+    if (!byMinute.has(minuteKey)) byMinute.set(minuteKey, price);
+  }
+  return Array.from(byMinute.values()).slice(0, 4);
+}
+
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
 
 function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
@@ -66,6 +78,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const prices = chronological.map((row) => num(row?.ltp)).filter((value): value is number => value !== null);
   const ema9 = ema(prices, 9);
   const ema21 = ema(prices, 21);
+  const priceAboveEma21 = ltp !== null && ema21 !== null ? ltp > ema21 : false;
+  const priceBelowEma21 = ltp !== null && ema21 !== null ? ltp < ema21 : false;
   const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
   const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
   const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
@@ -76,9 +90,13 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
   const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
   const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
+  const minuteCloses = latestMinuteCloses(history);
+  const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
+  const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
+  const vixStable = vixMovePct === null || vixMovePct <= 0;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
