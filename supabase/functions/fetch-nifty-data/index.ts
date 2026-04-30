@@ -135,24 +135,24 @@ serve(async (req) => {
     if (!settings.upstox_access_token) return json({ error: "Connect Upstox OAuth before fetching market data." }, 400);
 
     const headers = { Authorization: `Bearer ${settings.upstox_access_token}`, Accept: "application/json" };
-    const nifty = await getQuote(INSTRUMENT_KEY, headers).catch((error) => ({ error }));
-    if ("error" in nifty) {
-      if (isInvalidUpstoxToken(nifty.error)) {
+    const quoteKeys = [INSTRUMENT_KEY, CONTEXT_INSTRUMENTS.bankNifty, CONTEXT_INSTRUMENTS.indiaVix, ...CONTEXT_INSTRUMENTS.heavyweights];
+    const quotes = await getQuotes(quoteKeys, headers).catch((error) => ({ error }));
+    if ("error" in quotes) {
+      const details = String(quotes.error?.message ?? quotes.error);
+      if (isInvalidUpstoxToken(quotes.error)) {
         await auth.adminClient.from("trading_api_settings").update({ upstox_access_token: null, upstox_refresh_token: null, token_expires_at: null }).eq("user_id", auth.user.id);
         return json({ error: "Upstox OAuth reconnect required", details: "The saved Upstox access token is invalid or expired. Open API Settings, tap Get Code, complete login, then paste a fresh code and Connect." }, 401);
       }
-      return json({ error: "Upstox Nifty request failed", details: String(nifty.error?.message ?? nifty.error) }, 502);
+      if (isUpstoxRateLimitError(quotes.error)) return latestCachedMarketData(auth.adminClient, auth.user.id, details);
+      return json({ error: "Upstox Nifty request failed", details }, 502);
     }
 
-    const [bankNifty, indiaVix, optionChain, margin, ...heavyweights] = await Promise.allSettled([
-      getQuote(CONTEXT_INSTRUMENTS.bankNifty, headers),
-      getQuote(CONTEXT_INSTRUMENTS.indiaVix, headers),
+    const [optionChain, margin] = await Promise.allSettled([
       getOptionChainPcr(headers),
       getFundsAndMargin(headers),
-      ...CONTEXT_INSTRUMENTS.heavyweights.map((key) => getQuote(key, headers)),
     ]);
 
-    const contextQuote = (result: PromiseSettledResult<{ quote: Record<string, unknown>; raw: unknown }>) => result.status === "fulfilled" ? result.value.quote : null;
+    const nifty = { quote: quotes.quoteFor(INSTRUMENT_KEY), raw: quotes.raw };
     const ltp = nifty.quote.ltp;
 
     const row = {
@@ -174,9 +174,9 @@ serve(async (req) => {
           todayPnl: margin.status === "fulfilled" ? margin.value.todayPnl : null,
         },
         context: {
-          bankNifty: contextQuote(bankNifty),
-          indiaVix: contextQuote(indiaVix),
-          heavyweights: heavyweights.map(contextQuote).filter(Boolean),
+          bankNifty: quotes.quoteFor(CONTEXT_INSTRUMENTS.bankNifty),
+          indiaVix: quotes.quoteFor(CONTEXT_INSTRUMENTS.indiaVix),
+          heavyweights: CONTEXT_INSTRUMENTS.heavyweights.map((key) => quotes.quoteFor(key)).filter((quote) => quote.ltp !== null),
         },
         execution: { intent: executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity },
       },
