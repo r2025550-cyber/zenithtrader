@@ -460,6 +460,28 @@ const Index = () => {
     toast({ title: "Retrying Connection...", description: message });
   };
 
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isUpstoxRateLimitError = (message: string) => message.includes(UPSTOX_RATE_LIMIT_ERROR) || message.toLowerCase().includes("too many requests");
+
+  const throttleUpstoxRequest = async () => {
+    upstoxRequestQueueRef.current = upstoxRequestQueueRef.current.catch(() => undefined).then(async () => {
+      const now = Date.now();
+      const waitForBackoff = Math.max(0, upstoxBackoffUntilRef.current - now);
+      if (waitForBackoff > 0) await delay(waitForBackoff);
+      const waitForThrottle = Math.max(0, UPSTOX_POLL_INTERVAL_MS - (Date.now() - lastUpstoxRequestAtRef.current));
+      if (waitForThrottle > 0) await delay(waitForThrottle);
+      lastUpstoxRequestAtRef.current = Date.now();
+    });
+    await upstoxRequestQueueRef.current;
+  };
+
+  const markUpstoxRateLimited = (message: string) => {
+    if (!isUpstoxRateLimitError(message)) return false;
+    upstoxBackoffUntilRef.current = Math.max(upstoxBackoffUntilRef.current, Date.now() + UPSTOX_RATE_LIMIT_BACKOFF_MS);
+    showRetryToast("Upstox rate limit hit (UDAPI10005). Waiting 5 seconds before retrying to avoid IP block.");
+    return true;
+  };
+
   const reasoning = useMemo(() => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
@@ -508,6 +530,8 @@ const Index = () => {
   };
 
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
+    const touchesUpstox = ["fetch-nifty-data", "fetch-option-premium", "system-status", "place-live-order", "modify-stop-loss-order", "emergency-exit"].includes(name);
+    if (touchesUpstox) await throttleUpstoxRequest();
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
     if (error) {
       let serverMessage = error.message;
@@ -521,6 +545,7 @@ const Index = () => {
         : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
           ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
         : serverMessage;
+      markUpstoxRateLimited(message);
       throw new Error(message);
     }
     return data;
