@@ -250,9 +250,11 @@ const Index = () => {
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
-    const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
-    const stopHit = activeTradePlan.currentPremium <= (activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss);
-    const targetHit = activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target);
+    const isLongCall = activeTradePlan.action === "BUY";
+    const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
+    const premiumProfit = isLongCall ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : activeTradePlan.entryPremium - activeTradePlan.currentPremium;
+    const stopHit = isLongCall ? activeTradePlan.currentPremium <= currentStop : activeTradePlan.currentPremium >= currentStop;
+    const targetHit = isLongCall ? activeTradePlan.currentPremium >= (activeTradePlan.targetPremium ?? activeTradePlan.target) : activeTradePlan.currentPremium <= (activeTradePlan.targetPremium ?? activeTradePlan.target);
     if (stopHit) {
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
@@ -271,11 +273,14 @@ const Index = () => {
     }
     if (premiumProfit >= PREMIUM_TSL_STEP) {
       const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
-      if (candidateStop > (activeTradePlan.stopLossPremium ?? 0)) {
+      const candidateStop = isLongCall
+        ? activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP
+        : activeTradePlan.entryPremium + activeTradePlan.initialSlPoints - lockedSteps * PREMIUM_TSL_STEP;
+      const shouldTrail = isLongCall ? candidateStop > currentStop : candidateStop < currentStop;
+      if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserSlPoints(String(Math.max(0, nextPlan.entryPremium - candidateStop)));
+        setUserSlPoints(String(Math.max(0, Math.abs(nextPlan.entryPremium - candidateStop))));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
         syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
