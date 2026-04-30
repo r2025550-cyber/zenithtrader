@@ -71,7 +71,6 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const heavyweights = ((latest?.raw_payload?.context as Record<string, unknown> | undefined)?.heavyweights ?? []) as Record<string, unknown>[];
   const heavyMoves = heavyweights.map((quote) => pctMove(num(quote?.ltp), num(quote?.open))).filter((value: number | null): value is number => value !== null);
   const pcr = num(latest?.raw_payload?.optionChain?.pcr);
-  const pcr = num(latest?.raw_payload?.optionChain?.pcr);
   const effectiveVolume = volume ?? num(latest?.raw_payload?.optionChain?.totalVolume);
   const volumeSource = volume !== null ? latest?.raw_payload?.volumeSource ?? "upstox_quote" : effectiveVolume !== null ? "upstox_option_chain" : null;
   const chronological = [...history].reverse();
