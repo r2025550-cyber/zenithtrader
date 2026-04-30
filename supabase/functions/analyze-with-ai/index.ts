@@ -24,7 +24,7 @@ function atmStrike(price: number | null) {
 
 const NIFTY_LOT_SIZE = 65;
 
-function latestMinuteCloses(history: MarketRow[]) {
+function latestMinuteCloses(history: MarketRow[], count = 4) {
   const byMinute = new Map<string, number>();
   for (const row of history) {
     const price = num(row?.ltp);
@@ -33,7 +33,7 @@ function latestMinuteCloses(history: MarketRow[]) {
     const minuteKey = new Date(stampedAt).toISOString().slice(0, 16);
     if (!byMinute.has(minuteKey)) byMinute.set(minuteKey, price);
   }
-  return Array.from(byMinute.values()).slice(0, 4);
+  return Array.from(byMinute.values()).slice(0, count);
 }
 
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
@@ -83,20 +83,19 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
   const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
   const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
-  const fifteenMinuteRows = history.filter((row) => Date.now() - new Date(row.created_at).getTime() <= 15 * 60 * 1000);
-  const oldest15 = fifteenMinuteRows[fifteenMinuteRows.length - 1];
-  const trend15MovePct = pctMove(ltp, num(oldest15?.ltp));
-  const trend15 = trend15MovePct === null ? "pending" : trend15MovePct > 0.08 ? "bullish" : trend15MovePct < -0.08 ? "bearish" : "flat";
   const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
   const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
-  const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
+  const trendMinuteCloses = latestMinuteCloses(history, 6);
+  const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
+  const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
+  const multiTimeframeAligned = trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m;
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -107,7 +106,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
       pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
       emaAligned ? `9/21 EMA crossover aligns ${emaTrend} with price action.` : `9/21 EMA alignment pending/failed: EMA=${emaTrend}, price=${priceAction}.`,
-      multiTimeframeAligned ? `15-minute ${trend15} trend confirms 1-minute ${entry1m} entry.` : `15-minute trend does not confirm 1-minute entry: 15m=${trend15}, 1m=${entry1m}.`,
+      multiTimeframeAligned ? `5-minute ${trend5} trend confirms 1-minute ${entry1m} entry.` : `5-minute trend does not confirm 1-minute entry: 5m=${trend5}, 1m=${entry1m}.`,
     ],
   };
 }
