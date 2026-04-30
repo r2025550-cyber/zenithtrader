@@ -243,14 +243,22 @@ const Index = () => {
   }, [activeTrade, aiEnabled, cooldownActive, cooldownRemainingMinutes, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
 
   useEffect(() => {
-    if (!latestSignal || latestSignal.action !== "BUY" || activeTrade) return;
+    const strike = parseSuggestedStrike(latestSignal?.strike);
+    if (!latestSignal || !["BUY", "SELL"].includes(latestSignal.action) || !strike || activeTrade) return;
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
-    const { targetPoints, slPoints } = calculateVolatilityPoints(marketHistory);
-    setUserTargetPoints(String(targetPoints));
-    setUserSlPoints(String(slPoints));
-  }, [activeTrade, latestSignal, marketHistory]);
+    setUserTargetPoints(String(DEFAULT_PREMIUM_TARGET_POINTS));
+    setUserSlPoints(String(DEFAULT_PREMIUM_SL_POINTS));
+    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action: latestSignal.action })
+      .then(({ premium, instrument }) => {
+        toast({ title: "Premium points auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ${DEFAULT_PREMIUM_TARGET_POINTS} pts · SL ${DEFAULT_PREMIUM_SL_POINTS} pts.` });
+      })
+      .catch((error) => {
+        toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrade, latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
