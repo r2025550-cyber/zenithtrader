@@ -188,6 +188,8 @@ const Index = () => {
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
   const dailyPnl = upstoxTodayPnl ?? 0;
   const availableCash = toNumber(latestData?.raw_payload?.account?.margin?.availableCash) ?? 0;
+  const upstoxReady = systemStatus?.upstox?.ok === true;
+  const upstoxNeedsSetup = session && systemStatus?.upstox?.ok === false;
   const normalizedDailyTarget = Math.max(0, Number.parseInt(dailyProfitTarget, 10) || 0);
   const normalizedMaxDailyLoss = DAILY_STOP_LOSS;
   const tradesRemaining = Math.max(0, MAX_TRADES_PER_DAY - executedTrades);
@@ -510,6 +512,9 @@ const Index = () => {
   };
 
   const fetchLiveNifty = async (executionIntent = false) => {
+    if (!upstoxReady) {
+      throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
+    }
     const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
@@ -582,6 +587,10 @@ const Index = () => {
 
   const runTradingCycle = async () => {
     if (tradingBlocked) return;
+    if (!upstoxReady) {
+      await retestUpstox(true);
+      if (systemStatus?.upstox?.ok !== true) return;
+    }
     await fetchLiveNifty();
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     setLatestSignal(ai.signal);
