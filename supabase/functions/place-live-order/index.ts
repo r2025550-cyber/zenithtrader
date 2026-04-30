@@ -29,6 +29,11 @@ function firstNode(payload: Record<string, unknown>) {
   return Object.values((payload?.data as Record<string, unknown> | undefined) ?? {})[0] as UpstoxRecord | undefined;
 }
 
+function upstoxErrorMessage(prefix: string, status: number, payload: any) {
+  const reason = payload?.errors?.[0]?.message ?? payload?.errors?.[0]?.errorCode ?? payload?.message ?? payload?.error ?? payload?.status ?? JSON.stringify(payload);
+  return `${prefix} HTTP ${status}: ${reason}`;
+}
+
 async function getAvailableCash(headers: HeadersInit) {
   const response = await fetch("https://api.upstox.com/v2/user/get-funds-and-margin?segment=SEC", { headers });
   const payload = await response.json().catch(() => ({}));
@@ -43,7 +48,7 @@ async function resolveAtmOption(headers: HeadersInit, spotPrice: number, action:
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
   const contractResponse = await fetch(`https://api.upstox.com/v2/option/contract?instrument_key=${encoded}`, { headers });
   const contractPayload = await contractResponse.json().catch(() => ({}));
-  if (!contractResponse.ok) throw new Error(`Option contract HTTP ${contractResponse.status}: ${JSON.stringify(contractPayload)}`);
+  if (!contractResponse.ok) throw new Error(upstoxErrorMessage("Option contract", contractResponse.status, contractPayload));
 
   const rows = (Array.isArray(contractPayload?.data) ? contractPayload.data : []) as UpstoxRecord[];
   const today = new Date().toISOString().slice(0, 10);
@@ -73,14 +78,14 @@ async function getOptionLtp(headers: HeadersInit, instrumentToken: string) {
   const encoded = encodeURIComponent(instrumentToken);
   const response = await fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Option LTP HTTP ${response.status}: ${JSON.stringify(payload)}`);
+  if (!response.ok) throw new Error(upstoxErrorMessage("Option LTP", response.status, payload));
   return numberFrom(firstNode(payload)?.last_price, firstNode(payload)?.ltp, firstNode(payload)?.lastPrice) ?? 0;
 }
 
 async function placeOrder(headers: HeadersInit, orderPayload: Record<string, unknown>) {
   const orderResponse = await fetch("https://api.upstox.com/v2/order/place", { method: "POST", headers, body: JSON.stringify(orderPayload) });
   const orderResult = await orderResponse.json().catch(() => ({}));
-  if (!orderResponse.ok) throw new Error(`Order HTTP ${orderResponse.status}: ${JSON.stringify(orderResult)}`);
+  if (!orderResponse.ok) throw new Error(upstoxErrorMessage("Order", orderResponse.status, orderResult));
   return orderResult;
 }
 
