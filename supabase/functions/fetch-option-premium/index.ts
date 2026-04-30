@@ -73,6 +73,7 @@ serve(async (req) => {
     if (premium === null) return json({ error: "Option premium unavailable from Upstox." }, 400);
     return json({ success: true, premium, instrument, raw: payload });
   } catch (error) {
+    console.error("fetch-option-premium Upstox failure", { message: error instanceof Error ? error.message : String(error) });
     return json({ error: error instanceof Error ? error.message : "Option premium fetch failed" }, 500);
   }
 });
