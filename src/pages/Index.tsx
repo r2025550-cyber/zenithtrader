@@ -658,9 +658,10 @@ const Index = () => {
         const volatilityPoints = calculateVolatilityPoints(marketHistory);
         const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
         const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
+        const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
         if (!liveOrder.success) {
-          toast({ title: "Low Margin", description: "Available Cash is insufficient for the selected lot size. Live order blocked.", variant: "destructive" });
+          toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
         }
         const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
@@ -678,7 +679,7 @@ const Index = () => {
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
-      showRetryToast(error instanceof Error ? error.message : "Execution cycle will retry on the next poll.");
+      toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
     } finally {
       setIsBusy(false);
     }
