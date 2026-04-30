@@ -470,7 +470,7 @@ const Index = () => {
         rules?.divergence && "Low Conviction divergence",
         rules?.volumeValid && "Volume +20% confirmed",
         rules?.emaAligned && `EMA ${rules.emaTrend} aligned`,
-        rules?.multiTimeframeAligned && `15m confirms 1m ${rules.entry1m}`,
+        rules?.multiTimeframeAligned && `5m confirms 1m ${rules.entry1m}`,
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");
