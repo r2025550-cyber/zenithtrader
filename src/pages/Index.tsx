@@ -137,6 +137,7 @@ const Index = () => {
   const retryToastRef = useRef(0);
   const lastSignalAutofillRef = useRef("");
   const lastSignalAlertRef = useRef("");
+  const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -330,11 +331,13 @@ const Index = () => {
   }, [activeTradePlan]);
 
   useEffect(() => {
+    const previousAction = previousSignalActionRef.current;
+    previousSignalActionRef.current = latestSignal?.action ?? "WAIT";
     if (!isTradeSignal(latestSignal?.action)) return;
     const signalKey = `${latestSignal?.created_at ?? ""}-${latestSignal?.action}-${latestSignal?.strike}`;
     if (signalKey === lastSignalAlertRef.current) return;
     lastSignalAlertRef.current = signalKey;
-    triggerSignalAlert(latestSignal as Signal);
+    triggerSignalAlert(latestSignal as Signal, previousAction === "WAIT");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
@@ -386,10 +389,10 @@ const Index = () => {
     oscillator.stop(context.currentTime + (tone === "SELL" ? 0.58 : 0.45));
   };
 
-  const triggerSignalAlert = (signal: Signal) => {
+  const triggerSignalAlert = (signal: Signal, vibrate = false) => {
     if (!isTradeSignal(signal.action)) return;
     playAlertTone(signal.action as "BUY" | "SELL");
-    if (navigator.vibrate) navigator.vibrate(signal.action === "BUY" ? [80, 40, 80] : [180]);
+    if (vibrate && navigator.vibrate) navigator.vibrate(signal.action === "BUY" ? [80, 40, 80] : [180]);
   };
 
   useEffect(() => {
