@@ -48,7 +48,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const volumes = history.map((row) => num(row?.raw_payload?.volume) ?? num(row?.raw_payload?.optionChain?.totalVolume)).filter((value): value is number => value !== null).slice(0, 5);
   const avg5Volume = volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
   const volumeAvailable = volume !== null && avg5Volume !== null && volumes.length >= 2;
-  const volumeValid = volumeAvailable ? volume >= avg5Volume * 1.2 : null;
+  const volumeValid = volumeAvailable ? volume >= avg5Volume * 1.1 : null;
   const previous = history[1];
   const previousHigh = num(previous?.high_price);
   const previousLow = num(previous?.low_price);
