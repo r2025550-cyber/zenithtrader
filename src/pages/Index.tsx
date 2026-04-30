@@ -115,8 +115,9 @@ const calculatePremiumExitPrices = (entryPremium: number) => ({
   stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
 });
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
+const isTradeSignal = (action?: string | null) => action === "BUY" || action === "SELL";
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend5?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
@@ -135,6 +136,7 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const lastSignalAutofillRef = useRef("");
+  const lastSignalAlertRef = useRef("");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
