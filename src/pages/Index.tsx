@@ -114,7 +114,7 @@ type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; ch
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string };
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
 
 const calculateVolatilityPoints = (points: MarketPoint[]) => {
   const recent = points.slice(-12).map((point) => point.value);
@@ -435,11 +435,17 @@ const Index = () => {
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
     if (error) {
-      const message = error.message.includes(UPSTOX_INVALID_CODE_ERROR)
+      let serverMessage = error.message;
+      const context = (error as unknown as { context?: Response }).context;
+      if (context) {
+        const payload = await context.clone().json().catch(() => null);
+        serverMessage = [payload?.error, payload?.details].filter(Boolean).join(" — ") || serverMessage;
+      }
+      const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
         ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-        : error.message.includes(UPSTOX_INVALID_TOKEN_ERROR) || error.message.toLowerCase().includes("upstox oauth reconnect required")
+        : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
           ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
-        : error.message;
+        : serverMessage;
       throw new Error(message);
     }
     return data;
