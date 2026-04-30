@@ -127,6 +127,7 @@ type PulseCheck = { ok: boolean; message: string; details?: Record<string, unkno
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
+type MarketFetchResult = { data: NiftyData | null; fallback?: boolean; rateLimited?: boolean; retryAfterMs?: number; error?: string; details?: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
 type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
 
@@ -463,6 +464,10 @@ const Index = () => {
 
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const isUpstoxRateLimitError = (message: string) => message.includes(UPSTOX_RATE_LIMIT_ERROR) || message.toLowerCase().includes("too many requests");
+  const applyUpstoxBackoff = (retryAfterMs = UPSTOX_RATE_LIMIT_BACKOFF_MS) => {
+    upstoxBackoffUntilRef.current = Math.max(upstoxBackoffUntilRef.current, Date.now() + Math.max(retryAfterMs, UPSTOX_RATE_LIMIT_BACKOFF_MS));
+    showRetryToast("Upstox rate limit hit (UDAPI10005). Waiting 5 seconds before retrying to avoid IP block.");
+  };
 
   const throttleUpstoxRequest = async () => {
     upstoxRequestQueueRef.current = upstoxRequestQueueRef.current.catch(() => undefined).then(async () => {
@@ -478,8 +483,7 @@ const Index = () => {
 
   const markUpstoxRateLimited = (message: string) => {
     if (!isUpstoxRateLimitError(message)) return false;
-    upstoxBackoffUntilRef.current = Math.max(upstoxBackoffUntilRef.current, Date.now() + UPSTOX_RATE_LIMIT_BACKOFF_MS);
-    showRetryToast("Upstox rate limit hit (UDAPI10005). Waiting 5 seconds before retrying to avoid IP block.");
+    applyUpstoxBackoff();
     return true;
   };
 
@@ -650,10 +654,12 @@ const Index = () => {
     if (!skipReadyCheck && !upstoxReady) {
       throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
     }
-    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
+    if (!market.data) throw new Error([market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.");
     setSystemStatus((prev) => ({
       ready: prev?.gemini?.ok ? true : prev?.ready ?? true,
-      upstox: { ok: true, message: "Upstox token verified by live market data fetch." },
+      upstox: { ok: true, message: market.fallback ? "Upstox rate-limited; using last cached market data while waiting 5 seconds." : "Upstox token verified by live market data fetch." },
       gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." },
       checkedAt: new Date().toISOString(),
     }));
