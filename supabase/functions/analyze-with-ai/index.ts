@@ -107,7 +107,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       europeanOpenCaution ? "European Market Open time-block: extra caution active." : "Normal time block.",
       overextended ? "Overextended Zone: Nifty moved >1.5% without pullback; stop new entries." : "Mean-reversion guard clear.",
       noTradeRange ? "No-Trade Zone: 60-minute range is under 40 points." : "Range filter clear or awaiting more history.",
-      divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
+      niftyDrivenMomentum ? `Nifty momentum override active (price ${priceAboveBothEmas ? "above" : "below"} both 9 & 21 EMA on 1m+5m); Bank Nifty divergence weight reduced.` : (divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context."),
       pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
       emaAligned ? `9/21 EMA crossover aligns ${emaTrend} with price action.` : `9/21 EMA alignment pending/failed: EMA=${emaTrend}, price=${priceAction}.`,
       multiTimeframeAligned ? `5-minute ${trend5} trend confirms 1-minute ${entry1m} entry.` : `5-minute trend does not confirm 1-minute entry: 5m=${trend5}, 1m=${entry1m}.`,
