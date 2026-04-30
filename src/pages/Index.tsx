@@ -303,7 +303,7 @@ const Index = () => {
     if (liveAtmStrike === null) return;
     if (lastAtmStrikeRef.current !== null && lastAtmStrikeRef.current !== liveAtmStrike && !activeTrade) {
       setSuggestedEntryPremium(null);
-      lastSignalAutofillRef.current = null;
+      lastSignalAutofillRef.current = "";
     }
     lastAtmStrikeRef.current = liveAtmStrike;
   }, [liveAtmStrike, activeTrade]);
