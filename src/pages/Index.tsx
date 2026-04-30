@@ -671,18 +671,19 @@ const Index = () => {
           toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
           return;
         }
-        const volatilityPoints = calculateVolatilityPoints(marketHistory);
-        const targetPoints = Number(userTargetPoints) || volatilityPoints.targetPoints;
-        const slPoints = Number(userSlPoints) || volatilityPoints.slPoints;
         const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: targetPoints, stopLossPremiumPoints: slPoints });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS });
         if (!liveOrder.success) {
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
         }
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: liveOrder.targetPremium, stopLoss: liveOrder.stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium: liveOrder.targetPremium, stopLossPremium: liveOrder.stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
-        setUserTargetPoints(String(targetPoints));
-        setUserSlPoints(String(slPoints));
+        const targetPremium = Number(userTargetPoints) || liveOrder.targetPremium;
+        const stopLossPremium = Number(userSlPoints) || liveOrder.stopLossPremium;
+        const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
+        const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
+        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
+        setUserTargetPoints(String(Number(targetPremium.toFixed(2))));
+        setUserSlPoints(String(Number(stopLossPremium.toFixed(2))));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
