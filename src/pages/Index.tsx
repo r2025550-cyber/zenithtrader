@@ -60,6 +60,7 @@ const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 5;
 const COOLDOWN_MS = 15 * 60 * 1000;
+const SIGNAL_LOCK_MS = 10_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -115,7 +116,7 @@ const calculatePremiumExitPrices = (entryPremium: number) => ({
 });
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
@@ -134,6 +135,7 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const lastSignalAutofillRef = useRef("");
+  const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -163,6 +165,26 @@ const Index = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
+
+  const applySniperSignal = (signal: Signal) => {
+    const locked = signalLockRef.current;
+    const now = Date.now();
+    if (locked && now < locked.lockedUntil) {
+      const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
+      const majorBreak = signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 || signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
+      if (signal.action === "WAIT" && !majorBreak) {
+        setLatestSignal(locked.signal);
+        return;
+      }
+      if (!fullReversal && signal.action !== locked.signal.action) {
+        setLatestSignal(locked.signal);
+        return;
+      }
+    }
+    if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
+    else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
+    setLatestSignal(signal);
+  };
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
@@ -400,6 +422,12 @@ const Index = () => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
       const triggered = [
+        "Sniper Mode active",
+        rules?.sustainedBullish1m && "3 bullish 1m candles",
+        rules?.sustainedBearish1m && "3 bearish 1m candles",
+        rules?.priceAboveEma21 && "Price > 21 EMA",
+        rules?.priceBelowEma21 && "Price < 21 EMA",
+        rules?.vixStable && "VIX stable",
         rules?.fakeBreakout && "POTENTIAL TRAP",
         rules?.vixRising && "VIX risk size-down",
         rules?.europeanOpenCaution && "European open caution",
@@ -412,7 +440,7 @@ const Index = () => {
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");
-      return `AI Suggestion: ${latestSignal.action} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Sniper Mode: ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
     }
     if (targetAchieved) return "Target Achieved: daily profit goal reached. AI trading is stopped for the day.";
     if (hardKillActive) return "Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.";
@@ -632,7 +660,7 @@ const Index = () => {
     }
     await fetchLiveNifty(false, true);
     const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
-    setLatestSignal(ai.signal);
+    applySniperSignal(ai.signal);
   };
 
   const executeTradingSignal = async () => {
@@ -649,7 +677,7 @@ const Index = () => {
       const liveMarket = await fetchLiveNifty(true, true);
       const liveSpot = Number(liveMarket?.ltp);
       const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
-      setLatestSignal(ai.signal);
+      applySniperSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
         if (!Number.isFinite(liveSpot)) {
           toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
@@ -758,7 +786,7 @@ const Index = () => {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
           withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
-            .then((ai) => setLatestSignal(ai.signal))
+            .then((ai) => applySniperSignal(ai.signal))
             .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
         }, AI_REASONING_INTERVAL_MS);
       }

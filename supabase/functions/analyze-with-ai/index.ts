@@ -24,6 +24,18 @@ function atmStrike(price: number | null) {
 
 const NIFTY_LOT_SIZE = 65;
 
+function latestMinuteCloses(history: MarketRow[]) {
+  const byMinute = new Map<string, number>();
+  for (const row of history) {
+    const price = num(row?.ltp);
+    const stampedAt = row?.source_timestamp ?? row?.created_at;
+    if (price === null || !stampedAt) continue;
+    const minuteKey = new Date(stampedAt).toISOString().slice(0, 16);
+    if (!byMinute.has(minuteKey)) byMinute.set(minuteKey, price);
+  }
+  return Array.from(byMinute.values()).slice(0, 4);
+}
+
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
 
 function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
@@ -66,6 +78,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const prices = chronological.map((row) => num(row?.ltp)).filter((value): value is number => value !== null);
   const ema9 = ema(prices, 9);
   const ema21 = ema(prices, 21);
+  const priceAboveEma21 = ltp !== null && ema21 !== null ? ltp > ema21 : false;
+  const priceBelowEma21 = ltp !== null && ema21 !== null ? ltp < ema21 : false;
   const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
   const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
   const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
@@ -76,9 +90,13 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
   const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
   const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
+  const minuteCloses = latestMinuteCloses(history);
+  const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
+  const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
+  const vixStable = vixMovePct === null || vixMovePct <= 0;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -127,7 +145,14 @@ serve(async (req) => {
       return json({ success: true, signal: { action: "WAIT", strike: "WAIT", reason, conviction: "LOW", highProbability: false, ruleContext, raw_text: `ACTION: WAIT\nSTRIKE: WAIT\nCONVICTION: LOW\nREASON: ${reason}` } });
     }
 
+    const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true;
+    const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true;
+    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true].filter(Boolean).length / 5) * 100);
+
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
+- SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
+- WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is above 80% and every Sniper Mode gate is confirmed.
+- TREND ALIGNMENT: BUY requires Price > 21 EMA, VIX Stable, Volume > 20% average, and sustained bullish 1m candles. SELL requires Price < 21 EMA, VIX Stable, Volume > 20% average, and sustained bearish 1m candles. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
 - Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
 - Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
@@ -151,6 +176,8 @@ STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
 REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
 
+Computed Sniper Mode gates:\n${JSON.stringify({ buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: 80 })}
+
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
 Execution payload:\n${JSON.stringify({ executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss, userTargetPoints, userSlPoints })}
@@ -160,12 +187,22 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const result = await generateOpenAIText(settings.openai_api_key, prompt, 700);
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
+    if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore <= 80)) {
+      signal.action = "WAIT";
+      signal.strike = "WAIT";
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, and 3 rising 1m candles.`;
+    }
+    if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore <= 80)) {
+      signal.action = "WAIT";
+      signal.strike = "WAIT";
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, and 3 falling 1m candles.`;
+    }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && ruleContext.rules.volumeValid !== false && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
+    const highProbability = conviction === "HIGH" && signal.action !== "WAIT" && sniperConfirmationScore > 80 && (buySniperReady || sellSniperReady) && ruleContext.rules.emaAligned === true && ruleContext.rules.multiTimeframeAligned === true && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !ruleContext.rules.divergence;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
