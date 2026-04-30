@@ -329,6 +329,15 @@ const Index = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTradePlan]);
 
+  useEffect(() => {
+    if (!isTradeSignal(latestSignal?.action)) return;
+    const signalKey = `${latestSignal?.created_at ?? ""}-${latestSignal?.action}-${latestSignal?.strike}`;
+    if (signalKey === lastSignalAlertRef.current) return;
+    lastSignalAlertRef.current = signalKey;
+    triggerSignalAlert(latestSignal as Signal);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
+
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
     const targetPremium = Number(value);
