@@ -56,8 +56,8 @@ const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
-const DEFAULT_PREMIUM_TARGET_POINTS = 40;
-const DEFAULT_PREMIUM_SL_POINTS = 20;
+const DEFAULT_PREMIUM_TARGET_POINTS = 25;
+const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 5;
 const COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -109,6 +109,10 @@ const parseSuggestedAction = (signal?: Signal | null) => {
   const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
   return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
 };
+const calculatePremiumExitPrices = (entryPremium: number) => ({
+  targetPremium: Number((entryPremium + DEFAULT_PREMIUM_TARGET_POINTS).toFixed(2)),
+  stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
+});
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
