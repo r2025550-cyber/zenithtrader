@@ -296,6 +296,18 @@ const Index = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
+  // Instant Strike Update: when live ATM moves and there's no active trade, drop stale suggested premium and force a re-autofill on the next signal.
+  const liveAtmStrike = hasLivePrice ? Math.round(latestLtp / 50) * 50 : null;
+  const lastAtmStrikeRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (liveAtmStrike === null) return;
+    if (lastAtmStrikeRef.current !== null && lastAtmStrikeRef.current !== liveAtmStrike && !activeTrade) {
+      setSuggestedEntryPremium(null);
+      lastSignalAutofillRef.current = null;
+    }
+    lastAtmStrikeRef.current = liveAtmStrike;
+  }, [liveAtmStrike, activeTrade]);
+
   useEffect(() => {
     if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
     const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
