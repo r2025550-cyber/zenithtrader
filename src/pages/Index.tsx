@@ -439,7 +439,6 @@ const Index = () => {
   const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
     if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
     await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
-    const nextPlan = { ...plan, lastSyncedStopLossPremium: plan.stopLossPremium };
     setActiveTradePlan((current) => {
       if (!current || current.slOrderId !== plan.slOrderId) return current;
       const currentStop = current.stopLossPremium ?? current.stopLoss;
