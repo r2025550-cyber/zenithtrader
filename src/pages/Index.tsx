@@ -262,8 +262,8 @@ const Index = () => {
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
         const exits = calculatePremiumExitPrices(premium);
-        setUserTargetPoints(String(exits.targetPremium));
-        setUserSlPoints(String(exits.stopLossPremium));
+        setUserTargetPoints(formatPremiumInput(exits.targetPremium));
+        setUserSlPoints(formatPremiumInput(exits.stopLossPremium));
         toast({ title: "Premium exit prices auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ₹${exits.targetPremium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)}.` });
       })
       .catch((error) => {
@@ -308,8 +308,8 @@ const Index = () => {
       if (shouldTrail) {
         const nextPlan = { ...activeTradePlan, targetPremium: candidateTarget, target: candidateTarget, stopLossPremium: candidateStop, stopLoss: candidateStop };
         setActiveTradePlan(nextPlan);
-        setUserTargetPoints(String(Number(candidateTarget.toFixed(2))));
-        setUserSlPoints(String(Number(candidateStop.toFixed(2))));
+        setUserTargetPoints(formatPremiumInput(candidateTarget));
+        setUserSlPoints(formatPremiumInput(candidateStop));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
         syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
       }
@@ -683,8 +683,8 @@ const Index = () => {
         const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
         const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
         const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
-        setUserTargetPoints(String(Number(targetPremium.toFixed(2))));
-        setUserSlPoints(String(Number(stopLossPremium.toFixed(2))));
+        setUserTargetPoints(formatPremiumInput(targetPremium));
+        setUserSlPoints(formatPremiumInput(stopLossPremium));
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
