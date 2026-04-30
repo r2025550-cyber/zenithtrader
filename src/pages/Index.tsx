@@ -166,6 +166,7 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -262,6 +263,7 @@ const Index = () => {
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
         const exits = calculatePremiumExitPrices(premium);
+        setSuggestedEntryPremium(premium);
         setUserTargetPoints(formatPremiumInput(exits.targetPremium));
         setUserSlPoints(formatPremiumInput(exits.stopLossPremium));
         toast({ title: "Premium exit prices auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ₹${exits.targetPremium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)}.` });
