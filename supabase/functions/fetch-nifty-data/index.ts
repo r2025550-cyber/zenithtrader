@@ -22,6 +22,11 @@ function firstNode(payload: Record<string, unknown>) {
   return Object.values(payload?.data ?? {})[0] as any;
 }
 
+function upstoxErrorMessage(prefix: string, status: number, payload: any) {
+  const reason = payload?.errors?.[0]?.message ?? payload?.errors?.[0]?.errorCode ?? payload?.message ?? payload?.error ?? payload?.status ?? JSON.stringify(payload);
+  return `${prefix} HTTP ${status}: ${reason}`;
+}
+
 function quoteFrom(node: any) {
   const ohlc = node?.ohlc ?? node ?? {};
   const depth = node?.depth ?? {};
@@ -72,20 +77,12 @@ function isInvalidUpstoxToken(error: unknown) {
 
 async function getQuote(instrumentKey: string, headers: HeadersInit) {
   const encoded = encodeURIComponent(instrumentKey);
-  const [ltpResponse, ohlcResponse, quoteResponse] = await Promise.all([
-    fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encoded}`, { headers }),
-    fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers }),
-    fetch(`https://api.upstox.com/v2/market-quote/quotes?instrument_key=${encoded}`, { headers }),
-  ]);
-  const ltpPayload = await ltpResponse.json().catch(() => ({}));
-  const ohlcPayload = await ohlcResponse.json().catch(() => ({}));
+  const ohlcResponse = await fetch(`https://api.upstox.com/v2/market-quote/ohlc?instrument_key=${encoded}&interval=1d`, { headers });
   const quotePayload = await quoteResponse.json().catch(() => ({}));
-  if (!ltpResponse.ok) throw new Error(JSON.stringify({ error: "Upstox LTP request failed", status: ltpResponse.status, payload: ltpPayload }));
-  if (!ohlcResponse.ok) throw new Error(JSON.stringify({ error: "Upstox OHLC request failed", status: ohlcResponse.status, payload: ohlcPayload }));
-  const fullQuote = quoteResponse.ok ? quoteFrom(firstNode(quotePayload)) : {};
+  if (!quoteResponse.ok) throw new Error(upstoxErrorMessage("Upstox quote request failed", quoteResponse.status, quotePayload));
+  const fullQuote = quoteFrom(firstNode(quotePayload));
   const ohlcQuote = quoteFrom(firstNode(ohlcPayload));
-  const ltpQuote = quoteFrom(firstNode(ltpPayload));
-  return { quote: { ...ohlcQuote, ...fullQuote, ltp: ltpQuote.ltp ?? fullQuote.ltp ?? ohlcQuote.ltp, volume: ltpQuote.volume ?? fullQuote.volume ?? ohlcQuote.volume }, raw: { ltp: ltpPayload, ohlc: ohlcPayload, quote: quotePayload } };
+  return { quote: { ...ohlcQuote, ...fullQuote, ltp: fullQuote.ltp ?? ohlcQuote.ltp, volume: fullQuote.volume ?? ohlcQuote.volume }, raw: { ohlc: ohlcPayload, quote: quotePayload } };
 }
 
 async function getFundsAndMargin(headers: HeadersInit) {
