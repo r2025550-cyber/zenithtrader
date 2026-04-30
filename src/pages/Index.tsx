@@ -654,10 +654,12 @@ const Index = () => {
     if (!skipReadyCheck && !upstoxReady) {
       throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
     }
-    const market = await invokeFunction<{ data: NiftyData }>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
+    if (!market.data) throw new Error([market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.");
     setSystemStatus((prev) => ({
       ready: prev?.gemini?.ok ? true : prev?.ready ?? true,
-      upstox: { ok: true, message: "Upstox token verified by live market data fetch." },
+      upstox: { ok: true, message: market.fallback ? "Upstox rate-limited; using last cached market data while waiting 5 seconds." : "Upstox token verified by live market data fetch." },
       gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." },
       checkedAt: new Date().toISOString(),
     }));
