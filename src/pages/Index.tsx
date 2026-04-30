@@ -115,8 +115,9 @@ const calculatePremiumExitPrices = (entryPremium: number) => ({
   stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
 });
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
+const isTradeSignal = (action?: string | null) => action === "BUY" || action === "SELL";
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend15?: string; entry1m?: string } };
+type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend5?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
 type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
@@ -135,6 +136,8 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const lastSignalAutofillRef = useRef("");
+  const lastSignalAlertRef = useRef("");
+  const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -327,6 +330,17 @@ const Index = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTradePlan]);
 
+  useEffect(() => {
+    const previousAction = previousSignalActionRef.current;
+    previousSignalActionRef.current = latestSignal?.action ?? "WAIT";
+    if (!isTradeSignal(latestSignal?.action)) return;
+    const signalKey = `${latestSignal?.created_at ?? ""}-${latestSignal?.action}-${latestSignal?.strike}`;
+    if (signalKey === lastSignalAlertRef.current) return;
+    lastSignalAlertRef.current = signalKey;
+    triggerSignalAlert(latestSignal as Signal, previousAction === "WAIT");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
+
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
     const targetPremium = Number(value);
@@ -350,23 +364,46 @@ const Index = () => {
     syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
   };
 
-  const playAlertTone = () => {
+  const unlockAudio = () => {
     const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtor) return;
+    if (!AudioCtor) return null;
     const context = audioContextRef.current ?? new AudioCtor();
     audioContextRef.current = context;
+    if (context.state === "suspended") context.resume().catch(() => undefined);
+    return context;
+  };
+
+  const playAlertTone = (tone: "exit" | "BUY" | "SELL" = "exit") => {
+    const context = unlockAudio();
+    if (!context) return;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    oscillator.type = "square";
-    oscillator.frequency.value = 880;
+    oscillator.type = tone === "BUY" ? "sine" : "square";
+    oscillator.frequency.value = tone === "BUY" ? 1320 : tone === "SELL" ? 220 : 880;
     gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.42);
+    gain.gain.exponentialRampToValueAtTime(tone === "SELL" ? 0.16 : 0.12, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (tone === "SELL" ? 0.55 : 0.42));
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.start();
-    oscillator.stop(context.currentTime + 0.45);
+    oscillator.stop(context.currentTime + (tone === "SELL" ? 0.58 : 0.45));
   };
+
+  const triggerSignalAlert = (signal: Signal, vibrate = false) => {
+    if (!isTradeSignal(signal.action)) return;
+    playAlertTone(signal.action as "BUY" | "SELL");
+    if (vibrate && navigator.vibrate) navigator.vibrate(signal.action === "BUY" ? [80, 40, 80] : [180]);
+  };
+
+  useEffect(() => {
+    const armAudio = () => unlockAudio();
+    window.addEventListener("pointerdown", armAudio, { passive: true });
+    window.addEventListener("keydown", armAudio);
+    return () => {
+      window.removeEventListener("pointerdown", armAudio);
+      window.removeEventListener("keydown", armAudio);
+    };
+  }, []);
 
   useEffect(() => {
     if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
@@ -436,7 +473,7 @@ const Index = () => {
         rules?.divergence && "Low Conviction divergence",
         rules?.volumeValid && "Volume +20% confirmed",
         rules?.emaAligned && `EMA ${rules.emaTrend} aligned`,
-        rules?.multiTimeframeAligned && `15m confirms 1m ${rules.entry1m}`,
+        rules?.multiTimeframeAligned && `5m confirms 1m ${rules.entry1m}`,
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");

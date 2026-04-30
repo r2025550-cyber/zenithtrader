@@ -24,7 +24,7 @@ function atmStrike(price: number | null) {
 
 const NIFTY_LOT_SIZE = 65;
 
-function latestMinuteCloses(history: MarketRow[]) {
+function latestMinuteCloses(history: MarketRow[], count = 4) {
   const byMinute = new Map<string, number>();
   for (const row of history) {
     const price = num(row?.ltp);
@@ -33,7 +33,7 @@ function latestMinuteCloses(history: MarketRow[]) {
     const minuteKey = new Date(stampedAt).toISOString().slice(0, 16);
     if (!byMinute.has(minuteKey)) byMinute.set(minuteKey, price);
   }
-  return Array.from(byMinute.values()).slice(0, 4);
+  return Array.from(byMinute.values()).slice(0, count);
 }
 
 type MarketRow = Record<string, unknown> & { raw_payload?: Record<string, unknown>; created_at?: string; ltp?: unknown };
@@ -83,20 +83,19 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const emaTrend = ema9 !== null && ema21 !== null ? (ema9 > ema21 ? "bullish" : ema9 < ema21 ? "bearish" : "flat") : "pending";
   const priceAction = ltp !== null && open !== null ? (ltp > open ? "bullish" : ltp < open ? "bearish" : "flat") : "pending";
   const emaAligned = emaTrend !== "pending" && priceAction !== "pending" && emaTrend === priceAction;
-  const fifteenMinuteRows = history.filter((row) => Date.now() - new Date(row.created_at).getTime() <= 15 * 60 * 1000);
-  const oldest15 = fifteenMinuteRows[fifteenMinuteRows.length - 1];
-  const trend15MovePct = pctMove(ltp, num(oldest15?.ltp));
-  const trend15 = trend15MovePct === null ? "pending" : trend15MovePct > 0.08 ? "bullish" : trend15MovePct < -0.08 ? "bearish" : "flat";
   const oneMinuteMovePct = pctMove(ltp, num(previous?.ltp));
   const entry1m = oneMinuteMovePct === null ? "pending" : oneMinuteMovePct > 0 ? "bullish" : oneMinuteMovePct < 0 ? "bearish" : "flat";
-  const multiTimeframeAligned = trend15 !== "pending" && entry1m !== "pending" && trend15 !== "flat" && trend15 === entry1m;
+  const trendMinuteCloses = latestMinuteCloses(history, 6);
+  const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
+  const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
+  const multiTimeframeAligned = trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m;
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend15, trend15MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +20% volume filter." : volumeValid === true ? `Volume +20% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +20% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -107,7 +106,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context.",
       pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
       emaAligned ? `9/21 EMA crossover aligns ${emaTrend} with price action.` : `9/21 EMA alignment pending/failed: EMA=${emaTrend}, price=${priceAction}.`,
-      multiTimeframeAligned ? `15-minute ${trend15} trend confirms 1-minute ${entry1m} entry.` : `15-minute trend does not confirm 1-minute entry: 15m=${trend15}, 1m=${entry1m}.`,
+      multiTimeframeAligned ? `5-minute ${trend5} trend confirms 1-minute ${entry1m} entry.` : `5-minute trend does not confirm 1-minute entry: 5m=${trend5}, 1m=${entry1m}.`,
     ],
   };
 }
@@ -145,14 +144,14 @@ serve(async (req) => {
       return json({ success: true, signal: { action: "WAIT", strike: "WAIT", reason, conviction: "LOW", highProbability: false, ruleContext, raw_text: `ACTION: WAIT\nSTRIKE: WAIT\nCONVICTION: LOW\nREASON: ${reason}` } });
     }
 
-    const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true;
-    const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true;
-    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true].filter(Boolean).length / 5) * 100);
+    const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true && ruleContext.rules.trend5 === "bullish" && ruleContext.rules.multiTimeframeAligned === true;
+    const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true && ruleContext.rules.trend5 === "bearish" && ruleContext.rules.multiTimeframeAligned === true;
+    const sniperConfirmationScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
 
     const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
 - SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
 - WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is above 80% and every Sniper Mode gate is confirmed.
-- TREND ALIGNMENT: BUY requires Price > 21 EMA, VIX Stable, Volume > 20% average, and sustained bullish 1m candles. SELL requires Price < 21 EMA, VIX Stable, Volume > 20% average, and sustained bearish 1m candles. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
+- TREND ALIGNMENT: Use 1m execution plus 5m trend confirmation only. BUY requires Price > 21 EMA, VIX Stable, Volume > 20% average, sustained bullish 1m candles, and bullish 5m trend. SELL requires Price < 21 EMA, VIX Stable, Volume > 20% average, sustained bearish 1m candles, and bearish 5m trend. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
 - Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
 - Valid signal requires current volume at least 20% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
 - Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
@@ -160,7 +159,7 @@ serve(async (req) => {
 - If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
 - PCR > 1.3 is Overbought; PCR < 0.7 is Oversold. If PCR is unavailable, state unavailable.
 - No-Trade Zone if the last 60 minutes remain inside a 40-point range.
-- Multi-timeframe rule: 15-minute trend must confirm the 1-minute entry direction before BUY/SELL; otherwise WAIT or LOW conviction.
+- Multi-timeframe rule: 5-minute trend must confirm the 1-minute entry direction before BUY/SELL; do not use 15-minute trend as a blocker.
 - Smart indicator rule: 9 EMA / 21 EMA crossover must align with price action for HIGH Conviction; if not aligned, cap conviction below HIGH.
 - Entry must wait for minor retracement: dip for CALL, bounce for PUT.
 - Risk reward must be strict 1:2.
@@ -190,12 +189,12 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore <= 80)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, and 3 rising 1m candles.`;
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +20% volume, 3 rising 1m candles, and bullish 5m trend.`;
     }
     if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore <= 80)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, and 3 falling 1m candles.`;
+      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +20% volume, 3 falling 1m candles, and bearish 5m trend.`;
     }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;
