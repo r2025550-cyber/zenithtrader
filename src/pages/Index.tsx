@@ -682,7 +682,16 @@ const Index = () => {
     try {
       await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity });
       setAiEnabled(checked);
-      if (checked) await fetchLiveNifty();
+      if (checked) {
+        const status = await retestUpstox(false);
+        if (!status.upstox.ok) {
+          setAiEnabled(false);
+          localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
+          toast({ title: "Upstox OAuth required", description: status.upstox.message, variant: "destructive" });
+          return;
+        }
+        await fetchLiveNifty();
+      }
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox prices refresh every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
     } catch (error) {
       if (checked) setAiEnabled(true);
@@ -695,7 +704,7 @@ const Index = () => {
   useEffect(() => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
-    if (session) {
+    if (session && upstoxReady) {
       marketIntervalRef.current = setInterval(() => {
         fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
       }, UPSTOX_POLL_INTERVAL_MS);
@@ -713,17 +722,17 @@ const Index = () => {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
+  }, [session, upstoxReady, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
 
   useEffect(() => {
     if (!session) return;
-    checkSystemStatus(false).catch(() => {
+    checkSystemStatus(false).then((status) => {
+      if (status.upstox.ok) return fetchLiveNifty();
+      return null;
+    }).catch(() => {
       // Connection Pulse will show missing setup after a manual check.
     });
     if (aiEnabled && !marketIsOpen) setAiEnabled(false);
-    fetchLiveNifty().catch(() => {
-      // Keep the dashboard usable until Upstox OAuth is connected.
-    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
