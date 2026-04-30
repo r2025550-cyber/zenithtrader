@@ -94,7 +94,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const trendMinuteCloses = latestMinuteCloses(history, 6);
   const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
   const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
-  const multiTimeframeAligned = trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m;
+  const ema1mFallbackAligned = ltp !== null && ema9 !== null && ((entry1m === "bullish" && ltp > ema9) || (entry1m === "bearish" && ltp < ema9));
+  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || (trend5 === "pending" && ema1mFallbackAligned);
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
