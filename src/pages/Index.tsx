@@ -154,6 +154,7 @@ const Index = () => {
   const [authPassword, setAuthPassword] = useState("");
   const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
   const [riskMode, setRiskMode] = useState("moderate");
+  const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(() => (storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper"));
   const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
   const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
@@ -528,11 +529,12 @@ const Index = () => {
     return true;
   };
 
+  const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
       const triggered = [
-        "Sniper Mode active",
+        `${modeLabel} active`,
         rules?.sustainedBullish1m && "3 bullish 1m candles",
         rules?.sustainedBearish1m && "3 bearish 1m candles",
         rules?.priceAboveEma21 && "Price > 21 EMA",
@@ -550,15 +552,15 @@ const Index = () => {
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");
-      return `Sniper Mode: ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Current Mode: ${modeLabel} — ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
     }
-    if (targetAchieved) return "Target Achieved: daily profit goal reached. AI trading is stopped for the day.";
-    if (hardKillActive) return "Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.";
-    if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
-    if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
-    if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.";
-  }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved]);
+    if (targetAchieved) return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
+    if (hardKillActive) return `Current Mode: ${modeLabel} — Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.`;
+    if (!aiEnabled) return `Current Mode: ${modeLabel} — Analyzing market trends... AI engine is standing by for confirmation.`;
+    if (riskMode === "conservative") return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
+    if (riskMode === "aggressive") return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
+    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.`;
+  }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
     event.preventDefault();
@@ -780,7 +782,7 @@ const Index = () => {
       if (!status.upstox.ok) return;
     }
     await fetchLiveNifty(false, true);
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     applySniperSignal(ai.signal);
   };
 
@@ -797,7 +799,7 @@ const Index = () => {
       }
       const liveMarket = await fetchLiveNifty(true, true);
       const liveSpot = Number(liveMarket?.ltp);
-      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
+      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
       applySniperSignal(ai.signal);
       if (ai.signal.action !== "WAIT") {
         if (!Number.isFinite(liveSpot)) {
@@ -907,7 +909,7 @@ const Index = () => {
       if (aiEnabled) {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
-          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
             .then((ai) => applySniperSignal(ai.signal))
             .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
         }, AI_REASONING_INTERVAL_MS);
@@ -1109,6 +1111,7 @@ const Index = () => {
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Price</Label><Input id="user-target-points" type="number" min="0" step="0.05" inputMode="decimal" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Price</Label><Input id="user-sl-points" type="number" min="0" step="0.05" inputMode="decimal" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
                 <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
                 {(targetAchieved || hardKillActive || cooldownActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{cooldownActive ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.` : targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
+                <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Trading Mode</label><Select value={tradingMode} onValueChange={(v) => { setTradingMode(v as "scalping" | "sniper"); localStorage.setItem("zt_trading_mode", v); setLatestSignal(null); signalLockRef.current = null; toast({ title: `Switched to ${v === "scalping" ? "Scalping" : "Sniper"} Mode`, description: "Resetting AI reasoning and forcing a fresh analysis with the new logic." }); if (aiEnabled && !tradingBlocked) { runTradingCycle().catch(() => {}); } }}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="scalping">Scalping (4–5 trades/day)</SelectItem><SelectItem value="sniper">Sniper (high-conviction only)</SelectItem></SelectContent></Select><p className="text-xs text-muted-foreground">Active: <span className="font-semibold text-foreground">{modeLabel}</span></p></div>
                 <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
                 <Button disabled={!session || isBusy || tradingBlocked || !upstoxReady} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
                 <Button disabled={!session || isBusy || ((tradingBlocked || !upstoxReady) && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
