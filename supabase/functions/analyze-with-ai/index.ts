@@ -356,26 +356,44 @@ serve(async (req) => {
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
     const reasonParts: string[] = [];
 
-    // Setup detection
-    // BUY-bounce: near support + bullish candle + EMA bullish + no long lower wick (rejection ok = lower wick is fine for bounce, but we want close strong)
+    // Setup detection (v3 retained)
     const buyBounce =
-      pa.nearSupport &&
-      (pa.bullishEngulfing || pa.strongGreen) &&
-      pa.emaBullish;
-    // SELL-rejection: near resistance + bearish candle + EMA bearish
+      pa.nearSupport && (pa.bullishEngulfing || pa.strongGreen) && pa.emaBullish;
     const sellRejection =
-      pa.nearResistance &&
-      (pa.bearishEngulfing || pa.strongRed) &&
-      pa.emaBearish;
-    // Breakout entries require RETEST (entry precision + fake-breakout filter)
+      pa.nearResistance && (pa.bearishEngulfing || pa.strongRed) && pa.emaBearish;
     const buyBreakoutRetest = pa.retestBullOk && pa.emaBullish;
     const sellBreakdownRetest = pa.retestBearOk && pa.emaBearish;
-    // Live breakout allowed only with strong momentum + EMA aligned (rare aggressive case)
     const buyLiveMomentum = pa.liveBullBreakout && pa.strongMomentum && pa.emaBullish;
     const sellLiveMomentum = pa.liveBearBreakout && pa.strongMomentum && pa.emaBearish;
 
+    // v4 setups
+    const earlyBuy = pa.earlyBuy;
+    const earlySell = pa.earlySell;
+    const trendPullbackBuy = pa.pullbackBuy;
+    const trendPullbackSell = pa.pullbackSell;
+    const momentumStreakBuy = pa.momentumBull && (pa.emaBullish || pa.ema21Slope > 0);
+    const momentumStreakSell = pa.momentumBear && (pa.emaBearish || pa.ema21Slope < 0);
+
+    // v4: RE-ENTRY — last trade direction + trend still valid + new breakout signal
+    const lastTradeAction = todayTrades[0]?.action as ("BUY" | "SELL" | undefined);
+    const reEntryBuy = lastTradeAction === "BUY" && pa.trendUp && (pa.liveBullBreakout || earlyBuy || pa.retestBullOk);
+    const reEntrySell = lastTradeAction === "SELL" && pa.trendDown && (pa.liveBearBreakout || earlySell || pa.retestBearOk);
+
+    // v4: FREQUENCY BOOST — relax if no trade in 30m and a medium setup is present
+    const frequencyBoostActive = minutesSinceLastTrade >= FREQUENCY_BOOST_MIN_GAP;
+    const mediumBuySetup = pa.nearSupport && pa.strongGreen;
+    const mediumSellSetup = pa.nearResistance && pa.strongRed;
+    const boostBuy = frequencyBoostActive && mediumBuySetup;
+    const boostSell = frequencyBoostActive && mediumSellSetup;
+
     const anySetup =
-      buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest || buyLiveMomentum || sellLiveMomentum;
+      buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest ||
+      buyLiveMomentum || sellLiveMomentum || earlyBuy || earlySell ||
+      trendPullbackBuy || trendPullbackSell || momentumStreakBuy || momentumStreakSell ||
+      boostBuy || boostSell;
+
+    // v4: re-entry bypasses trade-gap (still respects daily cap)
+    const gapBypassedByReEntry = (reEntryBuy || reEntrySell) && !tradeGapOk;
 
     if (dailyTargetHit) {
       reasonParts.push("Daily profit target hit — trading paused.");
@@ -383,16 +401,28 @@ serve(async (req) => {
       reasonParts.push("Max daily loss reached — kill-switch active.");
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
-    } else if (!tradeGapOk) {
+    } else if (!tradeGapOk && !gapBypassedByReEntry) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
     } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
       reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
-    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum) {
+    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell) {
       reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (earlyBuy) {
+      action = "BUY"; reasonParts.push(`EARLY BUY: strong breakout close above R=${pa.resistance?.toFixed(2)} (body≥${EARLY_ENTRY_MIN_BODY_PTS}pts, momentum confirmed).`);
+    } else if (earlySell) {
+      action = "SELL"; reasonParts.push(`EARLY SELL: strong breakdown close below S=${pa.support?.toFixed(2)} (body≥${EARLY_ENTRY_MIN_BODY_PTS}pts, momentum confirmed).`);
     } else if (buyBreakoutRetest) {
-      action = "BUY"; reasonParts.push(`Retest BUY: pullback to broken R≈${pa.recentBullBreakout?.level.toFixed(2)} confirmed by ${pa.bullishEngulfing ? "engulfing" : "strong green"} (EMA21 bullish, slope>0).`);
+      action = "BUY"; reasonParts.push(`Retest BUY: pullback to broken R≈${pa.recentBullBreakout?.level.toFixed(2)} confirmed by ${pa.bullishEngulfing ? "engulfing" : "strong green"}.`);
     } else if (sellBreakdownRetest) {
-      action = "SELL"; reasonParts.push(`Retest SELL: pullback to broken S≈${pa.recentBearBreakout?.level.toFixed(2)} confirmed by ${pa.bearishEngulfing ? "engulfing" : "strong red"} (EMA21 bearish, slope<0).`);
+      action = "SELL"; reasonParts.push(`Retest SELL: pullback to broken S≈${pa.recentBearBreakout?.level.toFixed(2)} confirmed by ${pa.bearishEngulfing ? "engulfing" : "strong red"}.`);
+    } else if (momentumStreakBuy) {
+      action = "BUY"; reasonParts.push(`Momentum streak BUY: ${pa.bullStreak} consecutive strong green candles, EMA21 aligned.`);
+    } else if (momentumStreakSell) {
+      action = "SELL"; reasonParts.push(`Momentum streak SELL: ${pa.bearStreak} consecutive strong red candles, EMA21 aligned.`);
+    } else if (trendPullbackBuy) {
+      action = "BUY"; reasonParts.push(`Trend continuation BUY: HH/HL with pullback to EMA21=${pa.ema21?.toFixed(2)} + bullish confirmation.`);
+    } else if (trendPullbackSell) {
+      action = "SELL"; reasonParts.push(`Trend continuation SELL: LH/LL with pullback to EMA21=${pa.ema21?.toFixed(2)} + bearish confirmation.`);
     } else if (buyBounce) {
       action = "BUY"; reasonParts.push(`Support bounce at ${pa.support?.toFixed(2)} with ${pa.bullishEngulfing ? "bullish engulfing" : "strong green"} (EMA21 bullish).`);
     } else if (sellRejection) {
@@ -401,9 +431,17 @@ serve(async (req) => {
       action = "BUY"; reasonParts.push(`Momentum breakout above R=${pa.resistance?.toFixed(2)} (strong body, no upper wick).`);
     } else if (sellLiveMomentum) {
       action = "SELL"; reasonParts.push(`Momentum breakdown below S=${pa.support?.toFixed(2)} (strong body, no lower wick).`);
+    } else if (boostBuy) {
+      action = "BUY"; reasonParts.push(`Frequency boost BUY: 30m+ idle, medium setup near support with strong green candle.`);
+    } else if (boostSell) {
+      action = "SELL"; reasonParts.push(`Frequency boost SELL: 30m+ idle, medium setup near resistance with strong red candle.`);
     } else {
       const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
+    }
+
+    if (gapBypassedByReEntry && action !== "WAIT") {
+      reasonParts.push(`(Re-entry: trend ${pa.trendUp ? "UP" : "DOWN"} still valid, gap bypassed.)`);
     }
 
     // SL/Target on spot points
