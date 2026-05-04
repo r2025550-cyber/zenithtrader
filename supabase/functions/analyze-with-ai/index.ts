@@ -95,14 +95,44 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
   const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
   const ema1mFallbackAligned = ltp !== null && ema9 !== null && ((entry1m === "bullish" && ltp > ema9) || (entry1m === "bearish" && ltp < ema9));
-  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || (trend5 === "pending" && ema1mFallbackAligned);
+  // Scalper Mode: 5m neutral/flat is acceptable if 1m shows clear breakout aligned with EMA9.
+  const strong1mBreakout = oneMinuteMovePct !== null && Math.abs(oneMinuteMovePct) > 0.05 && ema1mFallbackAligned;
+  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || ((trend5 === "pending" || trend5 === "flat") && (ema1mFallbackAligned || strong1mBreakout));
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
+  // 15-minute Support/Resistance from last 15 rows
+  const last15 = history.slice(0, 15);
+  const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
+  const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
+  const resistance15 = highs15.length ? Math.max(...highs15) : null;
+  const support15 = lows15.length ? Math.min(...lows15) : null;
+  const highVolume = volumeAvailable && volume !== null && effectiveAvgVolume !== null && volume >= effectiveAvgVolume * 1.2;
+  const breakoutAboveR15 = ltp !== null && resistance15 !== null && ltp > resistance15 && highVolume;
+  const breakdownBelowS15 = ltp !== null && support15 !== null && ltp < support15 && highVolume;
+  const srBreakout = breakoutAboveR15 || breakdownBelowS15;
+
+  // Candlestick patterns on latest 1m vs previous (for Quick Scalp at S/R)
+  const prevOpen = num(previous?.open_price);
+  const prevClose = num(previous?.close_price);
+  const bodyTop = open !== null && close !== null ? Math.max(open, close) : null;
+  const bodyBottom = open !== null && close !== null ? Math.min(open, close) : null;
+  const bodySize = bodyTop !== null && bodyBottom !== null ? bodyTop - bodyBottom : 0;
+  const lowerWick = bodyBottom !== null && low !== null ? bodyBottom - low : 0;
+  const upperWick = bodyTop !== null && high !== null ? high - bodyTop : 0;
+  const bullishEngulfing = open !== null && close !== null && prevOpen !== null && prevClose !== null && prevClose < prevOpen && close > open && close >= prevOpen && open <= prevClose;
+  const bearishEngulfing = open !== null && close !== null && prevOpen !== null && prevClose !== null && prevClose > prevOpen && close < open && close <= prevOpen && open >= prevClose;
+  const hammer = bodySize > 0 && lowerWick >= bodySize * 2 && upperWick <= bodySize * 0.5 && close !== null && open !== null && close >= open;
+  const shootingStar = bodySize > 0 && upperWick >= bodySize * 2 && lowerWick <= bodySize * 0.5 && close !== null && open !== null && close <= open;
+  const nearSupport = support15 !== null && ltp !== null && Math.abs(ltp - support15) <= 15;
+  const nearResistance = resistance15 !== null && ltp !== null && Math.abs(ltp - resistance15) <= 15;
+  const quickScalpBuy = (bullishEngulfing || hammer) && nearSupport;
+  const quickScalpSell = (bearishEngulfing || shootingStar) && nearResistance;
+
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +10% volume filter." : volumeValid === true ? `Volume +10% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +10% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -113,7 +143,9 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       niftyDrivenMomentum ? `Nifty momentum override active (price ${priceAboveBothEmas ? "above" : "below"} both 9 & 21 EMA on 1m+5m); Bank Nifty divergence weight reduced.` : (divergence ? "Divergence Guard: Nifty disagrees with Bank Nifty/top heavyweights; Low Conviction." : "Divergence guard clear or awaiting context."),
       pcr === null ? "PCR temporarily unavailable from option-chain payload; do not downgrade conviction only for missing PCR." : `PCR ${pcr}: ${pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral"}.`,
       emaAligned ? `9/21 EMA crossover aligns ${emaTrend} with price action.` : `9/21 EMA alignment pending/failed: EMA=${emaTrend}, price=${priceAction}.`,
-      multiTimeframeAligned ? `5-minute ${trend5} trend confirms 1-minute ${entry1m} entry.` : `5-minute trend does not confirm 1-minute entry: 5m=${trend5}, 1m=${entry1m}.`,
+      multiTimeframeAligned ? `5m ${trend5} confirms 1m ${entry1m} (or scalper-mode 1m breakout).` : `5m=${trend5}, 1m=${entry1m} — scalper-mode awaiting 1m EMA-aligned breakout.`,
+      srBreakout ? `S/R BREAKOUT: ${breakoutAboveR15 ? `15m resistance broken with high volume` : `15m support broken with high volume`}. EMA21 rule overridden.` : `15m S/R: support ${support15?.toFixed(2) ?? "n/a"}, resistance ${resistance15?.toFixed(2) ?? "n/a"}.`,
+      quickScalpBuy ? "QUICK SCALP BUY: bullish engulfing/hammer at 15m support." : quickScalpSell ? "QUICK SCALP SELL: bearish engulfing/shooting-star at 15m resistance." : "No candlestick scalp pattern at S/R.",
     ],
   };
 }
@@ -151,40 +183,34 @@ serve(async (req) => {
       return json({ success: true, signal: { action: "WAIT", strike: "WAIT", reason, conviction: "LOW", highProbability: false, ruleContext, raw_text: `ACTION: WAIT\nSTRIKE: WAIT\nCONVICTION: LOW\nREASON: ${reason}` } });
     }
 
-    const buySniperReady = ruleContext.rules.priceAboveEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBullish1m === true && ruleContext.rules.trend5 === "bullish" && ruleContext.rules.multiTimeframeAligned === true;
-    const sellSniperReady = ruleContext.rules.priceBelowEma21 === true && ruleContext.rules.vixStable === true && ruleContext.rules.volumeValid === true && ruleContext.rules.sustainedBearish1m === true && ruleContext.rules.trend5 === "bearish" && ruleContext.rules.multiTimeframeAligned === true;
-    const baseGateScore = Math.round(([ruleContext.rules.volumeValid === true, ruleContext.rules.vixStable === true, ruleContext.rules.priceAboveEma21 || ruleContext.rules.priceBelowEma21, ruleContext.rules.sustainedBullish1m || ruleContext.rules.sustainedBearish1m, ruleContext.rules.emaAligned === true, ruleContext.rules.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
-    const instantEmaBoost = (ruleContext.rules.priceAboveBothEmas || ruleContext.rules.priceBelowBothEmas) ? 40 : 0;
-    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + Math.round(baseGateScore * 0.6)));
+    const r = ruleContext.rules;
+    // Scalper Mode gates: relaxed sustained-candle and 5m requirements; S/R breakout or candlestick scalp can fully override EMA21.
+    const buySniperReady = (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
+    const sellSniperReady = (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
+    const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
+    const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
+    const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + Math.round(baseGateScore * 0.6)));
 
-    const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
-- SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
-- WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is at least 60% and every Sniper Mode gate is confirmed.
-- TREND ALIGNMENT: Use 1m execution plus 5m trend confirmation only. BUY requires Price > 21 EMA, VIX Stable, Volume > 10% average, sustained bullish 1m candles, and bullish 5m trend. SELL requires Price < 21 EMA, VIX Stable, Volume > 10% average, sustained bearish 1m candles, and bearish 5m trend. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
-- Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
-- Valid signal requires current volume at least 10% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
-- Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
-- 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
-- If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
-- PCR > 1.3 is Overbought; PCR < 0.7 is Oversold. If PCR is unavailable, state unavailable.
-- No-Trade Zone if the last 60 minutes remain inside a 40-point range.
-- Multi-timeframe rule: 5-minute trend must confirm the 1-minute entry direction before BUY/SELL; do not use 15-minute trend as a blocker.
-- Smart indicator rule: 9 EMA / 21 EMA crossover must align with price action for HIGH Conviction; if not aligned, cap conviction below HIGH.
-- Entry must wait for minor retracement: dip for CALL, bounce for PUT.
-- Risk reward must be strict 1:2.
-- Manual override: if User Target Points or User SL Points are provided, use those exact point values instead of AI-generated target/SL.
-- Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
-- Divergence Guard (relaxed): if Nifty 1m price is above BOTH 9 EMA and 21 EMA (or below both for bearish), Nifty momentum drives the signal — DO NOT downgrade for Bank Nifty / heavyweight divergence. Only flag divergence when Nifty itself is not in clear EMA-aligned momentum.
-- Sensitivity: trigger threshold lowered to 60% sniper score (was 80%). Volume filter relaxed to +10% above 5-period average (was +20%).
-- Strike freshness: always recompute the ATM strike from the latest spot every cycle so the option leg moves with the index instantly.
+    const prompt = `You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). Apply these rules:
+- SCALPER MODE: Generate BUY/SELL on either (a) sustained 1m trend, (b) 15m S/R breakout with high volume (overrides 21 EMA), or (c) Bullish Engulfing/Hammer at 15m support (Quick Scalp Buy) / Bearish Engulfing/Shooting-Star at 15m resistance (Quick Scalp Sell).
+- TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do not require both 1m and 5m same color.
+- 15m S/R OVERRIDE: If price breaks the 15m high/low with high volume, IGNORE the 21 EMA rule and trigger the trade.
+- QUICK SCALP: If a Bullish Engulfing or Hammer forms at 15m support on the 1m chart, trigger Quick Scalp Buy. Mirror for Bearish Engulfing/Shooting Star at 15m resistance for Quick Scalp Sell.
+- VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
+- Trigger threshold: 60% sniper score.
+- 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
+- Strike freshness: always recompute ATM from latest spot.
+- Manual override: if User Target/SL Points provided, use those exact point values.
+- Hard guards still apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
 
-Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, explicitly write the tradable ATM option phrase: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
+Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, write: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
 Respond exactly with:
 ACTION: BUY/SELL/WAIT
 STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
-REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
+REASON: concise rule trigger including entry, SL (prev candle low/high), 1:2 target, and which mode fired (Trend / S/R Breakout / Quick Scalp).
 
 Computed Sniper Mode gates:\n${JSON.stringify({ buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: 60 })}
 
@@ -200,12 +226,12 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +10% volume, 3 rising 1m candles, and bullish 5m trend.`;
+      signal.reason = `WAITING — Scalper score ${sniperConfirmationScore}%. Need EMA21/breakout/quick-scalp + bullish 1m + stable VIX.`;
     }
     if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +10% volume, 3 falling 1m candles, and bearish 5m trend.`;
+      signal.reason = `WAITING — Scalper score ${sniperConfirmationScore}%. Need EMA21/breakdown/quick-scalp + bearish 1m + stable VIX.`;
     }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;

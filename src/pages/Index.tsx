@@ -112,10 +112,14 @@ const parseSuggestedAction = (signal?: Signal | null) => {
   const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
   return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
 };
-const calculatePremiumExitPrices = (entryPremium: number) => ({
-  targetPremium: Number((entryPremium + DEFAULT_PREMIUM_TARGET_POINTS).toFixed(2)),
-  stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
-});
+const calculatePremiumExitPrices = (entryPremium: number, slPointsOverride?: number, targetPointsOverride?: number) => {
+  const slPts = Number.isFinite(slPointsOverride) && (slPointsOverride as number) > 0 ? (slPointsOverride as number) : DEFAULT_PREMIUM_SL_POINTS;
+  const tgtPts = Number.isFinite(targetPointsOverride) && (targetPointsOverride as number) > 0 ? (targetPointsOverride as number) : Math.max(DEFAULT_PREMIUM_TARGET_POINTS, slPts * 2);
+  return {
+    targetPremium: Number((entryPremium + tgtPts).toFixed(2)),
+    stopLossPremium: Number(Math.max(0.05, entryPremium - slPts).toFixed(2)),
+  };
+};
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 const isTradeSignal = (action?: string | null) => action === "BUY" || action === "SELL";
 
@@ -284,11 +288,19 @@ const Index = () => {
     lastSignalAutofillRef.current = signalKey;
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
-        const exits = calculatePremiumExitPrices(premium);
+        const rules = latestSignal.ruleContext?.rules as any;
+        const ltpNow = Number(latestData?.ltp);
+        let slPts: number | undefined;
+        if (Number.isFinite(ltpNow)) {
+          if (action === "BUY" && Number.isFinite(rules?.previousLow)) slPts = Math.max(5, Math.round(ltpNow - rules.previousLow));
+          if (action === "SELL" && Number.isFinite(rules?.previousHigh)) slPts = Math.max(5, Math.round(rules.previousHigh - ltpNow));
+        }
+        const tgtPts = slPts ? slPts * 2 : undefined;
+        const exits = calculatePremiumExitPrices(premium, slPts, tgtPts);
         setSuggestedEntryPremium(premium);
         setUserTargetPoints(formatPremiumInput(exits.targetPremium));
         setUserSlPoints(formatPremiumInput(exits.stopLossPremium));
-        toast({ title: "Premium exit prices auto-filled", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · Target ₹${exits.targetPremium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)}.` });
+        toast({ title: "Scalper auto-fill ready", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)} (prev candle) · Target ₹${exits.targetPremium.toFixed(2)} (1:2).` });
       })
       .catch((error) => {
         toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
