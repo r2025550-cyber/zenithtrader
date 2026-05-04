@@ -226,12 +226,12 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price > 21 EMA, stable VIX, +10% volume, 3 rising 1m candles, and bullish 5m trend.`;
+      signal.reason = `WAITING — Scalper score ${sniperConfirmationScore}%. Need EMA21/breakout/quick-scalp + bullish 1m + stable VIX.`;
     }
     if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore < 60)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
-      signal.reason = `WAITING FOR CONFIRMATION — Sniper score ${sniperConfirmationScore}%. Needs Price < 21 EMA, stable VIX, +10% volume, 3 falling 1m candles, and bearish 5m trend.`;
+      signal.reason = `WAITING — Scalper score ${sniperConfirmationScore}%. Need EMA21/breakdown/quick-scalp + bearish 1m + stable VIX.`;
     }
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
     if (signal.action === "SELL" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} PE`;
