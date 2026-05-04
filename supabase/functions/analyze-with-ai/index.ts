@@ -609,6 +609,8 @@ serve(async (req) => {
 
     const conviction: "HIGH" | "MEDIUM" | "LOW" =
       action === "WAIT" ? "LOW"
+        : (compressionBreakoutBuy || compressionBreakoutSell) ? "HIGH"
+        : (trapBuy || trapSell) ? "HIGH"
         : (earlyBuy || earlySell || momentumStreakBuy || momentumStreakSell) ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest) && pa.strongMomentum ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest || trendPullbackBuy || trendPullbackSell) ? "MEDIUM"
