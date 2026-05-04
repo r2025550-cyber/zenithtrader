@@ -460,6 +460,7 @@ const Index = () => {
 
   const handleTargetPointsChange = (value: string) => {
     setUserTargetPoints(value);
+    userEditedExitsRef.current = true;
     const targetPremium = Number(value);
     if (!activeTradePlan || !Number.isFinite(targetPremium) || targetPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
@@ -471,6 +472,7 @@ const Index = () => {
 
   const handleSlPointsChange = (value: string) => {
     setUserSlPoints(value);
+    userEditedExitsRef.current = true;
     const stopLossPremium = Number(value);
     if (!activeTradePlan || !Number.isFinite(stopLossPremium) || stopLossPremium <= 0) return;
     const entry = activeTradePlan.entryPremium ?? activeTradePlan.entry;
