@@ -229,8 +229,13 @@ serve(async (req) => {
     const nineTwentyBuyOk = !r.nineTwentyOversized || beyondNineTwentyHighWithVol;
     const nineTwentySellOk = !r.nineTwentyOversized || beyondNineTwentyLowWithVol;
 
-    const buySniperReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
-    const sellSniperReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
+    const scalpingMode = tradingMode === "scalping";
+    const volumeGateOk = scalpingMode ? (r.volumeValid !== false || r.highVolume === true || r.srBreakout === true) : (r.volumeValid === true || r.highVolume === true || r.srBreakout === true);
+    const vixGateOk = scalpingMode ? true : r.vixStable === true;
+    const bullishSetupReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true || r.priceAboveBothEmas === true || r.pdhBreakWithVolume === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true || r.breakoutAboveR15 === true);
+    const bearishSetupReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true || r.priceBelowBothEmas === true || r.pdlBreakWithVolume === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true || r.breakdownBelowS15 === true);
+    const buySniperReady = bullishSetupReady && vixGateOk && volumeGateOk && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true || scalpingMode);
+    const sellSniperReady = bearishSetupReady && vixGateOk && volumeGateOk && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true || scalpingMode);
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
@@ -240,6 +245,9 @@ serve(async (req) => {
     // Penalise when 9:20 is oversized and we don't have a confirmed break beyond it.
     const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
+    const bullishVotes = [r.breakoutAboveR15, r.quickScalpBuy, r.pdhBreakWithVolume, r.priceAboveBothEmas, r.priceAboveEma21 && r.entry1m === "bullish", r.sustainedBullish1m, r.entry1m === "bullish", r.aboveYesterdayClose && !r.priceBelowBothEmas].filter(Boolean).length;
+    const bearishVotes = [r.breakdownBelowS15, r.quickScalpSell, r.pdlBreakWithVolume, r.priceBelowBothEmas, r.priceBelowEma21 && r.entry1m === "bearish", r.sustainedBearish1m, r.entry1m === "bearish", r.belowYesterdayClose && !r.priceAboveBothEmas].filter(Boolean).length;
+    const directionalBias: "BUY" | "SELL" | "WAIT" = bullishVotes > bearishVotes ? "BUY" : bearishVotes > bullishVotes ? "SELL" : "WAIT";
 
     // Nifty 50 scalping: minimum score lowered to 70 per execution-logic spec.
     const minScore = tradingMode === "scalping" ? 70 : 80;
