@@ -3,20 +3,20 @@ import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 // =====================================================================
-// Pure Price-Action Scalping Engine v3 (Disciplined)
+// Hybrid Price-Action Scalping Engine v4 (Smart Execution)
 // ---------------------------------------------------------------------
-// Upgrades over v2:
-//  1) Confirmed swing-based S/R (min 2 touches, last 20–30 candles)
-//  2) EMA21 trend + slope filter
-//  3) Breakout requires retest pullback before entry
-//  4) Strict strong-candle definition (body>=60%, close near extreme)
-//  5) Mid-zone filter (no trade between S/R w/o momentum)
-//  6) Range filter allows breakout/momentum to override
-//  7) Smart trailing SL (BE @+10, lock +10 @+20, then last-candle trail)
-//  8) Entry precision: pullback wait after breakout close
-//  9) Fake-breakout wick filter (>50% wick rejected)
-// 10) Trade-quality: only trade when LTP within "near zone" of S/R
-// Maintains output shape & ruleContext for the frontend.
+// v3 (Disciplined) features RETAINED:
+//  Confirmed swing S/R, EMA21+slope, retest entries, strict candles,
+//  wick rejection, mid-zone filter, sideways guard, smart trailing.
+// v4 ADDITIONS (non-destructive, additive):
+//  1) EARLY ENTRY mode — strong breakout close + momentum -> immediate entry
+//  2) RE-ENTRY logic — after stop-out, allow 2nd valid breakout same trend
+//  3) TREND CONTINUATION — HH/HL or LH/LL pullback entries (not just S/R)
+//  4) FREQUENCY BOOST — relaxed entry if 30m without trades & medium setup
+//  5) SMART TRAILING UPGRADE — strong trend = EMA21 / 2-candle trail
+//  6) MOMENTUM DETECTION — 3 strong same-direction candles = momentum
+//  7) NO-TRADE ZONE — choppy: position-size cut flag (riskSizeDown)
+//  8) PARTIAL PROFIT BOOKING — book 50% @ +15pts, trail rest
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
@@ -29,6 +29,15 @@ const TRAIL_LOCK_AT_PROFIT = 20;
 const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
 const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
 const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
+// v4 constants
+const EARLY_ENTRY_MIN_BODY_PTS = 10;     // strong breakout close min body
+const EARLY_ENTRY_MIN_MOVE_PTS = 10;     // 1-min move threshold
+const FREQUENCY_BOOST_MIN_GAP = 30;      // minutes
+const PULLBACK_TOLERANCE_PTS = 10;       // trend continuation pullback to EMA21
+const PARTIAL_BOOK_PTS = 15;             // book 50% at +15
+const PARTIAL_BOOK_FRACTION = 0.5;
+const MOMENTUM_STREAK = 3;               // N consecutive strong candles
+const CHOPPY_RANGE_PTS = 20;             // very tight = choppy
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
