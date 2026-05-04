@@ -193,17 +193,29 @@ serve(async (req) => {
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + Math.round(baseGateScore * 0.6)));
 
-    const prompt = `You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). Apply these rules:
+    const minScore = tradingMode === "scalping" ? 60 : 80;
+    const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
 - SCALPER MODE: Generate BUY/SELL on either (a) sustained 1m trend, (b) 15m S/R breakout with high volume (overrides 21 EMA), or (c) Bullish Engulfing/Hammer at 15m support (Quick Scalp Buy) / Bearish Engulfing/Shooting-Star at 15m resistance (Quick Scalp Sell).
-- TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do not require both 1m and 5m same color.
+- TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do NOT require both 1m and 5m same color.
 - 15m S/R OVERRIDE: If price breaks the 15m high/low with high volume, IGNORE the 21 EMA rule and trigger the trade.
-- QUICK SCALP: If a Bullish Engulfing or Hammer forms at 15m support on the 1m chart, trigger Quick Scalp Buy. Mirror for Bearish Engulfing/Shooting Star at 15m resistance for Quick Scalp Sell.
+- QUICK SCALP: Bullish Engulfing/Hammer at 15m support → Quick Scalp Buy. Mirror at resistance for Quick Scalp Sell.
 - VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
-- Trigger threshold: 60% sniper score.
+- Trigger threshold: 60% score.`;
+    const sniperPrompt = `MODE: SNIPER (active). You are the trading mind for a Nifty Options SNIPER (1–2 high-conviction trades/day). Apply STRICT Sniper constraints:
+- Require 1m AND 5m EMA alignment in the same direction (no relaxation).
+- Require Volume +20% above 5-period avg (no volume → WAIT).
+- Require sustained 1m candles (3 consecutive in trend direction).
+- Bank Nifty / heavyweight divergence blocks the trade (no override).
+- Ignore relaxed S/R or candlestick "Quick Scalp" overrides — they are NOT enough alone.
+- VIX must be Stable.
+- Trigger threshold: 80% score.`;
+    const prompt = `${tradingMode === "scalping" ? scalpingPrompt : sniperPrompt}
+
+Common rules:
 - 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
 - Strike freshness: always recompute ATM from latest spot.
 - Manual override: if User Target/SL Points provided, use those exact point values.
-- Hard guards still apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
+- Hard guards always apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
 
 Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, write: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
@@ -211,13 +223,13 @@ Respond exactly with:
 ACTION: BUY/SELL/WAIT
 STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
-REASON: concise rule trigger including entry, SL (prev candle low/high), 1:2 target, and which mode fired (Trend / S/R Breakout / Quick Scalp).
+REASON: start with "[${tradingMode.toUpperCase()} MODE]" then concise rule trigger including entry, SL, 1:2 target, and which mode fired (Trend / S/R Breakout / Quick Scalp for Scalping; EMA+Volume+Trend for Sniper).
 
-Computed Sniper Mode gates:\n${JSON.stringify({ buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: 60 })}
+Computed gates:\n${JSON.stringify({ tradingMode, buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: minScore })}
 
 Computed rule context:\n${JSON.stringify(ruleContext)}
 
-Execution payload:\n${JSON.stringify({ executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss, userTargetPoints, userSlPoints })}
+Execution payload:\n${JSON.stringify({ tradingMode, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, dailyPnl, dailyProfitTarget, maxDailyLoss, userTargetPoints, userSlPoints })}
 
 Latest market data:\n${JSON.stringify(latest)}`;
 
