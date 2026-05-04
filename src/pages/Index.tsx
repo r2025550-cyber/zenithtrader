@@ -207,6 +207,22 @@ const Index = () => {
     });
   };
 
+  // ===== Execution Debug / Visibility Layer =====
+  type DebugLevel = "info" | "success" | "warn" | "error";
+  type DebugStage = "SIGNAL" | "ORDER" | "FILL" | "SL" | "TRAILING" | "ERROR";
+  type DebugEvent = { id: string; ts: number; stage: DebugStage; level: DebugLevel; title: string; detail?: string; data?: Record<string, unknown> };
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const lastDebugSignalKeyRef = useRef<string>("");
+  const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
+    const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
+    setDebugEvents((prev) => [evt, ...prev].slice(0, 25));
+    const tag = `[${evt.stage}]`;
+    const payload = { detail: evt.detail, ...(evt.data ?? {}) };
+    if (evt.level === "error") console.error(tag, evt.title, payload);
+    else if (evt.level === "warn") console.warn(tag, evt.title, payload);
+    else console.log(tag, evt.title, payload);
+  };
+
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
     const now = Date.now();
@@ -455,6 +471,23 @@ const Index = () => {
     if (signalKey === lastSignalAlertRef.current) return;
     lastSignalAlertRef.current = signalKey;
     triggerSignalAlert(latestSignal as Signal, previousAction === "WAIT");
+    if (signalKey !== lastDebugSignalKeyRef.current) {
+      lastDebugSignalKeyRef.current = signalKey;
+      const sigPremium = Number((latestSignal as any)?.entryPremium ?? (latestSignal as any)?.premiumEntry);
+      pushDebug({
+        stage: "SIGNAL",
+        level: "success",
+        title: `SIGNAL GENERATED: ${latestSignal?.action}`,
+        detail: `${latestSignal?.strike ?? "—"} @ ₹${Number.isFinite(sigPremium) ? sigPremium.toFixed(2) : "—"}`,
+        data: {
+          action: latestSignal?.action,
+          strike: latestSignal?.strike,
+          entryPrice: Number.isFinite(sigPremium) ? sigPremium : null,
+          conviction: latestSignal?.conviction,
+          createdAt: latestSignal?.created_at,
+        },
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
@@ -684,18 +717,32 @@ const Index = () => {
 
   const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
     if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
-    await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
-    setActiveTradePlan((current) => {
-      if (!current || current.slOrderId !== plan.slOrderId) return current;
-      const currentStop = current.stopLossPremium ?? current.stopLoss;
-      const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
-      const sameStop = currentStop === syncedStop;
-      if (!sameStop) return current;
-      const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
-      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
-      return syncedPlan;
-    });
-    toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+    const previousSl = plan.lastSyncedStopLossPremium ?? plan.stopLoss;
+    const profitPts = plan.entryPremium ? (plan.currentPremium ?? plan.entryPremium) - plan.entryPremium : 0;
+    try {
+      await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
+      setActiveTradePlan((current) => {
+        if (!current || current.slOrderId !== plan.slOrderId) return current;
+        const currentStop = current.stopLossPremium ?? current.stopLoss;
+        const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
+        const sameStop = currentStop === syncedStop;
+        if (!sameStop) return current;
+        const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
+        return syncedPlan;
+      });
+      pushDebug({
+        stage: "TRAILING",
+        level: "success",
+        title: "TRAILING ACTIVE",
+        detail: `SL ₹${previousSl.toFixed(2)} → ₹${plan.stopLossPremium.toFixed(2)} · profit +${profitPts.toFixed(1)}pts`,
+        data: { orderId: plan.slOrderId, previousSl, newSl: plan.stopLossPremium, profitPoints: Number(profitPts.toFixed(2)) },
+      });
+      toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+    } catch (err) {
+      pushDebug({ stage: "ERROR", level: "error", title: "TRAILING FAILED", detail: err instanceof Error ? err.message : String(err), data: { previousSl, attemptedSl: plan.stopLossPremium } });
+      throw err;
+    }
   };
 
   const saveUpstoxSettings = async () => {
@@ -901,11 +948,25 @@ const Index = () => {
           return;
         }
         const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined });
+        const orderPayload = { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined };
+        pushDebug({ stage: "ORDER", level: "info", title: "ORDER PLACING", detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`, data: orderPayload });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
         setLastExecution(liveOrder);
         if (!liveOrder.success) {
+          pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`, data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity } });
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
+        }
+        pushDebug({ stage: "ORDER", level: "success", title: "ORDER PLACED", detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`, data: { orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id, instrument: liveOrder.instrument } });
+        if (liveOrder.execution?.orderFilled) {
+          pushDebug({ stage: "FILL", level: "success", title: "ORDER FILLED", detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`, data: { fillPrice: liveOrder.entryPremium, quotedLtp: liveOrder.slippage?.quotedLtp, quantity: liveOrder.quantity, status: liveOrder.execution?.orderStatus } });
+        } else {
+          pushDebug({ stage: "FILL", level: "warn", title: "ORDER PENDING", detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}` });
+        }
+        if (liveOrder.execution?.slActive) {
+          pushDebug({ stage: "SL", level: "success", title: "SL ACTIVE", detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`, data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId } });
+        } else {
+          pushDebug({ stage: "ERROR", level: "warn", title: "SL FAILED", detail: "Server SL was not registered. Manual exit required if filled." });
         }
         const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
         const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
@@ -930,6 +991,7 @@ const Index = () => {
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
+      pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: error instanceof Error ? error.message : String(error) });
       toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
     } finally {
       setIsBusy(false);
@@ -1324,9 +1386,71 @@ const Index = () => {
               </div>
             </section>
 
+            {/* ===== Execution Debug Panel ===== */}
+            <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Debug · Trace</p>
+                  <h2 className="text-lg font-semibold">Signal → Order → SL → Trailing</h2>
+                </div>
+                {debugEvents.length > 0 && (
+                  <button onClick={() => setDebugEvents([])} className="rounded-sm border border-border bg-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">Clear</button>
+                )}
+              </div>
+
+              {/* Status summary cards */}
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(() => {
+                  const ex = lastExecution?.execution ?? {};
+                  const lastSig = debugEvents.find((e) => e.stage === "SIGNAL");
+                  const lastOrder = debugEvents.find((e) => e.stage === "ORDER" && e.level === "success");
+                  const lastSl = debugEvents.find((e) => e.stage === "SL");
+                  const lastTrail = debugEvents.find((e) => e.stage === "TRAILING");
+                  const cells = [
+                    { k: "Signal", v: lastSig?.title ?? (latestSignal?.action ? `WAITING (${latestSignal.action})` : "Idle"), tone: lastSig ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
+                    { k: "Order", v: lastOrder?.title ?? (ex.orderPlaced ? "ORDER PLACED" : "Idle"), tone: lastOrder ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
+                    { k: "SL", v: ex.slActive ? "SL ACTIVE" : (lastSl?.title ?? "Idle"), tone: ex.slActive ? "border-primary/40 text-primary" : "border-border text-muted-foreground" },
+                    { k: "Trailing", v: lastTrail?.title ?? "Idle", tone: lastTrail ? "border-warning/40 text-warning" : "border-border text-muted-foreground" },
+                  ];
+                  return cells.map((c) => (
+                    <div key={c.k} className={`rounded-md border bg-surface p-2 ${c.tone}`}>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.k}</p>
+                      <p className="text-[11px] font-bold leading-tight">{c.v}</p>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              {/* Event log */}
+              <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-surface">
+                {debugEvents.length === 0 ? (
+                  <p className="p-3 text-xs text-muted-foreground">No execution events yet. Events appear here in real-time as signals fire and orders are placed.</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {debugEvents.map((e) => {
+                      const tone = e.level === "error" ? "text-loss" : e.level === "warn" ? "text-warning" : e.level === "success" ? "text-profit" : "text-foreground";
+                      const stageTone = e.stage === "ERROR" ? "border-loss/40 bg-loss/10 text-loss" : e.stage === "TRAILING" ? "border-warning/40 bg-warning/10 text-warning" : e.stage === "SL" ? "border-primary/40 bg-primary/10 text-primary" : e.stage === "FILL" || e.stage === "ORDER" ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-panel text-muted-foreground";
+                      return (
+                        <li key={e.id} className="flex items-start gap-2 p-2 text-xs">
+                          <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${stageTone}`}>{e.stage}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className={`font-semibold ${tone}`}>{e.title}</p>
+                            {e.detail && <p className="truncate text-[11px] text-muted-foreground">{e.detail}</p>}
+                          </div>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(e.ts).toLocaleTimeString("en-IN", { hour12: false })}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">Full payloads also logged to browser console (F12) with [SIGNAL], [ORDER], [FILL], [SL], [TRAILING], [ERROR] tags.</p>
+            </section>
+
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
           </aside>
         </div>
+
 
         <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
