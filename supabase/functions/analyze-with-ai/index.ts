@@ -658,6 +658,67 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     const parsed = aiText ? parseSignal(aiText) : { action, strike: strikeLabel, reason: reasonParts.join(" ") };
     const finalReason = `[${tradingMode.toUpperCase()} MODE] ${parsed.reason || reasonParts.join(" ")}`.trim();
 
+    // ============================================================
+    // v6-safe ADDITIVE LAYER — SL/Target override + dynamic RR + smart trailing
+    // DO NOT modify entry/decision logic above. This block ONLY refines
+    // SL/Target math and exposes premium-conversion contract for execution.
+    // ============================================================
+    let slPrice: number | null = stopLoss;       // chart-based SL price (Nifty spot)
+    let entryPrice: number | null = entry;       // chart-based entry (Nifty spot)
+    let riskPoints: number | null = null;
+    let rrMultiplier = 1.2;
+    let momentumStrength: "strong" | "normal" | "weak" = "weak";
+    let targetPrice: number | null = target;
+    let v6TargetPoints: number | null = targetPoints;
+
+    if (action === "BUY" || action === "SELL") {
+      // SL override: previous candle low (BUY) / high (SELL) — chart-based
+      if (action === "BUY") {
+        slPrice = pa.prevLow ?? stopLoss;
+      } else {
+        slPrice = pa.prevHigh ?? stopLoss;
+      }
+      if (entryPrice !== null && slPrice !== null) {
+        riskPoints = Math.max(1, Math.abs(entryPrice - slPrice));
+      }
+
+      // Momentum classification (AI's limited role: classify strength → RR)
+      const strongMom =
+        pa.strongMomentum ||
+        (action === "BUY" && (pa.momentumBull || compressionBreakoutBuy || earlyBuy)) ||
+        (action === "SELL" && (pa.momentumBear || compressionBreakoutSell || earlySell));
+      const normalMom =
+        (action === "BUY" && (pa.trendUp || pa.emaBullish || buyBreakoutRetest || trendPullbackBuy)) ||
+        (action === "SELL" && (pa.trendDown || pa.emaBearish || sellBreakdownRetest || trendPullbackSell));
+
+      if (strongMom) { momentumStrength = "strong"; rrMultiplier = 2.5; }
+      else if (normalMom) { momentumStrength = "normal"; rrMultiplier = 1.8; }
+      else { momentumStrength = "weak"; rrMultiplier = 1.2; }
+
+      if (riskPoints !== null) {
+        v6TargetPoints = Math.round(riskPoints * rrMultiplier * 10) / 10;
+        if (entryPrice !== null) {
+          targetPrice = action === "BUY"
+            ? entryPrice + v6TargetPoints
+            : entryPrice - v6TargetPoints;
+        }
+      }
+    }
+
+    // Smart trailing config (additive — frontend trail loop reads these)
+    const v6TrailMode = "smart" as const;
+    const v6TrailSteps = [10, 20] as const;
+
+    // Premium-conversion contract for place-live-order:
+    // executor computes premiumSL = entryPremium - riskPoints
+    //                  premiumTarget = entryPremium + (riskPoints * rrMultiplier)
+    const premiumContract = {
+      formula: "premiumSL = entryPremium - riskPoints; premiumTarget = entryPremium + (riskPoints * rrMultiplier)",
+      riskPoints,
+      rrMultiplier,
+      momentumStrength,
+    };
+
     const signal = {
       action,
       strike: strikeLabel,
@@ -665,11 +726,25 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       conviction,
       optionType,
       entry,
+      entryPrice,
       stopLoss,
       target,
       slPoints,
       targetPoints,
       strikeNumber: strikeNum,
+      // ===== v6-safe additive fields =====
+      slPrice,                       // chart-based stop price (spot)
+      targetPrice,                   // chart-based target price (spot)
+      riskPoints,                    // |entry - SL|
+      rrMultiplier,                  // 2.5 / 1.8 / 1.2
+      momentumStrength,              // strong / normal / weak
+      // premium fields are computed at execution time (entryPremium known there)
+      premiumSL: null as number | null,
+      premiumTarget: null as number | null,
+      premiumContract,
+      trailMode: v6TrailMode,
+      trailSteps: v6TrailSteps,
+      engineVersion: "price-action-scalper-v6-safe",
     };
 
     const highProbability = action !== "WAIT";
@@ -825,11 +900,24 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         userTargetPoints, userSlPoints,
         optionType: signal.optionType,
         entry: signal.entry,
+        entryPrice: signal.entryPrice,
         stopLoss: signal.stopLoss,
         target: signal.target,
         slPoints: signal.slPoints,
         targetPoints: signal.targetPoints,
         strikeNumber: signal.strikeNumber,
+        // v6-safe additive
+        slPrice: signal.slPrice,
+        targetPrice: signal.targetPrice,
+        riskPoints: signal.riskPoints,
+        rrMultiplier: signal.rrMultiplier,
+        momentumStrength: signal.momentumStrength,
+        premiumSL: signal.premiumSL,
+        premiumTarget: signal.premiumTarget,
+        premiumContract: signal.premiumContract,
+        trailMode: signal.trailMode,
+        trailSteps: signal.trailSteps,
+        engineVersion: signal.engineVersion,
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,

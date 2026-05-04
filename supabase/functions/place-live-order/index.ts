@@ -24,6 +24,9 @@ const BodySchema = z.object({
   stopLossPremiumPoints: z.number().positive().optional(),
   // v6: optional override for slippage tolerance from client
   maxSlippagePct: z.number().positive().max(10).optional(),
+  // v6-safe: chart-based risk + RR from analyze-with-ai signal
+  riskPoints: z.number().positive().optional(),
+  rrMultiplier: z.number().positive().max(10).optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
@@ -231,8 +234,13 @@ serve(async (req) => {
       });
     }
 
-    const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
-    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
+    // v6-safe: prefer chart-derived risk points + RR from analyze-with-ai signal
+    const v6RiskPoints = parsed.data.riskPoints;
+    const v6Rr = parsed.data.rrMultiplier ?? 1.8;
+    const targetPremiumPoints = parsed.data.targetPremiumPoints
+      ?? (v6RiskPoints ? Math.round(v6RiskPoints * v6Rr * 10) / 10 : 25);
+    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints
+      ?? (v6RiskPoints ?? 15);
     const targetPremium = optionLtp + targetPremiumPoints;
     const stopLossPremium = Math.max(0.05, optionLtp - stopLossPremiumPoints);
     const requiredCash = optionLtp * quantity;
@@ -285,8 +293,17 @@ serve(async (req) => {
       });
     }
 
+    // ===== v6-safe: recompute SL/Target against ACTUAL fill price =====
+    // premiumSL = entryPremium - riskPoints; premiumTarget = entryPremium + (riskPoints * RR)
+    const effectiveStopPremium = v6RiskPoints
+      ? Math.max(0.05, fillPrice - v6RiskPoints)
+      : Math.max(0.05, fillPrice - stopLossPremiumPoints);
+    const effectiveTargetPremium = v6RiskPoints
+      ? fillPrice + (v6RiskPoints * v6Rr)
+      : fillPrice + targetPremiumPoints;
+
     // ===== v6: SL-LMT instead of SL-M =====
-    const slTrigger = Number(stopLossPremium.toFixed(2));
+    const slTrigger = Number(effectiveStopPremium.toFixed(2));
     const slLimit = Number(Math.max(0.05, slTrigger * (1 - SL_LMT_BUFFER_PCT / 100)).toFixed(2));
     const slPayload = {
       quantity,
@@ -333,11 +350,15 @@ serve(async (req) => {
       requiredCash,
       optionLtp,
       entryPremium: fillPrice,
-      targetPremium,
-      stopLossPremium,
+      targetPremium: effectiveTargetPremium,
+      stopLossPremium: effectiveStopPremium,
+      premiumSL: effectiveStopPremium,
+      premiumTarget: effectiveTargetPremium,
       targetPremiumPoints,
       stopLossPremiumPoints,
-      version: "execution-layer-v6",
+      riskPoints: v6RiskPoints ?? null,
+      rrMultiplier: v6Rr,
+      version: "execution-layer-v6-safe",
     });
   } catch (error) {
     console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });
