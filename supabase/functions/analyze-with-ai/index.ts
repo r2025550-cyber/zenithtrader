@@ -3,20 +3,15 @@ import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 // =====================================================================
-// Hybrid Price-Action Scalping Engine v4 (Smart Execution)
+// Hybrid Price-Action Scalping Engine v5 (Edge & Protection Layer)
 // ---------------------------------------------------------------------
-// v3 (Disciplined) features RETAINED:
-//  Confirmed swing S/R, EMA21+slope, retest entries, strict candles,
-//  wick rejection, mid-zone filter, sideways guard, smart trailing.
-// v4 ADDITIONS (non-destructive, additive):
-//  1) EARLY ENTRY mode — strong breakout close + momentum -> immediate entry
-//  2) RE-ENTRY logic — after stop-out, allow 2nd valid breakout same trend
-//  3) TREND CONTINUATION — HH/HL or LH/LL pullback entries (not just S/R)
-//  4) FREQUENCY BOOST — relaxed entry if 30m without trades & medium setup
-//  5) SMART TRAILING UPGRADE — strong trend = EMA21 / 2-candle trail
-//  6) MOMENTUM DETECTION — 3 strong same-direction candles = momentum
-//  7) NO-TRADE ZONE — choppy: position-size cut flag (riskSizeDown)
-//  8) PARTIAL PROFIT BOOKING — book 50% @ +15pts, trail rest
+// v3 + v4 features fully RETAINED (do not modify).
+// v5 ADDITIONS (purely additive — survival + edge layers):
+//  1) LIQUIDITY TRAP DETECTION — failed breakouts/breakdowns reverse signal
+//  2) LOSS PROTECTION — pause 60m after 2 consecutive losses
+//  3) POSITION SIZING — halve size after a loss; restore after a win
+//  4) NEWS/SPIKE FILTER — skip 5min after a >50pt single candle range
+//  5) COMPRESSION DETECTION — shrinking 5-candle range; breakout = high prob
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
@@ -38,6 +33,14 @@ const PARTIAL_BOOK_PTS = 15;             // book 50% at +15
 const PARTIAL_BOOK_FRACTION = 0.5;
 const MOMENTUM_STREAK = 3;               // N consecutive strong candles
 const CHOPPY_RANGE_PTS = 20;             // very tight = choppy
+// v5 constants
+const TRAP_LOOKBACK_CANDLES = 3;         // confirm trap within last N candles
+const LOSS_PAUSE_MIN = 60;               // pause minutes after 2 losses
+const LOSS_STREAK_THRESHOLD = 2;         // consecutive losses
+const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
+const SPIKE_COOLDOWN_MIN = 5;            // cooldown minutes after spike
+const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
+const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -279,6 +282,84 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   // ===== v4: CHOPPY market (very tight range = downsize) =====
   const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
 
+  // ===== v5: LIQUIDITY TRAP DETECTION =====
+  // Bull trap: a recent candle closed above resistance, but a SUBSEQUENT candle closed back below it.
+  // Bear trap: a recent candle closed below support, but a SUBSEQUENT candle closed back above it.
+  let bullTrap = false;
+  let bearTrap = false;
+  if (resistance !== null) {
+    for (let i = 1; i <= Math.min(TRAP_LOOKBACK_CANDLES, history.length - 2); i++) {
+      const breakoutBar = history[i + 1];
+      const followBar = history[i];
+      const bc = num(breakoutBar?.close_price);
+      const fc = num(followBar?.close_price);
+      if (bc !== null && fc !== null && bc > resistance && fc < resistance) { bullTrap = true; break; }
+    }
+  }
+  if (support !== null) {
+    for (let i = 1; i <= Math.min(TRAP_LOOKBACK_CANDLES, history.length - 2); i++) {
+      const breakoutBar = history[i + 1];
+      const followBar = history[i];
+      const bc = num(breakoutBar?.close_price);
+      const fc = num(followBar?.close_price);
+      if (bc !== null && fc !== null && bc < support && fc > support) { bearTrap = true; break; }
+    }
+  }
+  // Live trap (current candle reverses immediately)
+  const liveBullTrap = resistance !== null && close !== null && open !== null &&
+    high !== null && high > resistance && close < resistance;
+  const liveBearTrap = support !== null && close !== null && open !== null &&
+    low !== null && low < support && close > support;
+  bullTrap = bullTrap || liveBullTrap;
+  bearTrap = bearTrap || liveBearTrap;
+
+  // ===== v5: NEWS / SPIKE FILTER =====
+  // Find largest candle range in last 5 candles; if >= SPIKE_RANGE_PTS within cooldown, block.
+  let spikeDetected = false;
+  let spikeAgeMin = Infinity;
+  for (let i = 0; i < Math.min(5, history.length); i++) {
+    const r = history[i];
+    const h = num(r?.high_price), l = num(r?.low_price);
+    if (h === null || l === null) continue;
+    const rng = h - l;
+    if (rng >= SPIKE_RANGE_PTS) {
+      const t = new Date((r?.source_timestamp ?? r?.created_at) as string).getTime();
+      const ageMin = (Date.now() - t) / 60000;
+      if (ageMin <= SPIKE_COOLDOWN_MIN) { spikeDetected = true; spikeAgeMin = Math.min(spikeAgeMin, ageMin); }
+    }
+  }
+
+  // ===== v5: COMPRESSION DETECTION =====
+  // Last N candle ranges shrinking on average; recent breakout from compression = high-prob.
+  let compression = false;
+  let compressionBreakout: "BULL" | "BEAR" | null = null;
+  if (history.length >= COMPRESSION_LOOKBACK + 1) {
+    const ranges: number[] = [];
+    for (let i = 1; i <= COMPRESSION_LOOKBACK; i++) {
+      const r = history[i];
+      const h = num(r?.high_price), l = num(r?.low_price);
+      if (h !== null && l !== null) ranges.push(h - l);
+    }
+    if (ranges.length === COMPRESSION_LOOKBACK) {
+      // ranges[0] = most recent prior candle ... ranges[N-1] = oldest
+      // Compression: oldest avg > newest avg by shrink ratio
+      const oldHalf = ranges.slice(Math.floor(ranges.length / 2));
+      const newHalf = ranges.slice(0, Math.floor(ranges.length / 2));
+      const oldAvg = oldHalf.reduce((a, b) => a + b, 0) / oldHalf.length;
+      const newAvg = newHalf.reduce((a, b) => a + b, 0) / newHalf.length;
+      compression = oldAvg > 0 && newAvg / oldAvg <= COMPRESSION_SHRINK_RATIO;
+      // Live candle breaking out of the compression range = high-prob trigger
+      const compHigh = Math.max(...history.slice(1, COMPRESSION_LOOKBACK + 1)
+        .map(r => num(r?.high_price)).filter((v): v is number => v !== null));
+      const compLow = Math.min(...history.slice(1, COMPRESSION_LOOKBACK + 1)
+        .map(r => num(r?.low_price)).filter((v): v is number => v !== null));
+      if (compression && close !== null) {
+        if (close > compHigh && strongGreen) compressionBreakout = "BULL";
+        else if (close < compLow && strongRed) compressionBreakout = "BEAR";
+      }
+    }
+  }
+
   return {
     ltp, open, high, low, close,
     prevHigh: pHigh, prevLow: pLow, prevClose: pClose,
@@ -295,6 +376,10 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     momentumBull, momentumBear, bullStreak, bearStreak,
     trendUp, trendDown, pullbackBuy, pullbackSell,
     earlyBuy, earlySell,
+    // v5 additions
+    bullTrap, bearTrap, liveBullTrap, liveBearTrap,
+    spikeDetected, spikeAgeMin,
+    compression, compressionBreakout,
   };
 }
 
@@ -318,6 +403,11 @@ serve(async (req) => {
     const maxDailyLoss = 2000;
     const userTargetPoints = num(body?.userTargetPoints);
     const userSlPoints = num(body?.userSlPoints);
+    // v5: optional recent trade outcomes from frontend (most-recent first), e.g. [-12, +25, -8]
+    const recentTradesPnl: number[] = Array.isArray(body?.recentTradesPnl)
+      ? body.recentTradesPnl.map((v: unknown) => Number(v)).filter((n: number) => Number.isFinite(n))
+      : [];
+    const lastClosedTradeAt = num(body?.lastClosedTradeAt); // unix ms, optional
 
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
@@ -352,6 +442,28 @@ serve(async (req) => {
     const minutesSinceLastTrade = lastTradeAt ? (Date.now() - lastTradeAt) / 60000 : Infinity;
     const tradeGapOk = minutesSinceLastTrade >= MIN_TRADE_GAP_MIN;
     const tradeCapOk = tradesToday < MAX_TRADES_PER_DAY;
+
+    // ===== v5: LOSS PROTECTION & POSITION SIZING =====
+    let consecutiveLosses = 0;
+    for (const p of recentTradesPnl) { if (p < 0) consecutiveLosses++; else break; }
+    const lastTradePnl = recentTradesPnl.length ? recentTradesPnl[0] : null;
+    const lastTradeWasLoss = lastTradePnl !== null && lastTradePnl < 0;
+    const lastTradeWasWin = lastTradePnl !== null && lastTradePnl > 0;
+    const minutesSinceLastClosed = lastClosedTradeAt ? (Date.now() - lastClosedTradeAt) / 60000 : Infinity;
+    const lossPauseActive = consecutiveLosses >= LOSS_STREAK_THRESHOLD && minutesSinceLastClosed < LOSS_PAUSE_MIN;
+    const lossPauseRemainingMin = lossPauseActive ? Math.max(0, Math.ceil(LOSS_PAUSE_MIN - minutesSinceLastClosed)) : 0;
+    // Position-sizing multiplier: halve after a loss, restore after a win, default 1.
+    const positionSizeMultiplier = lastTradeWasLoss ? 0.5 : (lastTradeWasWin ? 1 : 1);
+
+    // ===== v5: NEWS/SPIKE & COMPRESSION FLAGS =====
+    const spikeBlock = pa.spikeDetected;
+    const compressionBreakoutBuy = pa.compressionBreakout === "BULL" && (pa.emaBullish || pa.ema21Slope > 0);
+    const compressionBreakoutSell = pa.compressionBreakout === "BEAR" && (pa.emaBearish || pa.ema21Slope < 0);
+
+    // ===== v5: LIQUIDITY TRAP REVERSAL SETUPS =====
+    // Trap above resistance => SELL signal; trap below support => BUY signal.
+    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing || pa.liveBullTrap);
+    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing || pa.liveBearTrap);
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
     const reasonParts: string[] = [];
@@ -390,7 +502,9 @@ serve(async (req) => {
       buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest ||
       buyLiveMomentum || sellLiveMomentum || earlyBuy || earlySell ||
       trendPullbackBuy || trendPullbackSell || momentumStreakBuy || momentumStreakSell ||
-      boostBuy || boostSell;
+      boostBuy || boostSell ||
+      // v5
+      trapBuy || trapSell || compressionBreakoutBuy || compressionBreakoutSell;
 
     // v4: re-entry bypasses trade-gap (still respects daily cap)
     const gapBypassedByReEntry = (reEntryBuy || reEntrySell) && !tradeGapOk;
@@ -399,14 +513,26 @@ serve(async (req) => {
       reasonParts.push("Daily profit target hit — trading paused.");
     } else if (maxDailyLossHit) {
       reasonParts.push("Max daily loss reached — kill-switch active.");
+    } else if (lossPauseActive) {
+      reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
+    } else if (spikeBlock) {
+      reasonParts.push(`Spike/news filter: candle range ≥ ${SPIKE_RANGE_PTS}pts within last ${SPIKE_COOLDOWN_MIN}m — cooldown active.`);
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
     } else if (!tradeGapOk && !gapBypassedByReEntry) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
     } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
       reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
-    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell) {
+    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell && !trapBuy && !trapSell && !compressionBreakoutBuy && !compressionBreakoutSell) {
       reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (trapSell) {
+      action = "SELL"; reasonParts.push(`LIQUIDITY TRAP SELL: failed breakout above R=${pa.resistance?.toFixed(2)} reversed back below — bull trap.`);
+    } else if (trapBuy) {
+      action = "BUY"; reasonParts.push(`LIQUIDITY TRAP BUY: failed breakdown below S=${pa.support?.toFixed(2)} reversed back above — bear trap.`);
+    } else if (compressionBreakoutBuy) {
+      action = "BUY"; reasonParts.push(`COMPRESSION BREAKOUT BUY: ${COMPRESSION_LOOKBACK}-candle range shrank, broke upward with strong green.`);
+    } else if (compressionBreakoutSell) {
+      action = "SELL"; reasonParts.push(`COMPRESSION BREAKOUT SELL: ${COMPRESSION_LOOKBACK}-candle range shrank, broke downward with strong red.`);
     } else if (earlyBuy) {
       action = "BUY"; reasonParts.push(`EARLY BUY: strong breakout close above R=${pa.resistance?.toFixed(2)} (body≥${EARLY_ENTRY_MIN_BODY_PTS}pts, momentum confirmed).`);
     } else if (earlySell) {
@@ -483,6 +609,8 @@ serve(async (req) => {
 
     const conviction: "HIGH" | "MEDIUM" | "LOW" =
       action === "WAIT" ? "LOW"
+        : (compressionBreakoutBuy || compressionBreakoutSell) ? "HIGH"
+        : (trapBuy || trapSell) ? "HIGH"
         : (earlyBuy || earlySell || momentumStreakBuy || momentumStreakSell) ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest) && pa.strongMomentum ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest || trendPullbackBuy || trendPullbackSell) ? "MEDIUM"
@@ -545,7 +673,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     };
 
     const highProbability = action !== "WAIT";
-    const effectiveLotSize = tradingLotSize;
+    // v5: position sizing — halve lots after a loss; restore on win.
+    const sizedLots = Math.max(1, Math.floor(tradingLotSize * positionSizeMultiplier));
+    const effectiveLotSize = sizedLots;
     const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE;
 
     const ruleContext = {
@@ -602,6 +732,25 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         pcrState: "Disabled (price-action mode)",
         vixSizeCut: false,
         vixRising: false,
+        // v5 additions
+        bullTrap: pa.bullTrap,
+        bearTrap: pa.bearTrap,
+        liveBullTrap: pa.liveBullTrap,
+        liveBearTrap: pa.liveBearTrap,
+        trapBuy,
+        trapSell,
+        spikeDetected: pa.spikeDetected,
+        spikeAgeMin: pa.spikeAgeMin === Infinity ? null : pa.spikeAgeMin,
+        spikeBlock,
+        compression: pa.compression,
+        compressionBreakout: pa.compressionBreakout,
+        compressionBreakoutBuy,
+        compressionBreakoutSell,
+        consecutiveLosses,
+        lossPauseActive,
+        lossPauseRemainingMin,
+        positionSizeMultiplier,
+        lastTradePnl,
       },
       guidance: reasonParts,
       tradesToday,
@@ -616,7 +765,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       reason: signal.reason,
       raw_response: JSON.stringify({
         text: aiText,
-        engine: "price-action-scalper-v4",
+        engine: "price-action-scalper-v5",
         tradingMode,
         signal,
         ruleContext,
@@ -625,6 +774,19 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveLotSize, effectiveTradingQuantity,
         userTargetPoints, userSlPoints,
         riskSizeDown,
+        // v5
+        protection: {
+          consecutiveLosses,
+          lossPauseActive,
+          lossPauseRemainingMin,
+          positionSizeMultiplier,
+          spikeBlock,
+          spikeAgeMin: pa.spikeAgeMin === Infinity ? null : pa.spikeAgeMin,
+          bullTrap: pa.bullTrap,
+          bearTrap: pa.bearTrap,
+          compression: pa.compression,
+          compressionBreakout: pa.compressionBreakout,
+        },
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
@@ -678,6 +840,18 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         partialBook: {
           atProfitPts: PARTIAL_BOOK_PTS,
           fraction: PARTIAL_BOOK_FRACTION,
+        },
+        protection: {
+          consecutiveLosses,
+          lossPauseActive,
+          lossPauseRemainingMin,
+          positionSizeMultiplier,
+          spikeBlock,
+          spikeAgeMin: pa.spikeAgeMin === Infinity ? null : pa.spikeAgeMin,
+          bullTrap: pa.bullTrap,
+          bearTrap: pa.bearTrap,
+          compression: pa.compression,
+          compressionBreakout: pa.compressionBreakout,
         },
       },
     });
