@@ -66,6 +66,79 @@ function quoteFrom(node: any) {
   };
 }
 
+function previousTradingDayIso(date = new Date()) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() - 1);
+  // Skip Sunday (0) and Saturday (6)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+async function getYesterdayOhlc(headers: HeadersInit) {
+  // Try last 7 days window to be safe across weekends/holidays
+  const to = new Date().toISOString().slice(0, 10);
+  const fromDate = new Date();
+  fromDate.setUTCDate(fromDate.getUTCDate() - 7);
+  const from = fromDate.toISOString().slice(0, 10);
+  const encoded = encodeURIComponent(INSTRUMENT_KEY);
+  const url = `https://api.upstox.com/v2/historical-candle/${encoded}/day/${to}/${from}`;
+  const response = await fetch(url, { headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return { pdh: null, pdl: null, pdc: null, pdo: null, error: `Historical HTTP ${response.status}`, raw: payload };
+  // Upstox returns candles array sorted newest-first: [timestamp, open, high, low, close, volume, oi]
+  const candles = (payload?.data?.candles ?? []) as any[];
+  const today = new Date().toISOString().slice(0, 10);
+  const previousCandle = candles.find((c) => String(c?.[0] ?? "").slice(0, 10) < today) ?? candles[1] ?? candles[0];
+  if (!previousCandle) return { pdh: null, pdl: null, pdc: null, pdo: null, error: "No previous candle", raw: payload };
+  return {
+    pdo: numberFrom(previousCandle[1]),
+    pdh: numberFrom(previousCandle[2]),
+    pdl: numberFrom(previousCandle[3]),
+    pdc: numberFrom(previousCandle[4]),
+    date: String(previousCandle[0] ?? "").slice(0, 10),
+    error: null,
+    raw: null,
+  };
+}
+
+async function resolveAtmOptionTokens(headers: HeadersInit, ltp: number | null) {
+  if (ltp === null) return { atmStrike: null, ce: null, pe: null, expiry: null, error: "No LTP" };
+  const atm = Math.round(ltp / 50) * 50;
+  const encoded = encodeURIComponent(INSTRUMENT_KEY);
+  const response = await fetch(`https://api.upstox.com/v2/option/contract?instrument_key=${encoded}`, { headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return { atmStrike: atm, ce: null, pe: null, expiry: null, error: `Contract HTTP ${response.status}` };
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const expiries = Array.from(new Set(rows.map((r: any) => String(r?.expiry ?? r?.expiry_date ?? "")).filter(Boolean))).sort();
+  const expiry = expiries.find((v: string) => v >= today) ?? expiries[0] ?? null;
+  if (!expiry) return { atmStrike: atm, ce: null, pe: null, expiry: null, error: "No expiry" };
+  const findRow = (type: "CE" | "PE") => rows.find((r: any) => {
+    const rExp = String(r?.expiry ?? r?.expiry_date ?? "");
+    const rType = String(r?.instrument_type ?? r?.option_type ?? r?.optionType ?? "").toUpperCase();
+    const rStrike = numberFrom(r?.strike_price, r?.strikePrice, r?.strike);
+    return rExp === expiry && rType.includes(type) && rStrike === atm;
+  });
+  const ceRow = findRow("CE");
+  const peRow = findRow("PE");
+  return {
+    atmStrike: atm,
+    expiry,
+    ce: ceRow ? { instrumentToken: String(ceRow.instrument_key ?? ceRow.instrumentKey ?? ceRow.instrument_token ?? ""), tradingSymbol: `Nifty ${atm} CE`, strike: atm } : null,
+    pe: peRow ? { instrumentToken: String(peRow.instrument_key ?? peRow.instrumentKey ?? peRow.instrument_token ?? ""), tradingSymbol: `Nifty ${atm} PE`, strike: atm } : null,
+    error: null,
+  };
+}
+
+async function getOptionLtp(headers: HeadersInit, instrumentToken: string | null) {
+  if (!instrumentToken) return null;
+  const response = await fetch(`https://api.upstox.com/v2/market-quote/ltp?instrument_key=${encodeURIComponent(instrumentToken)}`, { headers });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) return null;
+  const node = Object.values((payload?.data as Record<string, unknown> | undefined) ?? {})[0] as any;
+  return numberFrom(node?.last_price, node?.ltp, node?.lastPrice);
+}
+
 function nextThursdayIso(date = new Date()) {
   const utc = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const daysUntilThursday = (4 - utc.getUTCDay() + 7) % 7;
