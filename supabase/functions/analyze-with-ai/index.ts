@@ -141,8 +141,31 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const quickScalpBuy = (bullishEngulfing || hammer) && nearSupport;
   const quickScalpSell = (bearishEngulfing || shootingStar) && nearResistance;
 
+  // Nifty 9:20 ORB candle (IST) — find the 1-min row stamped at 09:20 today and cap its size at 30 points.
+  // If 9:20 candle range > 30 points, treat as a "wide opening" → suppress fresh entries until volatility settles.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const nineTwentyRow = history.find((row) => {
+    const stamp = new Date((row?.source_timestamp ?? row?.created_at) as string);
+    // Convert to IST (UTC+5:30); 09:20 IST == 03:50 UTC
+    const istMinutes = stamp.getUTCHours() * 60 + stamp.getUTCMinutes() + 330;
+    const istHour = Math.floor((istMinutes % 1440) / 60);
+    const istMin = (istMinutes % 1440) % 60;
+    const sameDay = stamp.toISOString().slice(0, 10) === todayIso || (istMinutes >= 1440 && new Date(stamp.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) === todayIso);
+    return sameDay && istHour === 9 && istMin === 20;
+  });
+  const nineTwentyHigh = num(nineTwentyRow?.high_price);
+  const nineTwentyLow = num(nineTwentyRow?.low_price);
+  const nineTwentyRange = nineTwentyHigh !== null && nineTwentyLow !== null ? nineTwentyHigh - nineTwentyLow : null;
+  const nineTwentyOversized = nineTwentyRange !== null && nineTwentyRange > 30;
+
+  // Psychological round-number proximity (Nifty 50-point levels: 24100, 24150, 24200…)
+  const nearestRound50 = ltp !== null ? Math.round(ltp / 50) * 50 : null;
+  const distanceToRound50 = ltp !== null && nearestRound50 !== null ? Math.abs(ltp - nearestRound50) : null;
+  const nearRound50 = distanceToRound50 !== null && distanceToRound50 <= 10; // within 10 pts of a 50-level
+  const atRound50 = distanceToRound50 !== null && distanceToRound50 <= 3;
+
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, immediateSupport: support15, immediateResistance: resistance15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high, pdh, pdl, pdc, pdhBreakWithVolume, pdlBreakWithVolume, aboveYesterdayClose, belowYesterdayClose, ltp },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, immediateSupport: support15, immediateResistance: resistance15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high, pdh, pdl, pdc, pdhBreakWithVolume, pdlBreakWithVolume, aboveYesterdayClose, belowYesterdayClose, ltp, nineTwentyHigh, nineTwentyLow, nineTwentyRange, nineTwentyOversized, nearestRound50, distanceToRound50, nearRound50, atRound50 },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +10% volume filter." : volumeValid === true ? `Volume +10% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +10% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
