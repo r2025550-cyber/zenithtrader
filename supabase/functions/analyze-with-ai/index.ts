@@ -202,7 +202,8 @@ serve(async (req) => {
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
-    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + Math.round(baseGateScore * 0.6)));
+    const pdhPdlBoost = (r.pdhBreakWithVolume || r.pdlBreakWithVolume) ? 25 : (r.aboveYesterdayClose || r.belowYesterdayClose) ? 8 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + pdhPdlBoost + Math.round(baseGateScore * 0.6)));
 
     const minScore = tradingMode === "scalping" ? 60 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
