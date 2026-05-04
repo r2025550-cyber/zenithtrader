@@ -471,6 +471,23 @@ const Index = () => {
     if (signalKey === lastSignalAlertRef.current) return;
     lastSignalAlertRef.current = signalKey;
     triggerSignalAlert(latestSignal as Signal, previousAction === "WAIT");
+    if (signalKey !== lastDebugSignalKeyRef.current) {
+      lastDebugSignalKeyRef.current = signalKey;
+      const sigPremium = Number((latestSignal as any)?.entryPremium ?? (latestSignal as any)?.premiumEntry);
+      pushDebug({
+        stage: "SIGNAL",
+        level: "success",
+        title: `SIGNAL GENERATED: ${latestSignal?.action}`,
+        detail: `${latestSignal?.strike ?? "—"} @ ₹${Number.isFinite(sigPremium) ? sigPremium.toFixed(2) : "—"}`,
+        data: {
+          action: latestSignal?.action,
+          strike: latestSignal?.strike,
+          entryPrice: Number.isFinite(sigPremium) ? sigPremium : null,
+          conviction: latestSignal?.conviction,
+          createdAt: latestSignal?.created_at,
+        },
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
