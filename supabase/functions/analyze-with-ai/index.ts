@@ -154,6 +154,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const body = await req.json().catch(() => ({}));
+    const tradingMode: "scalping" | "sniper" = body?.tradingMode === "sniper" ? "sniper" : "scalping";
     const tradingLotSize = Number.isInteger(body?.tradingLotSize) && body.tradingLotSize > 0 ? body.tradingLotSize : Number.isInteger(body?.tradingQuantity) && body.tradingQuantity > 0 ? Math.max(1, Math.ceil(body.tradingQuantity / NIFTY_LOT_SIZE)) : null;
     const tradingQuantity = tradingLotSize ? tradingLotSize * NIFTY_LOT_SIZE : null;
     const executionIntent = body?.executionIntent === true;
