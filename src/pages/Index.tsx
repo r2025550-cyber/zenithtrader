@@ -112,10 +112,14 @@ const parseSuggestedAction = (signal?: Signal | null) => {
   const optionType = signal?.strike?.match(/Nifty\s+\d{4,6}\s+(CE|PE)/i)?.[1]?.toUpperCase();
   return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
 };
-const calculatePremiumExitPrices = (entryPremium: number) => ({
-  targetPremium: Number((entryPremium + DEFAULT_PREMIUM_TARGET_POINTS).toFixed(2)),
-  stopLossPremium: Number(Math.max(0.05, entryPremium - DEFAULT_PREMIUM_SL_POINTS).toFixed(2)),
-});
+const calculatePremiumExitPrices = (entryPremium: number, slPointsOverride?: number, targetPointsOverride?: number) => {
+  const slPts = Number.isFinite(slPointsOverride) && (slPointsOverride as number) > 0 ? (slPointsOverride as number) : DEFAULT_PREMIUM_SL_POINTS;
+  const tgtPts = Number.isFinite(targetPointsOverride) && (targetPointsOverride as number) > 0 ? (targetPointsOverride as number) : Math.max(DEFAULT_PREMIUM_TARGET_POINTS, slPts * 2);
+  return {
+    targetPremium: Number((entryPremium + tgtPts).toFixed(2)),
+    stopLossPremium: Number(Math.max(0.05, entryPremium - slPts).toFixed(2)),
+  };
+};
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 const isTradeSignal = (action?: string | null) => action === "BUY" || action === "SELL";
 
