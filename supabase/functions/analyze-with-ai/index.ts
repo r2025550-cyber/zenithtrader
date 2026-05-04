@@ -222,13 +222,24 @@ serve(async (req) => {
 
     const r = ruleContext.rules;
     // Scalper Mode gates: relaxed sustained-candle and 5m requirements; S/R breakout or candlestick scalp can fully override EMA21.
-    const buySniperReady = (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
-    const sellSniperReady = (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
+    // 9:20 oversized opening guard: when the 9:20 candle exceeds the 30-pt cap, only allow entries that have CLEARED the 9:20 high/low with volume.
+    const ltpForGate = r.ltp;
+    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && (r.highVolume || r.volumeValid === true);
+    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && (r.highVolume || r.volumeValid === true);
+    const nineTwentyBuyOk = !r.nineTwentyOversized || beyondNineTwentyHighWithVol;
+    const nineTwentySellOk = !r.nineTwentyOversized || beyondNineTwentyLowWithVol;
+
+    const buySniperReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
+    const sellSniperReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
     const pdhPdlBoost = (r.pdhBreakWithVolume || r.pdlBreakWithVolume) ? 25 : (r.aboveYesterdayClose || r.belowYesterdayClose) ? 8 : 0;
-    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + pdhPdlBoost + Math.round(baseGateScore * 0.6)));
+    // Round-number proximity boost: prioritise scalps near 50-pt psychological levels.
+    const roundNumberBoost = r.atRound50 ? 15 : r.nearRound50 ? 8 : 0;
+    // Penalise when 9:20 is oversized and we don't have a confirmed break beyond it.
+    const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
 
     const minScore = tradingMode === "scalping" ? 60 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
@@ -236,6 +247,8 @@ serve(async (req) => {
 - TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do NOT require both 1m and 5m same color.
 - 15m S/R OVERRIDE: If price breaks the 15m high/low with high volume, IGNORE the 21 EMA rule and trigger the trade.
 - QUICK SCALP: Bullish Engulfing/Hammer at 15m support → Quick Scalp Buy. Mirror at resistance for Quick Scalp Sell.
+- 9:20 ORB CAP (Nifty 50): The 9:20 candle is capped at 30 points. If 9:20 range > 30 pts (oversized opening), DO NOT take fresh entries unless price clears the 9:20 high (BUY) / low (SELL) with high volume.
+- ROUND-NUMBER PRIORITY: Prioritise setups within 10 pts of a 50-point psychological level (24100, 24150, 24200…). Mention the round number in REASON when relevant.
 - VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
 - Trigger threshold: 60% score.`;
     const sniperPrompt = `MODE: SNIPER (active). You are the trading mind for a Nifty Options SNIPER (1–2 high-conviction trades/day). Apply STRICT Sniper constraints:
