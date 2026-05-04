@@ -673,7 +673,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     };
 
     const highProbability = action !== "WAIT";
-    const effectiveLotSize = tradingLotSize;
+    // v5: position sizing — halve lots after a loss; restore on win.
+    const sizedLots = Math.max(1, Math.floor(tradingLotSize * positionSizeMultiplier));
+    const effectiveLotSize = sizedLots;
     const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE;
 
     const ruleContext = {
