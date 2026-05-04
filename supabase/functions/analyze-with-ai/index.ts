@@ -443,6 +443,28 @@ serve(async (req) => {
     const tradeGapOk = minutesSinceLastTrade >= MIN_TRADE_GAP_MIN;
     const tradeCapOk = tradesToday < MAX_TRADES_PER_DAY;
 
+    // ===== v5: LOSS PROTECTION & POSITION SIZING =====
+    let consecutiveLosses = 0;
+    for (const p of recentTradesPnl) { if (p < 0) consecutiveLosses++; else break; }
+    const lastTradePnl = recentTradesPnl.length ? recentTradesPnl[0] : null;
+    const lastTradeWasLoss = lastTradePnl !== null && lastTradePnl < 0;
+    const lastTradeWasWin = lastTradePnl !== null && lastTradePnl > 0;
+    const minutesSinceLastClosed = lastClosedTradeAt ? (Date.now() - lastClosedTradeAt) / 60000 : Infinity;
+    const lossPauseActive = consecutiveLosses >= LOSS_STREAK_THRESHOLD && minutesSinceLastClosed < LOSS_PAUSE_MIN;
+    const lossPauseRemainingMin = lossPauseActive ? Math.max(0, Math.ceil(LOSS_PAUSE_MIN - minutesSinceLastClosed)) : 0;
+    // Position-sizing multiplier: halve after a loss, restore after a win, default 1.
+    const positionSizeMultiplier = lastTradeWasLoss ? 0.5 : (lastTradeWasWin ? 1 : 1);
+
+    // ===== v5: NEWS/SPIKE & COMPRESSION FLAGS =====
+    const spikeBlock = pa.spikeDetected;
+    const compressionBreakoutBuy = pa.compressionBreakout === "BULL" && (pa.emaBullish || pa.ema21Slope > 0);
+    const compressionBreakoutSell = pa.compressionBreakout === "BEAR" && (pa.emaBearish || pa.ema21Slope < 0);
+
+    // ===== v5: LIQUIDITY TRAP REVERSAL SETUPS =====
+    // Trap above resistance => SELL signal; trap below support => BUY signal.
+    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing || pa.liveBullTrap);
+    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing || pa.liveBearTrap);
+
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
     const reasonParts: string[] = [];
 
