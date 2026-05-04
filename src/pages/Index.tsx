@@ -1182,6 +1182,72 @@ const Index = () => {
           </aside>
         </div>
 
+        <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Ghanshyam Sir Foundation</p>
+              <h2 className="text-xl font-semibold">Current Levels</h2>
+            </div>
+            <span className="text-xs text-muted-foreground">Auto-refresh every 1m · forced re-analysis on &gt;15pt move{yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDH</p>
+              <p className="mt-1 text-lg font-bold text-warning">{pdhVal === null ? "—" : pdhVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDL</p>
+              <p className="mt-1 text-lg font-bold text-warning">{pdlVal === null ? "—" : pdlVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-border bg-surface p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDC</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{pdcVal === null ? "—" : pdcVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-profit/30 bg-profit/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Resistance</p>
+              <p className="mt-1 text-lg font-bold text-profit">{immediateResistance === null ? "—" : immediateResistance.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-loss/30 bg-loss/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Support</p>
+              <p className="mt-1 text-lg font-bold text-loss">{immediateSupport === null ? "—" : immediateSupport.toFixed(2)}</p>
+            </div>
+          </div>
+          {hasLivePrice && (pdhVal !== null || pdlVal !== null) && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Spot {latestLtp.toLocaleString("en-IN")} ·{" "}
+              {pdhVal !== null && latestLtp > pdhVal ? <span className="font-semibold text-profit">Above PDH (Bullish bias)</span>
+                : pdlVal !== null && latestLtp < pdlVal ? <span className="font-semibold text-loss">Below PDL (Bearish bias)</span>
+                : pdcVal !== null && latestLtp > pdcVal ? <span className="font-semibold text-profit">Above PDC</span>
+                : pdcVal !== null && latestLtp < pdcVal ? <span className="font-semibold text-loss">Below PDC</span>
+                : <span>Inside yesterday's range</span>}
+            </p>
+          )}
+        </section>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          {[{ symbol: ceSymbol, ltp: ceLtpLive, mini: ceMini, series: ceSeries, tone: "profit" as const }, { symbol: peSymbol, ltp: peLtpLive, mini: peMini, series: peSeries, tone: "loss" as const }].map((opt) => (
+            <section key={opt.symbol} className="rounded-lg border border-border bg-panel p-4 shadow-panel">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">ATM {opt.tone === "profit" ? "Call" : "Put"} · {atmExpiry ?? "—"}</p>
+                  <h3 className="text-base font-semibold text-foreground">{opt.symbol}</h3>
+                </div>
+                <span className={`text-xl font-bold ${opt.tone === "profit" ? "text-profit" : "text-loss"}`}>{opt.ltp === null ? "—" : `₹${opt.ltp.toFixed(2)}`}</span>
+              </div>
+              <div className="relative h-32 rounded-md border border-border bg-surface">
+                {opt.mini.points ? (
+                  <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
+                    <polyline points={opt.mini.points} fill="none" stroke={opt.tone === "profit" ? "hsl(var(--profit))" : "hsl(var(--loss))"} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                  </svg>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{opt.series.length === 1 ? "Collecting first ticks…" : "Waiting for live ATM premium…"}</div>
+                )}
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">Range: {opt.mini.points ? `₹${opt.mini.min.toFixed(2)} – ₹${opt.mini.max.toFixed(2)}` : "—"} · Auto-switches when ATM strike changes</p>
+            </section>
+          ))}
+        </div>
+
         <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
           <section className="overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex items-center gap-2 border-b border-border p-4"><SlidersHorizontal className="h-5 w-5 text-accent" /><h2 className="text-xl font-semibold">Trade History</h2></div>
