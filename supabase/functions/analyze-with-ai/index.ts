@@ -3,21 +3,32 @@ import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 // =====================================================================
-// Pure Price-Action Scalping Engine for Nifty 50 Options
+// Pure Price-Action Scalping Engine v3 (Disciplined)
 // ---------------------------------------------------------------------
-// Removed: PCR/VIX gating, multi-confirmation scoring, AI scoring,
-// "wait for perfect setup" filters, divergence/heavyweight checks.
-// Kept: 15-candle Support/Resistance, EMA21 trend filter, candlestick
-// patterns (engulfing + strong-body), breakout entries, fixed SL/Target,
-// trailing stop loss, ATM strike picking, trade-gap & range guards.
+// Upgrades over v2:
+//  1) Confirmed swing-based S/R (min 2 touches, last 20–30 candles)
+//  2) EMA21 trend + slope filter
+//  3) Breakout requires retest pullback before entry
+//  4) Strict strong-candle definition (body>=60%, close near extreme)
+//  5) Mid-zone filter (no trade between S/R w/o momentum)
+//  6) Range filter allows breakout/momentum to override
+//  7) Smart trailing SL (BE @+10, lock +10 @+20, then last-candle trail)
+//  8) Entry precision: pullback wait after breakout close
+//  9) Fake-breakout wick filter (>50% wick rejected)
+// 10) Trade-quality: only trade when LTP within "near zone" of S/R
+// Maintains output shape & ruleContext for the frontend.
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-const MIN_TRADE_GAP_MIN = 12; // 10–15 min gap between trades
+const MIN_TRADE_GAP_MIN = 12;
 const MAX_TRADES_PER_DAY = 5;
-const SIDEWAYS_RANGE_PTS = 30; // <30 pts in last 30 min → WAIT
-const TRAIL_TRIGGER_PTS = 10; // move SL to break-even after +10 pts
-const TRAIL_STEP_PTS = 5; // then trail every +5 pts
+const SIDEWAYS_RANGE_PTS = 30;
+const TRAIL_TRIGGER_PTS = 10;     // move SL to break-even
+const TRAIL_LOCK_PTS = 10;        // lock min +10 after +20
+const TRAIL_LOCK_AT_PROFIT = 20;
+const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
+const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
+const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -25,10 +36,17 @@ function num(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function ema(values: number[], period: number): number | null {
-  if (values.length < period) return null;
+function emaSeries(values: number[], period: number): number[] {
+  if (values.length < period) return [];
   const k = 2 / (period + 1);
-  return values.slice(1).reduce((avg, v) => v * k + avg * (1 - k), values[0]);
+  const out: number[] = [];
+  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out.push(prev);
+  for (let i = period; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out.push(prev);
+  }
+  return out;
 }
 
 function atmStrike(price: number | null) {
@@ -46,6 +64,49 @@ type MarketRow = Record<string, unknown> & {
   close_price?: unknown;
 };
 
+// Find confirmed swing highs/lows with at least `minTouches` candles touching within tolerance.
+function confirmedSwings(history: MarketRow[], lookback = 30, minTouches = 2, tolPts = 4) {
+  const window = history.slice(1, lookback + 1); // exclude live tick
+  const highs = window.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
+  const lows = window.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
+  if (highs.length < 5 || lows.length < 5) return { support: null, resistance: null };
+
+  // Candidate swing points: local extremes over a 3-candle window
+  const swingHighs: number[] = [];
+  const swingLows: number[] = [];
+  for (let i = 1; i < window.length - 1; i++) {
+    const h = num(window[i]?.high_price);
+    const hPrev = num(window[i - 1]?.high_price);
+    const hNext = num(window[i + 1]?.high_price);
+    const l = num(window[i]?.low_price);
+    const lPrev = num(window[i - 1]?.low_price);
+    const lNext = num(window[i + 1]?.low_price);
+    if (h !== null && hPrev !== null && hNext !== null && h >= hPrev && h >= hNext) swingHighs.push(h);
+    if (l !== null && lPrev !== null && lNext !== null && l <= lPrev && l <= lNext) swingLows.push(l);
+  }
+
+  // Cluster: pick the level with most touches within tolPts
+  const bestLevel = (points: number[], allBars: number[], pickHighest: boolean) => {
+    if (!points.length) return null;
+    let best: { level: number; touches: number } | null = null;
+    for (const p of points) {
+      const touches = allBars.filter((v) => Math.abs(v - p) <= tolPts).length;
+      if (touches >= minTouches) {
+        if (!best || touches > best.touches || (touches === best.touches && (pickHighest ? p > best.level : p < best.level))) {
+          best = { level: p, touches };
+        }
+      }
+    }
+    // Fallback: hard extreme of window
+    if (!best) return pickHighest ? Math.max(...allBars) : Math.min(...allBars);
+    return best.level;
+  };
+
+  const resistance = bestLevel(swingHighs, highs, true);
+  const support = bestLevel(swingLows, lows, false);
+  return { support, resistance };
+}
+
 function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const ltp = num(latest?.ltp);
   const open = num(latest?.open_price);
@@ -53,41 +114,98 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const low = num(latest?.low_price);
   const close = num(latest?.close_price);
 
-  // 15-candle S/R (exclude live tick so breakouts can register)
-  const last15 = history.slice(1, 16);
-  const highs = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
-  const lows = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
-  const resistance = highs.length ? Math.max(...highs) : null;
-  const support = lows.length ? Math.min(...lows) : null;
+  // Confirmed swing S/R
+  const { support, resistance } = confirmedSwings(history, 30, 2, 4);
 
-  // EMA21 on closes (chronological)
-  const closes = [...history].reverse().map((r) => num(r?.ltp) ?? num(r?.close_price)).filter((v): v is number => v !== null);
-  const ema21 = ema(closes, 21);
-  const ema9 = ema(closes, 9);
-  const priceAboveEma21 = ltp !== null && ema21 !== null && ltp > ema21;
-  const priceBelowEma21 = ltp !== null && ema21 !== null && ltp < ema21;
+  // EMA21 series + slope
+  const closesChrono = [...history].reverse().map((r) => num(r?.ltp) ?? num(r?.close_price)).filter((v): v is number => v !== null);
+  const ema21Series = emaSeries(closesChrono, 21);
+  const ema9Series = emaSeries(closesChrono, 9);
+  const ema21 = ema21Series.length ? ema21Series[ema21Series.length - 1] : null;
+  const ema9 = ema9Series.length ? ema9Series[ema9Series.length - 1] : null;
+  const ema21Prev = ema21Series.length >= 4 ? ema21Series[ema21Series.length - 4] : null;
+  const ema21Slope = ema21 !== null && ema21Prev !== null ? ema21 - ema21Prev : 0;
+  const emaBullish = ltp !== null && ema21 !== null && ltp > ema21 && ema21Slope > 0;
+  const emaBearish = ltp !== null && ema21 !== null && ltp < ema21 && ema21Slope < 0;
 
-  // Candlestick: engulfing + strong-body
+  // Strict candle classification (body>=60% range, close near extreme)
   const prev = history[1];
   const pOpen = num(prev?.open_price);
   const pClose = num(prev?.close_price);
   const pHigh = num(prev?.high_price);
   const pLow = num(prev?.low_price);
   const body = open !== null && close !== null ? Math.abs(close - open) : 0;
-  const range = high !== null && low !== null ? high - low : 0;
-  const strongBody = range > 0 && body >= range * 0.7 && body >= 5; // big-body candle (>=5 pts)
-  const bullishEngulfing = open !== null && close !== null && pOpen !== null && pClose !== null && pClose < pOpen && close > open && close >= pOpen && open <= pClose;
-  const bearishEngulfing = open !== null && close !== null && pOpen !== null && pClose !== null && pClose > pOpen && close < open && close <= pOpen && open >= pClose;
-  const strongGreen = open !== null && close !== null && close > open && strongBody;
-  const strongRed = open !== null && close !== null && close < open && strongBody;
+  const range = high !== null && low !== null ? Math.max(high - low, 0) : 0;
+  const upperWick = high !== null && open !== null && close !== null ? high - Math.max(open, close) : 0;
+  const lowerWick = low !== null && open !== null && close !== null ? Math.min(open, close) - low : 0;
+  const bodyPct = range > 0 ? body / range : 0;
+  const closeNearHigh = high !== null && close !== null && range > 0 ? (high - close) / range <= 0.2 : false;
+  const closeNearLow = low !== null && close !== null && range > 0 ? (close - low) / range <= 0.2 : false;
+  const strongBody = bodyPct >= 0.6 && body >= 5;
+  const strongGreen = open !== null && close !== null && close > open && strongBody && closeNearHigh;
+  const strongRed = open !== null && close !== null && close < open && strongBody && closeNearLow;
+  const bullishEngulfing =
+    open !== null && close !== null && pOpen !== null && pClose !== null &&
+    pClose < pOpen && close > open && close >= pOpen && open <= pClose && bodyPct >= 0.55;
+  const bearishEngulfing =
+    open !== null && close !== null && pOpen !== null && pClose !== null &&
+    pClose > pOpen && close < open && close <= pOpen && open >= pClose && bodyPct >= 0.55;
 
-  // Proximity to S/R (within 12 pts)
-  const nearSupport = support !== null && ltp !== null && Math.abs(ltp - support) <= 12;
-  const nearResistance = resistance !== null && ltp !== null && Math.abs(ltp - resistance) <= 12;
+  // Wick rejection (fake-breakout filter): wick > 50% of range on the breakout side
+  const upperWickPct = range > 0 ? upperWick / range : 0;
+  const lowerWickPct = range > 0 ? lowerWick / range : 0;
+  const longUpperWick = upperWickPct > 0.5;
+  const longLowerWick = lowerWickPct > 0.5;
 
-  // Breakouts (close beyond level)
-  const breakoutAboveR = ltp !== null && resistance !== null && ltp > resistance && (strongGreen || bullishEngulfing);
-  const breakdownBelowS = ltp !== null && support !== null && ltp < support && (strongRed || bearishEngulfing);
+  // Proximity (near zone)
+  const nearSupport = support !== null && ltp !== null && Math.abs(ltp - support) <= NEAR_ZONE_PTS;
+  const nearResistance = resistance !== null && ltp !== null && Math.abs(ltp - resistance) <= NEAR_ZONE_PTS;
+
+  // Mid-zone detection (avoid no-mans-land)
+  const midZone = support !== null && resistance !== null && ltp !== null &&
+    ltp > support + NEAR_ZONE_PTS && ltp < resistance - NEAR_ZONE_PTS;
+
+  // Detect a recent breakout candle (within last N candles, excluding live tick)
+  let recentBullBreakout: { idx: number; level: number; closePx: number } | null = null;
+  let recentBearBreakout: { idx: number; level: number; closePx: number } | null = null;
+  if (resistance !== null) {
+    for (let i = 1; i <= Math.min(RETEST_MAX_AGE_CANDLES, history.length - 1); i++) {
+      const r = history[i];
+      const c = num(r?.close_price);
+      const o = num(r?.open_price);
+      const h = num(r?.high_price);
+      const l = num(r?.low_price);
+      if (c === null || o === null || h === null || l === null) continue;
+      const rng = Math.max(h - l, 0);
+      const bd = Math.abs(c - o);
+      const strong = rng > 0 && bd / rng >= 0.6 && c > o && (rng > 0 ? (h - c) / rng <= 0.2 : false);
+      const wickOk = rng > 0 ? (h - Math.max(o, c)) / rng <= 0.5 : false;
+      if (c > resistance && strong && wickOk) { recentBullBreakout = { idx: i, level: resistance, closePx: c }; break; }
+    }
+  }
+  if (support !== null) {
+    for (let i = 1; i <= Math.min(RETEST_MAX_AGE_CANDLES, history.length - 1); i++) {
+      const r = history[i];
+      const c = num(r?.close_price);
+      const o = num(r?.open_price);
+      const h = num(r?.high_price);
+      const l = num(r?.low_price);
+      if (c === null || o === null || h === null || l === null) continue;
+      const rng = Math.max(h - l, 0);
+      const bd = Math.abs(c - o);
+      const strong = rng > 0 && bd / rng >= 0.6 && c < o && (rng > 0 ? (c - l) / rng <= 0.2 : false);
+      const wickOk = rng > 0 ? (Math.min(o, c) - l) / rng <= 0.5 : false;
+      if (c < support && strong && wickOk) { recentBearBreakout = { idx: i, level: support, closePx: c }; break; }
+    }
+  }
+
+  // Retest confirmation: current LTP pulled back near the breakout level AND current candle confirms direction
+  const retestBullOk = recentBullBreakout !== null && ltp !== null &&
+    Math.abs(ltp - recentBullBreakout.level) <= RETEST_TOLERANCE_PTS &&
+    (strongGreen || bullishEngulfing) && !longUpperWick;
+  const retestBearOk = recentBearBreakout !== null && ltp !== null &&
+    Math.abs(ltp - recentBearBreakout.level) <= RETEST_TOLERANCE_PTS &&
+    (strongRed || bearishEngulfing) && !longLowerWick;
 
   // Sideways guard: last 30 min range
   const thirtyMinRows = history.filter((row) => {
@@ -98,18 +216,24 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const last30Range = rangeVals.length > 2 ? Math.max(...rangeVals) - Math.min(...rangeVals) : null;
   const sidewaysMarket = last30Range !== null && last30Range < SIDEWAYS_RANGE_PTS;
 
-  // Strong momentum (use 1m move + body)
+  // Strong momentum
   const oneMinMove = ltp !== null && num(prev?.ltp) !== null ? ltp - (num(prev?.ltp) as number) : 0;
   const strongMomentum = strongBody && Math.abs(oneMinMove) >= 8;
+
+  // Live breakout (close beyond level + strong + no long opposing wick)
+  const liveBullBreakout = ltp !== null && resistance !== null && ltp > resistance && strongGreen && !longUpperWick;
+  const liveBearBreakout = ltp !== null && support !== null && ltp < support && strongRed && !longLowerWick;
 
   return {
     ltp, open, high, low, close,
     prevHigh: pHigh, prevLow: pLow, prevClose: pClose,
-    support, resistance, ema9, ema21,
-    priceAboveEma21, priceBelowEma21,
+    support, resistance, ema9, ema21, ema21Slope,
+    emaBullish, emaBearish,
     bullishEngulfing, bearishEngulfing, strongGreen, strongRed, strongBody,
-    nearSupport, nearResistance,
-    breakoutAboveR, breakdownBelowS,
+    bodyPct, upperWickPct, lowerWickPct, longUpperWick, longLowerWick,
+    nearSupport, nearResistance, midZone,
+    recentBullBreakout, recentBearBreakout, retestBullOk, retestBearOk,
+    liveBullBreakout, liveBearBreakout,
     last30Range, sidewaysMarket,
     strongMomentum,
   };
@@ -118,7 +242,6 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
 function pickStrike(ltp: number | null, action: "BUY" | "SELL", strongMomentum: boolean) {
   const atm = atmStrike(ltp);
   if (atm === null) return null;
-  // Slightly OTM on strong momentum for better delta on a fast move
   if (strongMomentum) return action === "BUY" ? atm + 50 : atm - 50;
   return atm;
 }
@@ -146,17 +269,15 @@ serve(async (req) => {
       .select("*")
       .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false })
-      .limit(70);
+      .limit(80);
     const latest = history?.[0] as MarketRow | undefined;
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
 
     const pa = buildPriceAction(latest, (history ?? []) as MarketRow[]);
 
-    // Hard guards
     const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
     const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
 
-    // Trade-gap & per-day cap
     const since = new Date();
     since.setHours(0, 0, 0, 0);
     const { data: todaySignals } = await auth.adminClient
@@ -173,9 +294,29 @@ serve(async (req) => {
     const tradeGapOk = minutesSinceLastTrade >= MIN_TRADE_GAP_MIN;
     const tradeCapOk = tradesToday < MAX_TRADES_PER_DAY;
 
-    // Build signal (deterministic price-action rules; no AI scoring)
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
-    let reasonParts: string[] = [];
+    const reasonParts: string[] = [];
+
+    // Setup detection
+    // BUY-bounce: near support + bullish candle + EMA bullish + no long lower wick (rejection ok = lower wick is fine for bounce, but we want close strong)
+    const buyBounce =
+      pa.nearSupport &&
+      (pa.bullishEngulfing || pa.strongGreen) &&
+      pa.emaBullish;
+    // SELL-rejection: near resistance + bearish candle + EMA bearish
+    const sellRejection =
+      pa.nearResistance &&
+      (pa.bearishEngulfing || pa.strongRed) &&
+      pa.emaBearish;
+    // Breakout entries require RETEST (entry precision + fake-breakout filter)
+    const buyBreakoutRetest = pa.retestBullOk && pa.emaBullish;
+    const sellBreakdownRetest = pa.retestBearOk && pa.emaBearish;
+    // Live breakout allowed only with strong momentum + EMA aligned (rare aggressive case)
+    const buyLiveMomentum = pa.liveBullBreakout && pa.strongMomentum && pa.emaBullish;
+    const sellLiveMomentum = pa.liveBearBreakout && pa.strongMomentum && pa.emaBearish;
+
+    const anySetup =
+      buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest || buyLiveMomentum || sellLiveMomentum;
 
     if (dailyTargetHit) {
       reasonParts.push("Daily profit target hit — trading paused.");
@@ -185,25 +326,29 @@ serve(async (req) => {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
     } else if (!tradeGapOk) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
-    } else if (pa.sidewaysMarket) {
-      reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS}.`);
+    } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
+      reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
+    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum) {
+      reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (buyBreakoutRetest) {
+      action = "BUY"; reasonParts.push(`Retest BUY: pullback to broken R≈${pa.recentBullBreakout?.level.toFixed(2)} confirmed by ${pa.bullishEngulfing ? "engulfing" : "strong green"} (EMA21 bullish, slope>0).`);
+    } else if (sellBreakdownRetest) {
+      action = "SELL"; reasonParts.push(`Retest SELL: pullback to broken S≈${pa.recentBearBreakout?.level.toFixed(2)} confirmed by ${pa.bearishEngulfing ? "engulfing" : "strong red"} (EMA21 bearish, slope<0).`);
+    } else if (buyBounce) {
+      action = "BUY"; reasonParts.push(`Support bounce at ${pa.support?.toFixed(2)} with ${pa.bullishEngulfing ? "bullish engulfing" : "strong green"} (EMA21 bullish).`);
+    } else if (sellRejection) {
+      action = "SELL"; reasonParts.push(`Resistance rejection at ${pa.resistance?.toFixed(2)} with ${pa.bearishEngulfing ? "bearish engulfing" : "strong red"} (EMA21 bearish).`);
+    } else if (buyLiveMomentum) {
+      action = "BUY"; reasonParts.push(`Momentum breakout above R=${pa.resistance?.toFixed(2)} (strong body, no upper wick).`);
+    } else if (sellLiveMomentum) {
+      action = "SELL"; reasonParts.push(`Momentum breakdown below S=${pa.support?.toFixed(2)} (strong body, no lower wick).`);
     } else {
-      // BUY (CE) — bounce at support OR breakout above resistance
-      const buyBounce = pa.nearSupport && (pa.bullishEngulfing || pa.strongGreen) && pa.priceAboveEma21;
-      const buyBreakout = pa.breakoutAboveR;
-      // SELL (PE) — rejection at resistance OR breakdown below support
-      const sellRejection = pa.nearResistance && (pa.bearishEngulfing || pa.strongRed) && pa.priceBelowEma21;
-      const sellBreakdown = pa.breakdownBelowS;
-
-      if (buyBreakout) { action = "BUY"; reasonParts.push(`Breakout above 15-candle resistance ${pa.resistance?.toFixed(2)} with strong candle.`); }
-      else if (buyBounce) { action = "BUY"; reasonParts.push(`Support bounce at ${pa.support?.toFixed(2)} with ${pa.bullishEngulfing ? "bullish engulfing" : "strong green candle"}, price > EMA21.`); }
-      else if (sellBreakdown) { action = "SELL"; reasonParts.push(`Breakdown below 15-candle support ${pa.support?.toFixed(2)} with strong candle.`); }
-      else if (sellRejection) { action = "SELL"; reasonParts.push(`Resistance rejection at ${pa.resistance?.toFixed(2)} with ${pa.bearishEngulfing ? "bearish engulfing" : "strong red candle"}, price < EMA21.`); }
-      else { reasonParts.push(`No price-action setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}.`); }
+      const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
+      reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
     }
 
-    // SL/Target on spot points (for UI; option premium SL/T handled in place-live-order)
-    let entry = pa.ltp ?? 0;
+    // SL/Target on spot points
+    const entry = pa.ltp ?? 0;
     let stopLoss: number | null = null;
     let target: number | null = null;
     let slPoints: number | null = null;
@@ -211,7 +356,7 @@ serve(async (req) => {
     if (action === "BUY") {
       stopLoss = pa.prevLow ?? (pa.ltp !== null ? pa.ltp - 15 : null);
       slPoints = userSlPoints ?? (stopLoss !== null && pa.ltp !== null ? Math.max(5, pa.ltp - stopLoss) : 15);
-      targetPoints = userTargetPoints ?? Math.round(slPoints * 2); // 1:2 RR
+      targetPoints = userTargetPoints ?? Math.round(slPoints * 2);
       target = entry + targetPoints;
     } else if (action === "SELL") {
       stopLoss = pa.prevHigh ?? (pa.ltp !== null ? pa.ltp + 15 : null);
@@ -228,28 +373,30 @@ serve(async (req) => {
 
     const conviction: "HIGH" | "MEDIUM" | "LOW" =
       action === "WAIT" ? "LOW"
-        : (pa.breakoutAboveR || pa.breakdownBelowS) && pa.strongMomentum ? "HIGH"
+        : (buyBreakoutRetest || sellBreakdownRetest) && pa.strongMomentum ? "HIGH"
+        : (buyBreakoutRetest || sellBreakdownRetest) ? "MEDIUM"
+        : pa.strongMomentum ? "HIGH"
         : "MEDIUM";
 
-    // Compose AI reasoning prompt — SHORT, decisive, price-action only
     const promptContext = {
       mode: tradingMode,
       ltp: pa.ltp,
       support: pa.support, resistance: pa.resistance,
-      ema21: pa.ema21,
-      candle: { bullishEngulfing: pa.bullishEngulfing, bearishEngulfing: pa.bearishEngulfing, strongGreen: pa.strongGreen, strongRed: pa.strongRed },
-      breakout: { up: pa.breakoutAboveR, down: pa.breakdownBelowS },
-      proximity: { nearSupport: pa.nearSupport, nearResistance: pa.nearResistance },
+      ema21: pa.ema21, ema21Slope: pa.ema21Slope,
+      candle: { bullishEngulfing: pa.bullishEngulfing, bearishEngulfing: pa.bearishEngulfing, strongGreen: pa.strongGreen, strongRed: pa.strongRed, bodyPct: pa.bodyPct, upperWickPct: pa.upperWickPct, lowerWickPct: pa.lowerWickPct },
+      breakout: { liveUp: pa.liveBullBreakout, liveDown: pa.liveBearBreakout, retestUp: pa.retestBullOk, retestDown: pa.retestBearOk },
+      proximity: { nearSupport: pa.nearSupport, nearResistance: pa.nearResistance, midZone: pa.midZone },
       sidewaysMarket: pa.sidewaysMarket, last30Range: pa.last30Range,
       ruleAction: action, ruleStrike: strikeLabel, ruleReason: reasonParts.join(" "),
     };
-    const prompt = `You are a Nifty 50 options price-action scalper. NO indicators beyond EMA21, S/R, candlesticks. NO PCR/VIX/multi-confirmation. Use ONLY:
-- BUY (CE): price near 15-candle support + bullish engulfing/strong-green + price>EMA21, OR breakout above resistance with strong candle.
-- SELL (PE): price near 15-candle resistance + bearish engulfing/strong-red + price<EMA21, OR breakdown below support with strong candle.
-- SL = previous candle low (BUY) / high (SELL). Target = 1.5x–2x risk.
-- Skip if last-30m range < ${SIDEWAYS_RANGE_PTS} pts.
-- Strike: ATM = round(LTP/50)*50; if strong momentum, ATM±50.
-- Mode: ${tradingMode.toUpperCase()}. Be decisive — DO NOT default to WAIT if a setup is present.
+    const prompt = `You are a disciplined Nifty 50 options price-action scalper v3. Use ONLY:
+- Confirmed swing S/R, EMA21 + slope, strict candles (body>=60%, close near extreme).
+- Breakout entries REQUIRE retest (pullback to broken level + confirmation candle).
+- Reject candles with >50% wick on the breakout side.
+- Skip mid-zone unless strong momentum or retest setup.
+- SL = previous candle low (BUY) / high (SELL); RR 1:2.
+- Strike: ATM = round(LTP/50)*50; on strong momentum, ATM±50.
+- Mode: ${tradingMode.toUpperCase()}. Be decisive when a setup is present; otherwise WAIT.
 
 Rule engine pre-computed: ACTION=${action}, STRIKE=${strikeLabel}.
 Context: ${JSON.stringify(promptContext)}
@@ -268,7 +415,6 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       aiText = "";
     }
 
-    // Use rule engine as source of truth; AI text is for reasoning narrative only.
     const parsed = aiText ? parseSignal(aiText) : { action, strike: strikeLabel, reason: reasonParts.join(" ") };
     const finalReason = `[${tradingMode.toUpperCase()} MODE] ${parsed.reason || reasonParts.join(" ")}`.trim();
 
@@ -290,7 +436,6 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     const effectiveLotSize = tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE;
 
-    // Keep ruleContext shape compatible with frontend (it reads support15/resistance15/priceAboveEma21/priceBelowEma21/volumeValid/pcr/pcrState/vixSizeCut/vixRising)
     const ruleContext = {
       atmStrike: atmStrike(pa.ltp),
       rules: {
@@ -301,20 +446,27 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         immediateResistance: pa.resistance,
         ema9: pa.ema9,
         ema21: pa.ema21,
-        priceAboveEma21: pa.priceAboveEma21,
-        priceBelowEma21: pa.priceBelowEma21,
+        ema21Slope: pa.ema21Slope,
+        priceAboveEma21: pa.emaBullish,
+        priceBelowEma21: pa.emaBearish,
         bullishEngulfing: pa.bullishEngulfing,
         bearishEngulfing: pa.bearishEngulfing,
         strongGreen: pa.strongGreen,
         strongRed: pa.strongRed,
-        breakoutAboveR15: pa.breakoutAboveR,
-        breakdownBelowS15: pa.breakdownBelowS,
+        bodyPct: pa.bodyPct,
+        upperWickPct: pa.upperWickPct,
+        lowerWickPct: pa.lowerWickPct,
+        breakoutAboveR15: pa.liveBullBreakout || pa.retestBullOk,
+        breakdownBelowS15: pa.liveBearBreakout || pa.retestBearOk,
+        retestBullOk: pa.retestBullOk,
+        retestBearOk: pa.retestBearOk,
         nearSupport: pa.nearSupport,
         nearResistance: pa.nearResistance,
+        midZone: pa.midZone,
         last30Range: pa.last30Range,
         sidewaysMarket: pa.sidewaysMarket,
         strongMomentum: pa.strongMomentum,
-        // Compatibility shims for old UI fields:
+        // Compatibility shims
         volumeValid: null,
         pcr: null,
         pcrState: "Disabled (price-action mode)",
@@ -334,7 +486,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       reason: signal.reason,
       raw_response: JSON.stringify({
         text: aiText,
-        engine: "price-action-scalper-v2",
+        engine: "price-action-scalper-v3",
         tradingMode,
         signal,
         ruleContext,
@@ -342,7 +494,12 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity,
         effectiveLotSize, effectiveTradingQuantity,
         userTargetPoints, userSlPoints,
-        trail: { triggerPts: TRAIL_TRIGGER_PTS, stepPts: TRAIL_STEP_PTS },
+        trail: {
+          triggerPts: TRAIL_TRIGGER_PTS,
+          lockAtProfit: TRAIL_LOCK_AT_PROFIT,
+          lockPts: TRAIL_LOCK_PTS,
+          mode: "BE@+10, lock+10@+20, then last-candle trail",
+        },
       }),
     }).select("*").single();
     if (error) throw error;
@@ -362,7 +519,6 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveTradingQuantity,
         riskSizeDown: false,
         userTargetPoints, userSlPoints,
-        // Price-action specifics
         optionType: signal.optionType,
         entry: signal.entry,
         stopLoss: signal.stopLoss,
@@ -370,7 +526,11 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         slPoints: signal.slPoints,
         targetPoints: signal.targetPoints,
         strikeNumber: signal.strikeNumber,
-        trail: { triggerPts: TRAIL_TRIGGER_PTS, stepPts: TRAIL_STEP_PTS },
+        trail: {
+          triggerPts: TRAIL_TRIGGER_PTS,
+          lockAtProfit: TRAIL_LOCK_AT_PROFIT,
+          lockPts: TRAIL_LOCK_PTS,
+        },
       },
     });
   } catch (error) {
