@@ -156,6 +156,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       multiTimeframeAligned ? `5m ${trend5} confirms 1m ${entry1m} (or scalper-mode 1m breakout).` : `5m=${trend5}, 1m=${entry1m} — scalper-mode awaiting 1m EMA-aligned breakout.`,
       srBreakout ? `S/R BREAKOUT: ${breakoutAboveR15 ? `15m resistance broken with high volume` : `15m support broken with high volume`}. EMA21 rule overridden.` : `15m S/R: support ${support15?.toFixed(2) ?? "n/a"}, resistance ${resistance15?.toFixed(2) ?? "n/a"}.`,
       quickScalpBuy ? "QUICK SCALP BUY: bullish engulfing/hammer at 15m support." : quickScalpSell ? "QUICK SCALP SELL: bearish engulfing/shooting-star at 15m resistance." : "No candlestick scalp pattern at S/R.",
+      pdh !== null || pdl !== null || pdc !== null ? `Yesterday OHLC — PDH ${pdh?.toFixed(2) ?? "n/a"} · PDL ${pdl?.toFixed(2) ?? "n/a"} · PDC ${pdc?.toFixed(2) ?? "n/a"}. ${pdhBreakWithVolume ? "BULLISH BIAS: PDH broken with volume." : pdlBreakWithVolume ? "BEARISH BIAS: PDL broken with volume." : aboveYesterdayClose ? "Above PDC (mild bullish bias)." : belowYesterdayClose ? "Below PDC (mild bearish bias)." : "Inside yesterday's range."}` : "Yesterday OHLC unavailable.",
     ],
   };
 }
