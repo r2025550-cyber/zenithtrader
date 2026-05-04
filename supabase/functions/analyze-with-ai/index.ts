@@ -103,8 +103,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
-  // 15-minute Support/Resistance from last 15 rows — these double as the dashboard's "Immediate S/R"
-  const last15 = history.slice(0, 15);
+  // 15-minute Support/Resistance from previous rows only — excluding the live tick avoids making breakouts impossible.
+  const last15 = history.slice(1, 16);
   const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
   const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
   const resistance15 = highs15.length ? Math.max(...highs15) : null;
@@ -224,13 +224,19 @@ serve(async (req) => {
     // Scalper Mode gates: relaxed sustained-candle and 5m requirements; S/R breakout or candlestick scalp can fully override EMA21.
     // 9:20 oversized opening guard: when the 9:20 candle exceeds the 30-pt cap, only allow entries that have CLEARED the 9:20 high/low with volume.
     const ltpForGate = r.ltp;
-    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && (r.highVolume || r.volumeValid === true);
-    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && (r.highVolume || r.volumeValid === true);
+    const scalpingMode = tradingMode === "scalping";
+    const volumeConfirmationOk = scalpingMode ? r.volumeValid !== false || r.highVolume === true : r.highVolume === true || r.volumeValid === true;
+    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && volumeConfirmationOk;
+    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && volumeConfirmationOk;
     const nineTwentyBuyOk = !r.nineTwentyOversized || beyondNineTwentyHighWithVol;
     const nineTwentySellOk = !r.nineTwentyOversized || beyondNineTwentyLowWithVol;
 
-    const buySniperReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
-    const sellSniperReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
+    const volumeGateOk = scalpingMode ? (r.volumeValid !== false || r.highVolume === true || r.srBreakout === true) : (r.volumeValid === true || r.highVolume === true || r.srBreakout === true);
+    const vixGateOk = scalpingMode ? true : r.vixStable === true;
+    const bullishSetupReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true || r.priceAboveBothEmas === true || r.pdhBreakWithVolume === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true || r.breakoutAboveR15 === true);
+    const bearishSetupReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true || r.priceBelowBothEmas === true || r.pdlBreakWithVolume === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true || r.breakdownBelowS15 === true);
+    const buySniperReady = bullishSetupReady && vixGateOk && volumeGateOk && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true || scalpingMode);
+    const sellSniperReady = bearishSetupReady && vixGateOk && volumeGateOk && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true || scalpingMode);
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
@@ -240,6 +246,9 @@ serve(async (req) => {
     // Penalise when 9:20 is oversized and we don't have a confirmed break beyond it.
     const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
+    const bullishVotes = [r.breakoutAboveR15, r.quickScalpBuy, r.pdhBreakWithVolume, r.priceAboveBothEmas, r.priceAboveEma21 && r.entry1m === "bullish", r.sustainedBullish1m, r.entry1m === "bullish", r.aboveYesterdayClose && !r.priceBelowBothEmas].filter(Boolean).length;
+    const bearishVotes = [r.breakdownBelowS15, r.quickScalpSell, r.pdlBreakWithVolume, r.priceBelowBothEmas, r.priceBelowEma21 && r.entry1m === "bearish", r.sustainedBearish1m, r.entry1m === "bearish", r.belowYesterdayClose && !r.priceAboveBothEmas].filter(Boolean).length;
+    const directionalBias: "BUY" | "SELL" | "WAIT" = bullishVotes > bearishVotes ? "BUY" : bearishVotes > bullishVotes ? "SELL" : "WAIT";
 
     // Nifty 50 scalping: minimum score lowered to 70 per execution-logic spec.
     const minScore = tradingMode === "scalping" ? 70 : 80;
@@ -294,8 +303,8 @@ Latest market data:\n${JSON.stringify(latest)}`;
     // A score > 80 also overrides any divergence block.
     const scalpingHighConviction = tradingMode === "scalping" && sniperConfirmationScore >= 75;
     const divergenceOverride = sniperConfirmationScore > 80;
-    const buyGateOk = buySniperReady || scalpingHighConviction;
-    const sellGateOk = sellSniperReady || scalpingHighConviction;
+    const buyGateOk = buySniperReady || (scalpingHighConviction && directionalBias === "BUY");
+    const sellGateOk = sellSniperReady || (scalpingHighConviction && directionalBias === "SELL");
 
     if (signal.action === "BUY" && (!buyGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
@@ -311,10 +320,10 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "WAIT" && sniperConfirmationScore >= minScore) {
       if (buyGateOk && !sellGateOk) {
         signal.action = "BUY";
-        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — bullish votes ${bullishVotes}:${bearishVotes}; gates ready (force-promoted from WAIT).`;
       } else if (sellGateOk && !buyGateOk) {
         signal.action = "SELL";
-        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — bearish votes ${bearishVotes}:${bullishVotes}; gates ready (force-promoted from WAIT).`;
       }
     }
     if (signal.action !== "WAIT" && !signal.reason?.includes(modeTag)) signal.reason = `${modeTag} ${signal.reason ?? ""}`.trim();
@@ -337,11 +346,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
+      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, directionalBias, bullishVotes, bearishVotes, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
+    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, directionalBias, bullishVotes, bearishVotes, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
