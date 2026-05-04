@@ -103,7 +103,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
-  // 15-minute Support/Resistance from last 15 rows
+  // 15-minute Support/Resistance from last 15 rows — these double as the dashboard's "Immediate S/R"
   const last15 = history.slice(0, 15);
   const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
   const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
@@ -113,6 +113,16 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const breakoutAboveR15 = ltp !== null && resistance15 !== null && ltp > resistance15 && highVolume;
   const breakdownBelowS15 = ltp !== null && support15 !== null && ltp < support15 && highVolume;
   const srBreakout = breakoutAboveR15 || breakdownBelowS15;
+
+  // Ghanshyam Sir's Foundation: PDH / PDL / PDC bias
+  const yesterday = (latest?.raw_payload as any)?.context?.yesterday ?? {};
+  const pdh = num(yesterday?.pdh);
+  const pdl = num(yesterday?.pdl);
+  const pdc = num(yesterday?.pdc);
+  const pdhBreakWithVolume = ltp !== null && pdh !== null && ltp > pdh && (highVolume || volumeValid === true);
+  const pdlBreakWithVolume = ltp !== null && pdl !== null && ltp < pdl && (highVolume || volumeValid === true);
+  const aboveYesterdayClose = ltp !== null && pdc !== null && ltp > pdc;
+  const belowYesterdayClose = ltp !== null && pdc !== null && ltp < pdc;
 
   // Candlestick patterns on latest 1m vs previous (for Quick Scalp at S/R)
   const prevOpen = num(previous?.open_price);
