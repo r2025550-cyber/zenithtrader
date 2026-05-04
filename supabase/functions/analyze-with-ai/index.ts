@@ -3,20 +3,15 @@ import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 // =====================================================================
-// Hybrid Price-Action Scalping Engine v4 (Smart Execution)
+// Hybrid Price-Action Scalping Engine v5 (Edge & Protection Layer)
 // ---------------------------------------------------------------------
-// v3 (Disciplined) features RETAINED:
-//  Confirmed swing S/R, EMA21+slope, retest entries, strict candles,
-//  wick rejection, mid-zone filter, sideways guard, smart trailing.
-// v4 ADDITIONS (non-destructive, additive):
-//  1) EARLY ENTRY mode — strong breakout close + momentum -> immediate entry
-//  2) RE-ENTRY logic — after stop-out, allow 2nd valid breakout same trend
-//  3) TREND CONTINUATION — HH/HL or LH/LL pullback entries (not just S/R)
-//  4) FREQUENCY BOOST — relaxed entry if 30m without trades & medium setup
-//  5) SMART TRAILING UPGRADE — strong trend = EMA21 / 2-candle trail
-//  6) MOMENTUM DETECTION — 3 strong same-direction candles = momentum
-//  7) NO-TRADE ZONE — choppy: position-size cut flag (riskSizeDown)
-//  8) PARTIAL PROFIT BOOKING — book 50% @ +15pts, trail rest
+// v3 + v4 features fully RETAINED (do not modify).
+// v5 ADDITIONS (purely additive — survival + edge layers):
+//  1) LIQUIDITY TRAP DETECTION — failed breakouts/breakdowns reverse signal
+//  2) LOSS PROTECTION — pause 60m after 2 consecutive losses
+//  3) POSITION SIZING — halve size after a loss; restore after a win
+//  4) NEWS/SPIKE FILTER — skip 5min after a >50pt single candle range
+//  5) COMPRESSION DETECTION — shrinking 5-candle range; breakout = high prob
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
