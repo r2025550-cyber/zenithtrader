@@ -1080,7 +1080,14 @@ const Index = () => {
               <div className="absolute left-0 top-1/2 h-px w-full bg-profit/40" />
               <div className="absolute left-0 top-0 h-full w-1/3 bg-gradient-to-r from-primary/10 to-transparent animate-scan motion-reduce:animate-none" />
               {marketHistory.length ? <div className="absolute bottom-8 left-5 right-14 flex h-64 items-end gap-2">{chartBars.map((height, index) => <div key={`${marketHistory[index].time}-${index}`} className="flex flex-1 items-end justify-center"><span className={`w-full max-w-3 rounded-t-sm ${index > 0 && marketHistory[index].value < marketHistory[index - 1].value ? "bg-loss" : "bg-profit"}`} style={{ height: `${height}%` }} /></div>)}</div> : <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">Connect Upstox OAuth to stream live Nifty 50 prices.</div>}
-              {chartPolyline && <svg className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true"><polyline points={chartPolyline} fill="none" stroke="hsl(var(--chart-line))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" /></svg>}
+              {chartPolyline && (
+                <svg className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
+                  <polyline points={chartPolyline} fill="none" stroke="hsl(var(--chart-line))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+                  {targetY !== null && targetY >= 0 && targetY <= 100 && (<><line x1="0" x2="100" y1={targetY} y2={targetY} stroke="hsl(var(--profit))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, targetY - 1)} fill="hsl(var(--profit))" fontSize="3.2" fontWeight="700">TGT {visualTargetIndex?.toFixed(1)}</text></>)}
+                  {entryY !== null && entryY >= 0 && entryY <= 100 && signalAction && (<><line x1="0" x2="100" y1={entryY} y2={entryY} stroke="hsl(var(--primary))" strokeWidth="1" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, entryY - 1)} fill="hsl(var(--primary))" fontSize="3" fontWeight="700">ENTRY {visualEntryIndex?.toFixed(1)}</text></>)}
+                  {slY !== null && slY >= 0 && slY <= 100 && (<><line x1="0" x2="100" y1={slY} y2={slY} stroke="hsl(var(--loss))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, slY - 1)} fill="hsl(var(--loss))" fontSize="3.2" fontWeight="700">SL {visualSlIndex?.toFixed(1)}</text></>)}
+                </svg>
+              )}
             </div>
           </section>
 
