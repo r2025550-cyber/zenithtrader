@@ -220,13 +220,23 @@ serve(async (req) => {
       return json({ error: "Upstox Nifty request failed", details }, 502);
     }
 
-    const [optionChain, margin] = await Promise.allSettled([
+    const [optionChain, margin, yesterday] = await Promise.allSettled([
       getOptionChainPcr(headers),
       getFundsAndMargin(headers),
+      getYesterdayOhlc(headers),
     ]);
 
     const nifty = { quote: quotes.quoteFor(INSTRUMENT_KEY), raw: quotes.raw };
     const ltp = nifty.quote.ltp;
+
+    // Resolve ATM CE/PE instrument tokens for the current spot, then fetch their LTPs
+    const atm = await resolveAtmOptionTokens(headers, ltp).catch(() => ({ atmStrike: null, ce: null, pe: null, expiry: null, error: "ATM resolve failed" } as any));
+    const [ceLtp, peLtp] = await Promise.all([
+      getOptionLtp(headers, atm?.ce?.instrumentToken ?? null).catch(() => null),
+      getOptionLtp(headers, atm?.pe?.instrumentToken ?? null).catch(() => null),
+    ]);
+
+    const yesterdayValue = yesterday.status === "fulfilled" ? yesterday.value : { pdh: null, pdl: null, pdc: null, pdo: null, error: String(yesterday.reason?.message ?? yesterday.reason), date: null };
 
     const row = {
       user_id: auth.user.id,
@@ -250,6 +260,14 @@ serve(async (req) => {
           bankNifty: quotes.quoteFor(CONTEXT_INSTRUMENTS.bankNifty),
           indiaVix: quotes.quoteFor(CONTEXT_INSTRUMENTS.indiaVix),
           heavyweights: CONTEXT_INSTRUMENTS.heavyweights.map((key) => quotes.quoteFor(key)).filter((quote) => quote.ltp !== null),
+          yesterday: { pdh: yesterdayValue.pdh, pdl: yesterdayValue.pdl, pdc: yesterdayValue.pdc, pdo: yesterdayValue.pdo, date: yesterdayValue.date, error: yesterdayValue.error ?? null },
+          atm: {
+            strike: atm?.atmStrike ?? null,
+            expiry: atm?.expiry ?? null,
+            ce: atm?.ce ? { ...atm.ce, ltp: ceLtp } : null,
+            pe: atm?.pe ? { ...atm.pe, ltp: peLtp } : null,
+            error: atm?.error ?? null,
+          },
         },
         execution: { intent: executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity },
       },
