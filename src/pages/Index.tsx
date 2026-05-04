@@ -194,6 +194,15 @@ const Index = () => {
   const peStrikeRef = useRef<number | null>(null);
   const levelsAnchorLtpRef = useRef<number | null>(null);
   const lastForcedAiAtRef = useRef<number>(0);
+  const [lastExecution, setLastExecution] = useState<LiveOrderResult | null>(null);
+  const [execSettings, setExecSettings] = useState<ExecSettings>(() => loadExecSettings());
+  const updateExecSettings = (patch: Partial<ExecSettings>) => {
+    setExecSettings((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(EXEC_SETTINGS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
