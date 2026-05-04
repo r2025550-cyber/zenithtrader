@@ -293,8 +293,17 @@ serve(async (req) => {
       });
     }
 
+    // ===== v6-safe: recompute SL/Target against ACTUAL fill price =====
+    // premiumSL = entryPremium - riskPoints; premiumTarget = entryPremium + (riskPoints * RR)
+    const effectiveStopPremium = v6RiskPoints
+      ? Math.max(0.05, fillPrice - v6RiskPoints)
+      : Math.max(0.05, fillPrice - stopLossPremiumPoints);
+    const effectiveTargetPremium = v6RiskPoints
+      ? fillPrice + (v6RiskPoints * v6Rr)
+      : fillPrice + targetPremiumPoints;
+
     // ===== v6: SL-LMT instead of SL-M =====
-    const slTrigger = Number(stopLossPremium.toFixed(2));
+    const slTrigger = Number(effectiveStopPremium.toFixed(2));
     const slLimit = Number(Math.max(0.05, slTrigger * (1 - SL_LMT_BUFFER_PCT / 100)).toFixed(2));
     const slPayload = {
       quantity,
