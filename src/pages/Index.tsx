@@ -529,11 +529,12 @@ const Index = () => {
     return true;
   };
 
+  const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
     if (latestSignal) {
       const rules = latestSignal.ruleContext?.rules;
       const triggered = [
-        "Sniper Mode active",
+        `${modeLabel} active`,
         rules?.sustainedBullish1m && "3 bullish 1m candles",
         rules?.sustainedBearish1m && "3 bearish 1m candles",
         rules?.priceAboveEma21 && "Price > 21 EMA",
@@ -551,15 +552,15 @@ const Index = () => {
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
       ].filter(Boolean).join(" · ");
-      return `Sniper Mode: ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Current Mode: ${modeLabel} — ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
     }
-    if (targetAchieved) return "Target Achieved: daily profit goal reached. AI trading is stopped for the day.";
-    if (hardKillActive) return "Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.";
-    if (!aiEnabled) return "Analyzing market trends... AI engine is standing by for confirmation.";
-    if (riskMode === "conservative") return "AI loop armed: waiting for high-confidence RSI and trend confirmation.";
-    if (riskMode === "aggressive") return "AI loop armed: scanning momentum breakouts with tight VWAP risk control.";
-    return "AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.";
-  }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved]);
+    if (targetAchieved) return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
+    if (hardKillActive) return `Current Mode: ${modeLabel} — Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.`;
+    if (!aiEnabled) return `Current Mode: ${modeLabel} — Analyzing market trends... AI engine is standing by for confirmation.`;
+    if (riskMode === "conservative") return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
+    if (riskMode === "aggressive") return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
+    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.`;
+  }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
     event.preventDefault();
