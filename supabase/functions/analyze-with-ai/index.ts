@@ -341,7 +341,7 @@ Latest market data:\n${JSON.stringify(latest)}`;
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
+    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
