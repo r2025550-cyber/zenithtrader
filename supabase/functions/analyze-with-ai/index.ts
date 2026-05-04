@@ -141,8 +141,31 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const quickScalpBuy = (bullishEngulfing || hammer) && nearSupport;
   const quickScalpSell = (bearishEngulfing || shootingStar) && nearResistance;
 
+  // Nifty 9:20 ORB candle (IST) — find the 1-min row stamped at 09:20 today and cap its size at 30 points.
+  // If 9:20 candle range > 30 points, treat as a "wide opening" → suppress fresh entries until volatility settles.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const nineTwentyRow = history.find((row) => {
+    const stamp = new Date((row?.source_timestamp ?? row?.created_at) as string);
+    // Convert to IST (UTC+5:30); 09:20 IST == 03:50 UTC
+    const istMinutes = stamp.getUTCHours() * 60 + stamp.getUTCMinutes() + 330;
+    const istHour = Math.floor((istMinutes % 1440) / 60);
+    const istMin = (istMinutes % 1440) % 60;
+    const sameDay = stamp.toISOString().slice(0, 10) === todayIso || (istMinutes >= 1440 && new Date(stamp.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 10) === todayIso);
+    return sameDay && istHour === 9 && istMin === 20;
+  });
+  const nineTwentyHigh = num(nineTwentyRow?.high_price);
+  const nineTwentyLow = num(nineTwentyRow?.low_price);
+  const nineTwentyRange = nineTwentyHigh !== null && nineTwentyLow !== null ? nineTwentyHigh - nineTwentyLow : null;
+  const nineTwentyOversized = nineTwentyRange !== null && nineTwentyRange > 30;
+
+  // Psychological round-number proximity (Nifty 50-point levels: 24100, 24150, 24200…)
+  const nearestRound50 = ltp !== null ? Math.round(ltp / 50) * 50 : null;
+  const distanceToRound50 = ltp !== null && nearestRound50 !== null ? Math.abs(ltp - nearestRound50) : null;
+  const nearRound50 = distanceToRound50 !== null && distanceToRound50 <= 10; // within 10 pts of a 50-level
+  const atRound50 = distanceToRound50 !== null && distanceToRound50 <= 3;
+
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, immediateSupport: support15, immediateResistance: resistance15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high, pdh, pdl, pdc, pdhBreakWithVolume, pdlBreakWithVolume, aboveYesterdayClose, belowYesterdayClose, ltp },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, immediateSupport: support15, immediateResistance: resistance15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high, pdh, pdl, pdc, pdhBreakWithVolume, pdlBreakWithVolume, aboveYesterdayClose, belowYesterdayClose, ltp, nineTwentyHigh, nineTwentyLow, nineTwentyRange, nineTwentyOversized, nearestRound50, distanceToRound50, nearRound50, atRound50 },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +10% volume filter." : volumeValid === true ? `Volume +10% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +10% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -157,6 +180,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       srBreakout ? `S/R BREAKOUT: ${breakoutAboveR15 ? `15m resistance broken with high volume` : `15m support broken with high volume`}. EMA21 rule overridden.` : `15m S/R: support ${support15?.toFixed(2) ?? "n/a"}, resistance ${resistance15?.toFixed(2) ?? "n/a"}.`,
       quickScalpBuy ? "QUICK SCALP BUY: bullish engulfing/hammer at 15m support." : quickScalpSell ? "QUICK SCALP SELL: bearish engulfing/shooting-star at 15m resistance." : "No candlestick scalp pattern at S/R.",
       pdh !== null || pdl !== null || pdc !== null ? `Yesterday OHLC — PDH ${pdh?.toFixed(2) ?? "n/a"} · PDL ${pdl?.toFixed(2) ?? "n/a"} · PDC ${pdc?.toFixed(2) ?? "n/a"}. ${pdhBreakWithVolume ? "BULLISH BIAS: PDH broken with volume." : pdlBreakWithVolume ? "BEARISH BIAS: PDL broken with volume." : aboveYesterdayClose ? "Above PDC (mild bullish bias)." : belowYesterdayClose ? "Below PDC (mild bearish bias)." : "Inside yesterday's range."}` : "Yesterday OHLC unavailable.",
+      nineTwentyRange !== null ? `9:20 ORB candle range = ${nineTwentyRange.toFixed(2)} pts. ${nineTwentyOversized ? "OVERSIZED OPENING (>30 pts cap): suppress fresh entries until volatility settles; only allow trades that confirm beyond the 9:20 high/low with volume." : "Within 30-pt cap — opening volatility acceptable."}` : "9:20 candle not yet formed (or pre-open).",
+      nearestRound50 !== null ? `Nearest psychological 50-level: ${nearestRound50}. ${atRound50 ? "PRICE AT round number — prioritise; expect reaction (bounce or breakout)." : nearRound50 ? `Within ${distanceToRound50?.toFixed(1)} pts of ${nearestRound50} — high-priority zone for scalp entries.` : `${distanceToRound50?.toFixed(1)} pts away — neutral zone, lower priority.`}` : "Round-number context unavailable.",
     ],
   };
 }
@@ -197,13 +222,24 @@ serve(async (req) => {
 
     const r = ruleContext.rules;
     // Scalper Mode gates: relaxed sustained-candle and 5m requirements; S/R breakout or candlestick scalp can fully override EMA21.
-    const buySniperReady = (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
-    const sellSniperReady = (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
+    // 9:20 oversized opening guard: when the 9:20 candle exceeds the 30-pt cap, only allow entries that have CLEARED the 9:20 high/low with volume.
+    const ltpForGate = r.ltp;
+    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && (r.highVolume || r.volumeValid === true);
+    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && (r.highVolume || r.volumeValid === true);
+    const nineTwentyBuyOk = !r.nineTwentyOversized || beyondNineTwentyHighWithVol;
+    const nineTwentySellOk = !r.nineTwentyOversized || beyondNineTwentyLowWithVol;
+
+    const buySniperReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true) && (r.trend5 === "bullish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpBuy === true);
+    const sellSniperReady = nineTwentySellOk && (r.priceBelowEma21 === true || r.breakdownBelowS15 === true || r.quickScalpSell === true) && r.vixStable === true && (r.volumeValid === true || r.highVolume === true || r.srBreakout === true) && (r.sustainedBearish1m === true || r.entry1m === "bearish" || r.strong1mBreakout === true || r.quickScalpSell === true) && (r.trend5 === "bearish" || r.trend5 === "flat" || r.trend5 === "pending" || r.srBreakout === true || r.quickScalpSell === true);
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
     const pdhPdlBoost = (r.pdhBreakWithVolume || r.pdlBreakWithVolume) ? 25 : (r.aboveYesterdayClose || r.belowYesterdayClose) ? 8 : 0;
-    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + pdhPdlBoost + Math.round(baseGateScore * 0.6)));
+    // Round-number proximity boost: prioritise scalps near 50-pt psychological levels.
+    const roundNumberBoost = r.atRound50 ? 15 : r.nearRound50 ? 8 : 0;
+    // Penalise when 9:20 is oversized and we don't have a confirmed break beyond it.
+    const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
 
     const minScore = tradingMode === "scalping" ? 60 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
@@ -211,6 +247,8 @@ serve(async (req) => {
 - TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do NOT require both 1m and 5m same color.
 - 15m S/R OVERRIDE: If price breaks the 15m high/low with high volume, IGNORE the 21 EMA rule and trigger the trade.
 - QUICK SCALP: Bullish Engulfing/Hammer at 15m support → Quick Scalp Buy. Mirror at resistance for Quick Scalp Sell.
+- 9:20 ORB CAP (Nifty 50): The 9:20 candle is capped at 30 points. If 9:20 range > 30 pts (oversized opening), DO NOT take fresh entries unless price clears the 9:20 high (BUY) / low (SELL) with high volume.
+- ROUND-NUMBER PRIORITY: Prioritise setups within 10 pts of a 50-point psychological level (24100, 24150, 24200…). Mention the round number in REASON when relevant.
 - VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
 - Trigger threshold: 60% score.`;
     const sniperPrompt = `MODE: SNIPER (active). You are the trading mind for a Nifty Options SNIPER (1–2 high-conviction trades/day). Apply STRICT Sniper constraints:
@@ -229,7 +267,7 @@ Common rules:
 - 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
 - Strike freshness: always recompute ATM from latest spot.
 - Manual override: if User Target/SL Points provided, use those exact point values.
-- Hard guards always apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
+- Hard guards always apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down), 9:20 ORB cap (suppress fresh entries when 9:20 candle range > 30 pts unless price clears 9:20 H/L with volume), and prefer setups near 50-pt psychological levels.
 
 Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, write: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
