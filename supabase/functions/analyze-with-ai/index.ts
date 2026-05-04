@@ -267,7 +267,7 @@ Common rules:
 - 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
 - Strike freshness: always recompute ATM from latest spot.
 - Manual override: if User Target/SL Points provided, use those exact point values.
-- Hard guards always apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
+- Hard guards always apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down), 9:20 ORB cap (suppress fresh entries when 9:20 candle range > 30 pts unless price clears 9:20 H/L with volume), and prefer setups near 50-pt psychological levels.
 
 Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, write: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
