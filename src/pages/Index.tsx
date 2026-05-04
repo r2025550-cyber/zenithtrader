@@ -156,6 +156,9 @@ const Index = () => {
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastSignalAutofillRef = useRef("");
   const lastSignalAlertRef = useRef("");
+  // v6: tracks whether user has manually edited Target/SL inputs for the current signal/trade.
+  // Reset on new signal arrival; once true, auto-fill (signal sync + post-fill update) is skipped.
+  const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
