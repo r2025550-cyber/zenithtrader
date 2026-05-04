@@ -125,7 +125,7 @@ const isTradeSignal = (action?: string | null) => action === "BUY" || action ===
 
 type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend5?: string; entry1m?: string } };
 type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }> } }; created_at?: string; source_timestamp?: string };
+type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }>; yesterday?: { pdh?: number | null; pdl?: number | null; pdc?: number | null; pdo?: number | null; date?: string | null }; atm?: { strike?: number | null; expiry?: string | null; ce?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null; pe?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null } } }; created_at?: string; source_timestamp?: string };
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
@@ -179,6 +179,12 @@ const Index = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
+  const [ceSeries, setCeSeries] = useState<MarketPoint[]>([]);
+  const [peSeries, setPeSeries] = useState<MarketPoint[]>([]);
+  const ceStrikeRef = useRef<number | null>(null);
+  const peStrikeRef = useRef<number | null>(null);
+  const levelsAnchorLtpRef = useRef<number | null>(null);
+  const lastForcedAiAtRef = useRef<number>(0);
 
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
@@ -225,6 +231,38 @@ const Index = () => {
   const slY = visualSlIndex !== null && chartValues.length ? indexToY(visualSlIndex) : null;
   const targetY = visualTargetIndex !== null && chartValues.length ? indexToY(visualTargetIndex) : null;
   const entryY = visualEntryIndex !== null && chartValues.length ? indexToY(visualEntryIndex) : null;
+  // Yesterday's levels + immediate S/R from latest signal
+  const yesterdayLevels = (latestData?.raw_payload as any)?.context?.yesterday ?? {};
+  const pdhVal = toNumber(yesterdayLevels?.pdh);
+  const pdlVal = toNumber(yesterdayLevels?.pdl);
+  const pdcVal = toNumber(yesterdayLevels?.pdc);
+  const immediateSupport = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15);
+  const immediateResistance = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance ?? (latestSignal?.ruleContext?.rules as any)?.resistance15);
+  const pdhY = pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
+  const pdlY = pdlVal !== null && chartValues.length && pdlVal >= chartMin && pdlVal <= chartMax ? indexToY(pdlVal) : null;
+  const pdcY = pdcVal !== null && chartValues.length && pdcVal >= chartMin && pdcVal <= chartMax ? indexToY(pdcVal) : null;
+  const atmContext = (latestData?.raw_payload as any)?.context?.atm ?? {};
+  const atmStrikeLive = toNumber(atmContext?.strike);
+  const atmExpiry = atmContext?.expiry ?? null;
+  const ceSymbol = atmContext?.ce?.tradingSymbol ?? (atmStrikeLive ? `Nifty ${atmStrikeLive} CE` : "ATM CE");
+  const peSymbol = atmContext?.pe?.tradingSymbol ?? (atmStrikeLive ? `Nifty ${atmStrikeLive} PE` : "ATM PE");
+  const ceLtpLive = toNumber(atmContext?.ce?.ltp);
+  const peLtpLive = toNumber(atmContext?.pe?.ltp);
+  const buildMiniPolyline = (series: MarketPoint[]) => {
+    if (series.length < 2) return { points: "", min: 0, max: 0 };
+    const vals = series.map((p) => p.value);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = Math.max(max - min, 0.01);
+    const points = series.map((p, i) => {
+      const x = (i / (series.length - 1)) * 100;
+      const y = 92 - ((p.value - min) / range) * 84;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" ");
+    return { points, min, max };
+  };
+  const ceMini = buildMiniPolyline(ceSeries);
+  const peMini = buildMiniPolyline(peSeries);
   const marketIsOpen = isWithinMarketHours(marketClock);
   const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
@@ -711,6 +749,24 @@ const Index = () => {
     if (Number.isFinite(value)) {
       const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
       setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+      // Update ATM CE/PE rolling series; reset when strike changes
+      const atm = (market.data?.raw_payload as any)?.context?.atm;
+      const ceLtp = Number(atm?.ce?.ltp);
+      const peLtp = Number(atm?.pe?.ltp);
+      const ceStrike = Number(atm?.ce?.strike ?? atm?.strike);
+      const peStrike = Number(atm?.pe?.strike ?? atm?.strike);
+      if (Number.isFinite(ceStrike) && ceStrikeRef.current !== ceStrike) { ceStrikeRef.current = ceStrike; setCeSeries([]); }
+      if (Number.isFinite(peStrike) && peStrikeRef.current !== peStrike) { peStrikeRef.current = peStrike; setPeSeries([]); }
+      if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
+      if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
+      // Force a fresh AI cycle when price moves >15pts from anchor (re-baseline immediate S/R reasoning)
+      const anchor = levelsAnchorLtpRef.current;
+      if (anchor === null) levelsAnchorLtpRef.current = value;
+      else if (Math.abs(value - anchor) > 15 && aiEnabled && !tradingBlocked && Date.now() - lastForcedAiAtRef.current > 15_000) {
+        levelsAnchorLtpRef.current = value;
+        lastForcedAiAtRef.current = Date.now();
+        runTradingCycle().catch(() => {});
+      }
     }
     return market.data;
   };
@@ -1095,6 +1151,9 @@ const Index = () => {
                   {targetY !== null && targetY >= 0 && targetY <= 100 && (<><line x1="0" x2="100" y1={targetY} y2={targetY} stroke="hsl(var(--profit))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, targetY - 1)} fill="hsl(var(--profit))" fontSize="3.2" fontWeight="700">TGT {visualTargetIndex?.toFixed(1)}</text></>)}
                   {entryY !== null && entryY >= 0 && entryY <= 100 && signalAction && (<><line x1="0" x2="100" y1={entryY} y2={entryY} stroke="hsl(var(--primary))" strokeWidth="1" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, entryY - 1)} fill="hsl(var(--primary))" fontSize="3" fontWeight="700">ENTRY {visualEntryIndex?.toFixed(1)}</text></>)}
                   {slY !== null && slY >= 0 && slY <= 100 && (<><line x1="0" x2="100" y1={slY} y2={slY} stroke="hsl(var(--loss))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, slY - 1)} fill="hsl(var(--loss))" fontSize="3.2" fontWeight="700">SL {visualSlIndex?.toFixed(1)}</text></>)}
+                  {pdhY !== null && (<><line x1="0" x2="100" y1={pdhY} y2={pdhY} stroke="hsl(var(--warning))" strokeWidth="0.8" strokeDasharray="1 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdhY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">PDH {pdhVal?.toFixed(1)}</text></>)}
+                  {pdlY !== null && (<><line x1="0" x2="100" y1={pdlY} y2={pdlY} stroke="hsl(var(--warning))" strokeWidth="0.8" strokeDasharray="1 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdlY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">PDL {pdlVal?.toFixed(1)}</text></>)}
+                  {pdcY !== null && (<><line x1="0" x2="100" y1={pdcY} y2={pdcY} stroke="hsl(var(--muted-foreground))" strokeWidth="0.6" strokeDasharray="0.5 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdcY - 1)} fill="hsl(var(--muted-foreground))" fontSize="2.6" fontWeight="700">PDC {pdcVal?.toFixed(1)}</text></>)}
                 </svg>
               )}
             </div>
@@ -1121,6 +1180,72 @@ const Index = () => {
 
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
           </aside>
+        </div>
+
+        <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Ghanshyam Sir Foundation</p>
+              <h2 className="text-xl font-semibold">Current Levels</h2>
+            </div>
+            <span className="text-xs text-muted-foreground">Auto-refresh every 1m · forced re-analysis on &gt;15pt move{yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDH</p>
+              <p className="mt-1 text-lg font-bold text-warning">{pdhVal === null ? "—" : pdhVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDL</p>
+              <p className="mt-1 text-lg font-bold text-warning">{pdlVal === null ? "—" : pdlVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-border bg-surface p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">PDC</p>
+              <p className="mt-1 text-lg font-bold text-foreground">{pdcVal === null ? "—" : pdcVal.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-profit/30 bg-profit/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Resistance</p>
+              <p className="mt-1 text-lg font-bold text-profit">{immediateResistance === null ? "—" : immediateResistance.toFixed(2)}</p>
+            </div>
+            <div className="rounded-md border border-loss/30 bg-loss/5 p-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Support</p>
+              <p className="mt-1 text-lg font-bold text-loss">{immediateSupport === null ? "—" : immediateSupport.toFixed(2)}</p>
+            </div>
+          </div>
+          {hasLivePrice && (pdhVal !== null || pdlVal !== null) && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Spot {latestLtp.toLocaleString("en-IN")} ·{" "}
+              {pdhVal !== null && latestLtp > pdhVal ? <span className="font-semibold text-profit">Above PDH (Bullish bias)</span>
+                : pdlVal !== null && latestLtp < pdlVal ? <span className="font-semibold text-loss">Below PDL (Bearish bias)</span>
+                : pdcVal !== null && latestLtp > pdcVal ? <span className="font-semibold text-profit">Above PDC</span>
+                : pdcVal !== null && latestLtp < pdcVal ? <span className="font-semibold text-loss">Below PDC</span>
+                : <span>Inside yesterday's range</span>}
+            </p>
+          )}
+        </section>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          {[{ symbol: ceSymbol, ltp: ceLtpLive, mini: ceMini, series: ceSeries, tone: "profit" as const }, { symbol: peSymbol, ltp: peLtpLive, mini: peMini, series: peSeries, tone: "loss" as const }].map((opt) => (
+            <section key={opt.symbol} className="rounded-lg border border-border bg-panel p-4 shadow-panel">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">ATM {opt.tone === "profit" ? "Call" : "Put"} · {atmExpiry ?? "—"}</p>
+                  <h3 className="text-base font-semibold text-foreground">{opt.symbol}</h3>
+                </div>
+                <span className={`text-xl font-bold ${opt.tone === "profit" ? "text-profit" : "text-loss"}`}>{opt.ltp === null ? "—" : `₹${opt.ltp.toFixed(2)}`}</span>
+              </div>
+              <div className="relative h-32 rounded-md border border-border bg-surface">
+                {opt.mini.points ? (
+                  <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
+                    <polyline points={opt.mini.points} fill="none" stroke={opt.tone === "profit" ? "hsl(var(--profit))" : "hsl(var(--loss))"} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                  </svg>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{opt.series.length === 1 ? "Collecting first ticks…" : "Waiting for live ATM premium…"}</div>
+                )}
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">Range: {opt.mini.points ? `₹${opt.mini.min.toFixed(2)} – ₹${opt.mini.max.toFixed(2)}` : "—"} · Auto-switches when ATM strike changes</p>
+            </section>
+          ))}
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">

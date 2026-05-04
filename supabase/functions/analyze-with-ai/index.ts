@@ -103,7 +103,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
-  // 15-minute Support/Resistance from last 15 rows
+  // 15-minute Support/Resistance from last 15 rows — these double as the dashboard's "Immediate S/R"
   const last15 = history.slice(0, 15);
   const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
   const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
@@ -113,6 +113,16 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const breakoutAboveR15 = ltp !== null && resistance15 !== null && ltp > resistance15 && highVolume;
   const breakdownBelowS15 = ltp !== null && support15 !== null && ltp < support15 && highVolume;
   const srBreakout = breakoutAboveR15 || breakdownBelowS15;
+
+  // Ghanshyam Sir's Foundation: PDH / PDL / PDC bias
+  const yesterday = (latest?.raw_payload as any)?.context?.yesterday ?? {};
+  const pdh = num(yesterday?.pdh);
+  const pdl = num(yesterday?.pdl);
+  const pdc = num(yesterday?.pdc);
+  const pdhBreakWithVolume = ltp !== null && pdh !== null && ltp > pdh && (highVolume || volumeValid === true);
+  const pdlBreakWithVolume = ltp !== null && pdl !== null && ltp < pdl && (highVolume || volumeValid === true);
+  const aboveYesterdayClose = ltp !== null && pdc !== null && ltp > pdc;
+  const belowYesterdayClose = ltp !== null && pdc !== null && ltp < pdc;
 
   // Candlestick patterns on latest 1m vs previous (for Quick Scalp at S/R)
   const prevOpen = num(previous?.open_price);
@@ -132,7 +142,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const quickScalpSell = (bearishEngulfing || shootingStar) && nearResistance;
 
   return {
-    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high },
+    rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m, resistance15, support15, immediateSupport: support15, immediateResistance: resistance15, breakoutAboveR15, breakdownBelowS15, srBreakout, highVolume, bullishEngulfing, bearishEngulfing, hammer, shootingStar, quickScalpBuy, quickScalpSell, previousLow, previousHigh, strong1mBreakout, low, high, pdh, pdl, pdc, pdhBreakWithVolume, pdlBreakWithVolume, aboveYesterdayClose, belowYesterdayClose, ltp },
     atmStrike: atmStrike(ltp),
     guidance: [
       fakeBreakout ? "POTENTIAL TRAP: breakout/breakdown happened without the required +10% volume filter." : volumeValid === true ? `Volume +10% filter confirmed from ${volumeSource ?? "Upstox live feed"}.` : effectiveVolume !== null ? `Volume received from ${volumeSource ?? "Upstox"} but awaiting enough history for +10% comparison; treat as neutral, not failed.` : "Volume unavailable/insufficient from Upstox; treat as neutral, not failed.",
@@ -146,6 +156,7 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
       multiTimeframeAligned ? `5m ${trend5} confirms 1m ${entry1m} (or scalper-mode 1m breakout).` : `5m=${trend5}, 1m=${entry1m} — scalper-mode awaiting 1m EMA-aligned breakout.`,
       srBreakout ? `S/R BREAKOUT: ${breakoutAboveR15 ? `15m resistance broken with high volume` : `15m support broken with high volume`}. EMA21 rule overridden.` : `15m S/R: support ${support15?.toFixed(2) ?? "n/a"}, resistance ${resistance15?.toFixed(2) ?? "n/a"}.`,
       quickScalpBuy ? "QUICK SCALP BUY: bullish engulfing/hammer at 15m support." : quickScalpSell ? "QUICK SCALP SELL: bearish engulfing/shooting-star at 15m resistance." : "No candlestick scalp pattern at S/R.",
+      pdh !== null || pdl !== null || pdc !== null ? `Yesterday OHLC — PDH ${pdh?.toFixed(2) ?? "n/a"} · PDL ${pdl?.toFixed(2) ?? "n/a"} · PDC ${pdc?.toFixed(2) ?? "n/a"}. ${pdhBreakWithVolume ? "BULLISH BIAS: PDH broken with volume." : pdlBreakWithVolume ? "BEARISH BIAS: PDL broken with volume." : aboveYesterdayClose ? "Above PDC (mild bullish bias)." : belowYesterdayClose ? "Below PDC (mild bearish bias)." : "Inside yesterday's range."}` : "Yesterday OHLC unavailable.",
     ],
   };
 }
@@ -191,7 +202,8 @@ serve(async (req) => {
     const baseGateScore = Math.round(([r.volumeValid === true || r.highVolume === true, r.vixStable === true, r.priceAboveEma21 || r.priceBelowEma21 || r.srBreakout, r.sustainedBullish1m || r.sustainedBearish1m || r.strong1mBreakout, r.emaAligned === true, r.multiTimeframeAligned === true].filter(Boolean).length / 6) * 100);
     const instantEmaBoost = (r.priceAboveBothEmas || r.priceBelowBothEmas) ? 40 : 0;
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
-    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + Math.round(baseGateScore * 0.6)));
+    const pdhPdlBoost = (r.pdhBreakWithVolume || r.pdlBreakWithVolume) ? 25 : (r.aboveYesterdayClose || r.belowYesterdayClose) ? 8 : 0;
+    const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + pdhPdlBoost + Math.round(baseGateScore * 0.6)));
 
     const minScore = tradingMode === "scalping" ? 60 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
@@ -212,6 +224,8 @@ serve(async (req) => {
     const prompt = `${tradingMode === "scalping" ? scalpingPrompt : sniperPrompt}
 
 Common rules:
+- Ghanshyam Sir's Foundation Bias: Yesterday's High (PDH), Low (PDL) and Close (PDC) are key levels. PDH break with volume = strong bullish bias. PDL break with volume = strong bearish bias. Price above PDC = mild bullish; below = mild bearish. Mention which side of yesterday's range price is on.
+- Always reason from the LATEST Nifty spot LTP shown below — never reuse stale prices.
 - 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
 - Strike freshness: always recompute ATM from latest spot.
 - Manual override: if User Target/SL Points provided, use those exact point values.
