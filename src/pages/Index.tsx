@@ -1197,6 +1197,115 @@ const Index = () => {
               </div>
             </section>
 
+            <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Execution Layer · v6</p>
+                  <h2 className="text-lg font-semibold">Order Execution & Liquidity</h2>
+                </div>
+                <ShieldCheck className="h-5 w-5 text-primary" />
+              </div>
+
+              {/* Status Badges */}
+              <div className="mb-4 flex flex-wrap gap-2">
+                {(() => {
+                  const ex = lastExecution?.execution ?? {};
+                  const blocked = ex.blocked;
+                  const slipExit = ex.slippageExit;
+                  const badges: Array<{ label: string; tone: string; on: boolean }> = [
+                    { label: "Order Placed ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderPlaced },
+                    { label: "Order Filled ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderFilled },
+                    { label: "SL Active 🛡️", tone: "border-primary/40 bg-primary/10 text-primary", on: !!ex.slActive },
+                    { label: "Trailing Active 🔄", tone: "border-warning/40 bg-warning/10 text-warning", on: !!(activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0)) },
+                  ];
+                  return (
+                    <>
+                      {badges.map((b) => (
+                        <span key={b.label} className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${b.on ? b.tone : "border-border bg-surface text-muted-foreground opacity-60"}`}>{b.label}</span>
+                      ))}
+                      {blocked && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Blocked: {blocked} ⚠️</span>}
+                      {slipExit && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Slippage Exit ⚠️</span>}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Slippage / Liquidity grid */}
+              {lastExecution && (
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-md border border-border bg-surface p-3">
+                    <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Slippage</p>
+                    <p className="text-sm">
+                      Quoted <span className="font-semibold text-foreground">₹{lastExecution.slippage?.quotedLtp?.toFixed(2) ?? "—"}</span>
+                      {" → Fill "}
+                      <span className="font-semibold text-foreground">₹{lastExecution.slippage?.fillPrice?.toFixed(2) ?? "—"}</span>
+                    </p>
+                    <p className={`mt-1 text-sm font-bold ${(lastExecution.slippage?.slippagePct ?? 0) > execSettings.slippagePct ? "text-loss" : "text-profit"}`}>
+                      {lastExecution.slippage?.slippagePct?.toFixed(2) ?? "—"}% (max {execSettings.slippagePct}%)
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border bg-surface p-3">
+                    <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Liquidity</p>
+                    <p className="text-sm">Bid <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.bid?.toFixed(2) ?? "—"}</span> · Ask <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.ask?.toFixed(2) ?? "—"}</span></p>
+                    <p className="mt-1 text-sm">
+                      Spread <span className={`font-bold ${(lastExecution.liquidity?.spreadPct ?? 0) > execSettings.maxSpreadPct ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.spreadPct?.toFixed(2) ?? "—"}%</span>
+                      {" · Vol "}
+                      <span className={`font-bold ${(lastExecution.liquidity?.volume ?? 0) < (lastExecution.liquidity?.minVolume ?? 5000) ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.volume?.toLocaleString("en-IN") ?? "—"}</span>
+                      {" · "}
+                      <span className={`font-semibold ${(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "text-profit" : "text-loss"}`}>
+                        {(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "GOOD" : "LOW"}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Trade execution details */}
+              {activeTradePlan && lastExecution?.success && (
+                <div className="mb-4 rounded-md border border-border bg-surface p-3 text-sm">
+                  <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Trade Execution Details</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div><p className="text-[11px] text-muted-foreground">Entry</p><p className="font-bold">₹{activeTradePlan.entryPremium?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">SL Trigger / Limit</p><p className="font-bold text-loss">₹{lastExecution.slTriggerPrice?.toFixed(2) ?? activeTradePlan.stopLossPremium?.toFixed(2) ?? "—"} / ₹{lastExecution.slLimitPrice?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">Target</p><p className="font-bold text-profit">₹{activeTradePlan.targetPremium?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">Live P&L</p><p className={`font-bold ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</p></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Block / error reason */}
+              {lastExecution && !lastExecution.success && (
+                <div className="mb-4 rounded-md border border-loss/40 bg-loss/10 p-3 text-sm">
+                  <p className="font-semibold text-loss">Trade Blocked: {lastExecution.error ?? "Unknown"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{lastExecution.details ?? "No details provided."}</p>
+                </div>
+              )}
+
+              {/* Settings sub-panel */}
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">Execution Settings</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-slippage" className="text-xs text-muted-foreground">Slippage Tolerance (%)</Label>
+                    <Input id="exec-slippage" type="number" step="0.1" min="0.1" max="10" value={execSettings.slippagePct} onChange={(e) => updateExecSettings({ slippagePct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.slippagePct })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-spread" className="text-xs text-muted-foreground">Max Spread (%)</Label>
+                    <Input id="exec-spread" type="number" step="0.1" min="0.1" max="10" value={execSettings.maxSpreadPct} onChange={(e) => updateExecSettings({ maxSpreadPct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.maxSpreadPct })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-retries" className="text-xs text-muted-foreground">Retry Attempts</Label>
+                    <Input id="exec-retries" type="number" step="1" min="0" max="5" value={execSettings.retries} onChange={(e) => updateExecSettings({ retries: Number(e.target.value) || 0 })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border bg-panel p-2">
+                    <div><p className="text-xs font-semibold">Liquidity Filter</p><p className="text-[10px] text-muted-foreground">Skip low-volume / wide-spread strikes</p></div>
+                    <Switch checked={execSettings.liquidityFilter} onCheckedChange={(v) => updateExecSettings({ liquidityFilter: v })} aria-label="Liquidity filter" />
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">Slippage tolerance is sent to the order engine on every trade. Spread / retries / liquidity filter are enforced server-side; UI values reflect your preferences.</p>
+              </div>
+            </section>
+
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
           </aside>
         </div>
