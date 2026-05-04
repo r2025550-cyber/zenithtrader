@@ -3,20 +3,20 @@ import { generateOpenAIText } from "../_shared/openai.ts";
 import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } from "../_shared/trading.ts";
 
 // =====================================================================
-// Pure Price-Action Scalping Engine v3 (Disciplined)
+// Hybrid Price-Action Scalping Engine v4 (Smart Execution)
 // ---------------------------------------------------------------------
-// Upgrades over v2:
-//  1) Confirmed swing-based S/R (min 2 touches, last 20–30 candles)
-//  2) EMA21 trend + slope filter
-//  3) Breakout requires retest pullback before entry
-//  4) Strict strong-candle definition (body>=60%, close near extreme)
-//  5) Mid-zone filter (no trade between S/R w/o momentum)
-//  6) Range filter allows breakout/momentum to override
-//  7) Smart trailing SL (BE @+10, lock +10 @+20, then last-candle trail)
-//  8) Entry precision: pullback wait after breakout close
-//  9) Fake-breakout wick filter (>50% wick rejected)
-// 10) Trade-quality: only trade when LTP within "near zone" of S/R
-// Maintains output shape & ruleContext for the frontend.
+// v3 (Disciplined) features RETAINED:
+//  Confirmed swing S/R, EMA21+slope, retest entries, strict candles,
+//  wick rejection, mid-zone filter, sideways guard, smart trailing.
+// v4 ADDITIONS (non-destructive, additive):
+//  1) EARLY ENTRY mode — strong breakout close + momentum -> immediate entry
+//  2) RE-ENTRY logic — after stop-out, allow 2nd valid breakout same trend
+//  3) TREND CONTINUATION — HH/HL or LH/LL pullback entries (not just S/R)
+//  4) FREQUENCY BOOST — relaxed entry if 30m without trades & medium setup
+//  5) SMART TRAILING UPGRADE — strong trend = EMA21 / 2-candle trail
+//  6) MOMENTUM DETECTION — 3 strong same-direction candles = momentum
+//  7) NO-TRADE ZONE — choppy: position-size cut flag (riskSizeDown)
+//  8) PARTIAL PROFIT BOOKING — book 50% @ +15pts, trail rest
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
@@ -29,6 +29,15 @@ const TRAIL_LOCK_AT_PROFIT = 20;
 const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
 const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
 const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
+// v4 constants
+const EARLY_ENTRY_MIN_BODY_PTS = 10;     // strong breakout close min body
+const EARLY_ENTRY_MIN_MOVE_PTS = 10;     // 1-min move threshold
+const FREQUENCY_BOOST_MIN_GAP = 30;      // minutes
+const PULLBACK_TOLERANCE_PTS = 10;       // trend continuation pullback to EMA21
+const PARTIAL_BOOK_PTS = 15;             // book 50% at +15
+const PARTIAL_BOOK_FRACTION = 0.5;
+const MOMENTUM_STREAK = 3;               // N consecutive strong candles
+const CHOPPY_RANGE_PTS = 20;             // very tight = choppy
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -224,6 +233,52 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const liveBullBreakout = ltp !== null && resistance !== null && ltp > resistance && strongGreen && !longUpperWick;
   const liveBearBreakout = ltp !== null && support !== null && ltp < support && strongRed && !longLowerWick;
 
+  // ===== v4: MOMENTUM DETECTION (3 strong candles same direction) =====
+  let bullStreak = 0, bearStreak = 0;
+  for (let i = 0; i < Math.min(MOMENTUM_STREAK, history.length); i++) {
+    const r = history[i];
+    const o = num(r?.open_price), c = num(r?.close_price), h = num(r?.high_price), l = num(r?.low_price);
+    if (o === null || c === null || h === null || l === null) break;
+    const rng = Math.max(h - l, 0); const bd = Math.abs(c - o);
+    const strong = rng > 0 && bd / rng >= 0.55;
+    if (!strong) break;
+    if (c > o) { if (bearStreak > 0) break; bullStreak++; }
+    else if (c < o) { if (bullStreak > 0) break; bearStreak++; }
+    else break;
+  }
+  const momentumBull = bullStreak >= MOMENTUM_STREAK;
+  const momentumBear = bearStreak >= MOMENTUM_STREAK;
+
+  // ===== v4: TREND CONTINUATION (HH/HL or LH/LL on last ~6 candles) =====
+  const lastN = history.slice(1, 7);
+  const highsN = lastN.map(r => num(r?.high_price)).filter((v): v is number => v !== null);
+  const lowsN = lastN.map(r => num(r?.low_price)).filter((v): v is number => v !== null);
+  let trendUp = false, trendDown = false;
+  if (highsN.length >= 4 && lowsN.length >= 4) {
+    const firstHalfH = Math.max(...highsN.slice(Math.floor(highsN.length / 2)));
+    const secondHalfH = Math.max(...highsN.slice(0, Math.floor(highsN.length / 2)));
+    const firstHalfL = Math.min(...lowsN.slice(Math.floor(lowsN.length / 2)));
+    const secondHalfL = Math.min(...lowsN.slice(0, Math.floor(lowsN.length / 2)));
+    trendUp = secondHalfH > firstHalfH && secondHalfL > firstHalfL;
+    trendDown = secondHalfH < firstHalfH && secondHalfL < firstHalfL;
+  }
+  // Pullback to EMA21 in trend direction with confirmation
+  const pullbackBuy = trendUp && ema21 !== null && ltp !== null &&
+    Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongGreen || bullishEngulfing) && ema21Slope > 0;
+  const pullbackSell = trendDown && ema21 !== null && ltp !== null &&
+    Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongRed || bearishEngulfing) && ema21Slope < 0;
+
+  // ===== v4: EARLY ENTRY (strong breakout close, skip retest) =====
+  const earlyBuy = ltp !== null && resistance !== null && close !== null &&
+    close > resistance && strongGreen && body >= EARLY_ENTRY_MIN_BODY_PTS &&
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick && (emaBullish || ema21Slope > 0);
+  const earlySell = ltp !== null && support !== null && close !== null &&
+    close < support && strongRed && body >= EARLY_ENTRY_MIN_BODY_PTS &&
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick && (emaBearish || ema21Slope < 0);
+
+  // ===== v4: CHOPPY market (very tight range = downsize) =====
+  const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
+
   return {
     ltp, open, high, low, close,
     prevHigh: pHigh, prevLow: pLow, prevClose: pClose,
@@ -234,8 +289,12 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     nearSupport, nearResistance, midZone,
     recentBullBreakout, recentBearBreakout, retestBullOk, retestBearOk,
     liveBullBreakout, liveBearBreakout,
-    last30Range, sidewaysMarket,
+    last30Range, sidewaysMarket, choppyMarket,
     strongMomentum,
+    // v4 additions
+    momentumBull, momentumBear, bullStreak, bearStreak,
+    trendUp, trendDown, pullbackBuy, pullbackSell,
+    earlyBuy, earlySell,
   };
 }
 
@@ -297,26 +356,44 @@ serve(async (req) => {
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
     const reasonParts: string[] = [];
 
-    // Setup detection
-    // BUY-bounce: near support + bullish candle + EMA bullish + no long lower wick (rejection ok = lower wick is fine for bounce, but we want close strong)
+    // Setup detection (v3 retained)
     const buyBounce =
-      pa.nearSupport &&
-      (pa.bullishEngulfing || pa.strongGreen) &&
-      pa.emaBullish;
-    // SELL-rejection: near resistance + bearish candle + EMA bearish
+      pa.nearSupport && (pa.bullishEngulfing || pa.strongGreen) && pa.emaBullish;
     const sellRejection =
-      pa.nearResistance &&
-      (pa.bearishEngulfing || pa.strongRed) &&
-      pa.emaBearish;
-    // Breakout entries require RETEST (entry precision + fake-breakout filter)
+      pa.nearResistance && (pa.bearishEngulfing || pa.strongRed) && pa.emaBearish;
     const buyBreakoutRetest = pa.retestBullOk && pa.emaBullish;
     const sellBreakdownRetest = pa.retestBearOk && pa.emaBearish;
-    // Live breakout allowed only with strong momentum + EMA aligned (rare aggressive case)
     const buyLiveMomentum = pa.liveBullBreakout && pa.strongMomentum && pa.emaBullish;
     const sellLiveMomentum = pa.liveBearBreakout && pa.strongMomentum && pa.emaBearish;
 
+    // v4 setups
+    const earlyBuy = pa.earlyBuy;
+    const earlySell = pa.earlySell;
+    const trendPullbackBuy = pa.pullbackBuy;
+    const trendPullbackSell = pa.pullbackSell;
+    const momentumStreakBuy = pa.momentumBull && (pa.emaBullish || pa.ema21Slope > 0);
+    const momentumStreakSell = pa.momentumBear && (pa.emaBearish || pa.ema21Slope < 0);
+
+    // v4: RE-ENTRY — last trade direction + trend still valid + new breakout signal
+    const lastTradeAction = todayTrades[0]?.action as ("BUY" | "SELL" | undefined);
+    const reEntryBuy = lastTradeAction === "BUY" && pa.trendUp && (pa.liveBullBreakout || earlyBuy || pa.retestBullOk);
+    const reEntrySell = lastTradeAction === "SELL" && pa.trendDown && (pa.liveBearBreakout || earlySell || pa.retestBearOk);
+
+    // v4: FREQUENCY BOOST — relax if no trade in 30m and a medium setup is present
+    const frequencyBoostActive = minutesSinceLastTrade >= FREQUENCY_BOOST_MIN_GAP;
+    const mediumBuySetup = pa.nearSupport && pa.strongGreen;
+    const mediumSellSetup = pa.nearResistance && pa.strongRed;
+    const boostBuy = frequencyBoostActive && mediumBuySetup;
+    const boostSell = frequencyBoostActive && mediumSellSetup;
+
     const anySetup =
-      buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest || buyLiveMomentum || sellLiveMomentum;
+      buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest ||
+      buyLiveMomentum || sellLiveMomentum || earlyBuy || earlySell ||
+      trendPullbackBuy || trendPullbackSell || momentumStreakBuy || momentumStreakSell ||
+      boostBuy || boostSell;
+
+    // v4: re-entry bypasses trade-gap (still respects daily cap)
+    const gapBypassedByReEntry = (reEntryBuy || reEntrySell) && !tradeGapOk;
 
     if (dailyTargetHit) {
       reasonParts.push("Daily profit target hit — trading paused.");
@@ -324,16 +401,28 @@ serve(async (req) => {
       reasonParts.push("Max daily loss reached — kill-switch active.");
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
-    } else if (!tradeGapOk) {
+    } else if (!tradeGapOk && !gapBypassedByReEntry) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
     } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
       reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
-    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum) {
+    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell) {
       reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (earlyBuy) {
+      action = "BUY"; reasonParts.push(`EARLY BUY: strong breakout close above R=${pa.resistance?.toFixed(2)} (body≥${EARLY_ENTRY_MIN_BODY_PTS}pts, momentum confirmed).`);
+    } else if (earlySell) {
+      action = "SELL"; reasonParts.push(`EARLY SELL: strong breakdown close below S=${pa.support?.toFixed(2)} (body≥${EARLY_ENTRY_MIN_BODY_PTS}pts, momentum confirmed).`);
     } else if (buyBreakoutRetest) {
-      action = "BUY"; reasonParts.push(`Retest BUY: pullback to broken R≈${pa.recentBullBreakout?.level.toFixed(2)} confirmed by ${pa.bullishEngulfing ? "engulfing" : "strong green"} (EMA21 bullish, slope>0).`);
+      action = "BUY"; reasonParts.push(`Retest BUY: pullback to broken R≈${pa.recentBullBreakout?.level.toFixed(2)} confirmed by ${pa.bullishEngulfing ? "engulfing" : "strong green"}.`);
     } else if (sellBreakdownRetest) {
-      action = "SELL"; reasonParts.push(`Retest SELL: pullback to broken S≈${pa.recentBearBreakout?.level.toFixed(2)} confirmed by ${pa.bearishEngulfing ? "engulfing" : "strong red"} (EMA21 bearish, slope<0).`);
+      action = "SELL"; reasonParts.push(`Retest SELL: pullback to broken S≈${pa.recentBearBreakout?.level.toFixed(2)} confirmed by ${pa.bearishEngulfing ? "engulfing" : "strong red"}.`);
+    } else if (momentumStreakBuy) {
+      action = "BUY"; reasonParts.push(`Momentum streak BUY: ${pa.bullStreak} consecutive strong green candles, EMA21 aligned.`);
+    } else if (momentumStreakSell) {
+      action = "SELL"; reasonParts.push(`Momentum streak SELL: ${pa.bearStreak} consecutive strong red candles, EMA21 aligned.`);
+    } else if (trendPullbackBuy) {
+      action = "BUY"; reasonParts.push(`Trend continuation BUY: HH/HL with pullback to EMA21=${pa.ema21?.toFixed(2)} + bullish confirmation.`);
+    } else if (trendPullbackSell) {
+      action = "SELL"; reasonParts.push(`Trend continuation SELL: LH/LL with pullback to EMA21=${pa.ema21?.toFixed(2)} + bearish confirmation.`);
     } else if (buyBounce) {
       action = "BUY"; reasonParts.push(`Support bounce at ${pa.support?.toFixed(2)} with ${pa.bullishEngulfing ? "bullish engulfing" : "strong green"} (EMA21 bullish).`);
     } else if (sellRejection) {
@@ -342,9 +431,17 @@ serve(async (req) => {
       action = "BUY"; reasonParts.push(`Momentum breakout above R=${pa.resistance?.toFixed(2)} (strong body, no upper wick).`);
     } else if (sellLiveMomentum) {
       action = "SELL"; reasonParts.push(`Momentum breakdown below S=${pa.support?.toFixed(2)} (strong body, no lower wick).`);
+    } else if (boostBuy) {
+      action = "BUY"; reasonParts.push(`Frequency boost BUY: 30m+ idle, medium setup near support with strong green candle.`);
+    } else if (boostSell) {
+      action = "SELL"; reasonParts.push(`Frequency boost SELL: 30m+ idle, medium setup near resistance with strong red candle.`);
     } else {
       const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
+    }
+
+    if (gapBypassedByReEntry && action !== "WAIT") {
+      reasonParts.push(`(Re-entry: trend ${pa.trendUp ? "UP" : "DOWN"} still valid, gap bypassed.)`);
     }
 
     // SL/Target on spot points
@@ -371,11 +468,26 @@ serve(async (req) => {
       ? `Buy Nifty ${strikeNum} ${optionType}`
       : "WAIT";
 
+    // v4: Strong trend = momentum streak OR (HH/HL & EMA-aligned)
+    const strongTrend =
+      (action === "BUY" && (pa.momentumBull || (pa.trendUp && pa.emaBullish))) ||
+      (action === "SELL" && (pa.momentumBear || (pa.trendDown && pa.emaBearish)));
+
+    // v4: Risk size-down on choppy markets
+    const riskSizeDown = pa.choppyMarket;
+
+    // v4: Smart trail mode
+    const trailMode: "ema21" | "two-candle" | "standard" = strongTrend
+      ? (pa.ema21 !== null ? "ema21" : "two-candle")
+      : "standard";
+
     const conviction: "HIGH" | "MEDIUM" | "LOW" =
       action === "WAIT" ? "LOW"
+        : (earlyBuy || earlySell || momentumStreakBuy || momentumStreakSell) ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest) && pa.strongMomentum ? "HIGH"
-        : (buyBreakoutRetest || sellBreakdownRetest) ? "MEDIUM"
+        : (buyBreakoutRetest || sellBreakdownRetest || trendPullbackBuy || trendPullbackSell) ? "MEDIUM"
         : pa.strongMomentum ? "HIGH"
+        : (boostBuy || boostSell) ? "LOW"
         : "MEDIUM";
 
     const promptContext = {
@@ -465,7 +577,25 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         midZone: pa.midZone,
         last30Range: pa.last30Range,
         sidewaysMarket: pa.sidewaysMarket,
+        choppyMarket: pa.choppyMarket,
         strongMomentum: pa.strongMomentum,
+        // v4 additions
+        momentumBull: pa.momentumBull,
+        momentumBear: pa.momentumBear,
+        bullStreak: pa.bullStreak,
+        bearStreak: pa.bearStreak,
+        trendUp: pa.trendUp,
+        trendDown: pa.trendDown,
+        pullbackBuy: pa.pullbackBuy,
+        pullbackSell: pa.pullbackSell,
+        earlyBuy: pa.earlyBuy,
+        earlySell: pa.earlySell,
+        reEntryBuy,
+        reEntrySell,
+        gapBypassedByReEntry,
+        frequencyBoostActive,
+        strongTrend,
+        trailMode,
         // Compatibility shims
         volumeValid: null,
         pcr: null,
@@ -486,7 +616,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       reason: signal.reason,
       raw_response: JSON.stringify({
         text: aiText,
-        engine: "price-action-scalper-v3",
+        engine: "price-action-scalper-v4",
         tradingMode,
         signal,
         ruleContext,
@@ -494,11 +624,23 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity,
         effectiveLotSize, effectiveTradingQuantity,
         userTargetPoints, userSlPoints,
+        riskSizeDown,
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
           lockPts: TRAIL_LOCK_PTS,
-          mode: "BE@+10, lock+10@+20, then last-candle trail",
+          mode: trailMode,
+          description: trailMode === "ema21"
+            ? "Strong trend: trail using EMA21"
+            : trailMode === "two-candle"
+              ? "Strong trend: trail using last 2 candle low/high"
+              : "Standard: BE@+10, lock+10@+20, then last-candle trail",
+        },
+        partialBook: {
+          enabled: true,
+          atProfitPts: PARTIAL_BOOK_PTS,
+          fraction: PARTIAL_BOOK_FRACTION,
+          description: `Book ${PARTIAL_BOOK_FRACTION * 100}% at +${PARTIAL_BOOK_PTS}pts, trail rest`,
         },
       }),
     }).select("*").single();
@@ -517,7 +659,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveLotSize,
         tradingQuantity,
         effectiveTradingQuantity,
-        riskSizeDown: false,
+        riskSizeDown,
         userTargetPoints, userSlPoints,
         optionType: signal.optionType,
         entry: signal.entry,
@@ -530,6 +672,12 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
           lockPts: TRAIL_LOCK_PTS,
+          mode: trailMode,
+          strongTrend,
+        },
+        partialBook: {
+          atProfitPts: PARTIAL_BOOK_PTS,
+          fraction: PARTIAL_BOOK_FRACTION,
         },
       },
     });
