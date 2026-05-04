@@ -103,8 +103,8 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
 
-  // 15-minute Support/Resistance from last 15 rows — these double as the dashboard's "Immediate S/R"
-  const last15 = history.slice(0, 15);
+  // 15-minute Support/Resistance from previous rows only — excluding the live tick avoids making breakouts impossible.
+  const last15 = history.slice(1, 16);
   const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
   const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
   const resistance15 = highs15.length ? Math.max(...highs15) : null;
@@ -224,12 +224,13 @@ serve(async (req) => {
     // Scalper Mode gates: relaxed sustained-candle and 5m requirements; S/R breakout or candlestick scalp can fully override EMA21.
     // 9:20 oversized opening guard: when the 9:20 candle exceeds the 30-pt cap, only allow entries that have CLEARED the 9:20 high/low with volume.
     const ltpForGate = r.ltp;
-    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && (r.highVolume || r.volumeValid === true);
-    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && (r.highVolume || r.volumeValid === true);
+    const scalpingMode = tradingMode === "scalping";
+    const volumeConfirmationOk = scalpingMode ? r.volumeValid !== false || r.highVolume === true : r.highVolume === true || r.volumeValid === true;
+    const beyondNineTwentyHighWithVol = r.nineTwentyHigh !== null && ltpForGate !== null && ltpForGate > r.nineTwentyHigh && volumeConfirmationOk;
+    const beyondNineTwentyLowWithVol = r.nineTwentyLow !== null && ltpForGate !== null && ltpForGate < r.nineTwentyLow && volumeConfirmationOk;
     const nineTwentyBuyOk = !r.nineTwentyOversized || beyondNineTwentyHighWithVol;
     const nineTwentySellOk = !r.nineTwentyOversized || beyondNineTwentyLowWithVol;
 
-    const scalpingMode = tradingMode === "scalping";
     const volumeGateOk = scalpingMode ? (r.volumeValid !== false || r.highVolume === true || r.srBreakout === true) : (r.volumeValid === true || r.highVolume === true || r.srBreakout === true);
     const vixGateOk = scalpingMode ? true : r.vixStable === true;
     const bullishSetupReady = nineTwentyBuyOk && (r.priceAboveEma21 === true || r.breakoutAboveR15 === true || r.quickScalpBuy === true || r.priceAboveBothEmas === true || r.pdhBreakWithVolume === true) && (r.sustainedBullish1m === true || r.entry1m === "bullish" || r.strong1mBreakout === true || r.quickScalpBuy === true || r.breakoutAboveR15 === true);
