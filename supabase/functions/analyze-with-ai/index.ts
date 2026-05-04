@@ -224,6 +224,8 @@ serve(async (req) => {
     const prompt = `${tradingMode === "scalping" ? scalpingPrompt : sniperPrompt}
 
 Common rules:
+- Ghanshyam Sir's Foundation Bias: Yesterday's High (PDH), Low (PDL) and Close (PDC) are key levels. PDH break with volume = strong bullish bias. PDL break with volume = strong bearish bias. Price above PDC = mild bullish; below = mild bearish. Mention which side of yesterday's range price is on.
+- Always reason from the LATEST Nifty spot LTP shown below — never reuse stale prices.
 - 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
 - Strike freshness: always recompute ATM from latest spot.
 - Manual override: if User Target/SL Points provided, use those exact point values.
