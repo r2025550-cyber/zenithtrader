@@ -468,11 +468,26 @@ serve(async (req) => {
       ? `Buy Nifty ${strikeNum} ${optionType}`
       : "WAIT";
 
+    // v4: Strong trend = momentum streak OR (HH/HL & EMA-aligned)
+    const strongTrend =
+      (action === "BUY" && (pa.momentumBull || (pa.trendUp && pa.emaBullish))) ||
+      (action === "SELL" && (pa.momentumBear || (pa.trendDown && pa.emaBearish)));
+
+    // v4: Risk size-down on choppy markets
+    const riskSizeDown = pa.choppyMarket;
+
+    // v4: Smart trail mode
+    const trailMode: "ema21" | "two-candle" | "standard" = strongTrend
+      ? (pa.ema21 !== null ? "ema21" : "two-candle")
+      : "standard";
+
     const conviction: "HIGH" | "MEDIUM" | "LOW" =
       action === "WAIT" ? "LOW"
+        : (earlyBuy || earlySell || momentumStreakBuy || momentumStreakSell) ? "HIGH"
         : (buyBreakoutRetest || sellBreakdownRetest) && pa.strongMomentum ? "HIGH"
-        : (buyBreakoutRetest || sellBreakdownRetest) ? "MEDIUM"
+        : (buyBreakoutRetest || sellBreakdownRetest || trendPullbackBuy || trendPullbackSell) ? "MEDIUM"
         : pa.strongMomentum ? "HIGH"
+        : (boostBuy || boostSell) ? "LOW"
         : "MEDIUM";
 
     const promptContext = {
