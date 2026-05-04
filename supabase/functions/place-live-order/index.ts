@@ -24,6 +24,9 @@ const BodySchema = z.object({
   stopLossPremiumPoints: z.number().positive().optional(),
   // v6: optional override for slippage tolerance from client
   maxSlippagePct: z.number().positive().max(10).optional(),
+  // v6-safe: chart-based risk + RR from analyze-with-ai signal
+  riskPoints: z.number().positive().optional(),
+  rrMultiplier: z.number().positive().max(10).optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
