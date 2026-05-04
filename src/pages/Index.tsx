@@ -133,7 +133,16 @@ type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type MarketFetchResult = { data: NiftyData | null; fallback?: boolean; rateLimited?: boolean; retryAfterMs?: number; error?: string; details?: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
+type ExecutionMeta = { orderPlaced?: boolean; orderFilled?: boolean; orderStatus?: string; slActive?: boolean; trailingActive?: boolean; blocked?: string; slippageExit?: boolean };
+type SlippageMeta = { quotedLtp?: number; fillPrice?: number; slippagePct?: number; tolerancePct?: number; withinTolerance?: boolean };
+type LiquidityMeta = { ltp?: number; bid?: number; ask?: number; spread?: number; spreadPct?: number; volume?: number; maxSpreadPct?: number; minVolume?: number };
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; slType?: string; slTriggerPrice?: number; slLimitPrice?: number; execution?: ExecutionMeta; slippage?: SlippageMeta; liquidity?: LiquidityMeta; error?: string; details?: string };
+const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
+type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
+const DEFAULT_EXEC_SETTINGS: ExecSettings = { slippagePct: 1.5, maxSpreadPct: 2, retries: 2, liquidityFilter: true };
+const loadExecSettings = (): ExecSettings => {
+  try { const raw = storedValue(EXEC_SETTINGS_KEY); return raw ? { ...DEFAULT_EXEC_SETTINGS, ...JSON.parse(raw) } : DEFAULT_EXEC_SETTINGS; } catch { return DEFAULT_EXEC_SETTINGS; }
+};
 
 const Index = () => {
   const { toast } = useToast();
