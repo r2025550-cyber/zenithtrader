@@ -154,6 +154,7 @@ const Index = () => {
   const [authPassword, setAuthPassword] = useState("");
   const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
   const [riskMode, setRiskMode] = useState("moderate");
+  const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(() => (storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper"));
   const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
   const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
