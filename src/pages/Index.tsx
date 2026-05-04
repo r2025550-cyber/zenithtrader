@@ -717,6 +717,24 @@ const Index = () => {
     if (Number.isFinite(value)) {
       const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
       setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+      // Update ATM CE/PE rolling series; reset when strike changes
+      const atm = (market.data?.raw_payload as any)?.context?.atm;
+      const ceLtp = Number(atm?.ce?.ltp);
+      const peLtp = Number(atm?.pe?.ltp);
+      const ceStrike = Number(atm?.ce?.strike ?? atm?.strike);
+      const peStrike = Number(atm?.pe?.strike ?? atm?.strike);
+      if (Number.isFinite(ceStrike) && ceStrikeRef.current !== ceStrike) { ceStrikeRef.current = ceStrike; setCeSeries([]); }
+      if (Number.isFinite(peStrike) && peStrikeRef.current !== peStrike) { peStrikeRef.current = peStrike; setPeSeries([]); }
+      if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
+      if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
+      // Force a fresh AI cycle when price moves >15pts from anchor (re-baseline immediate S/R reasoning)
+      const anchor = levelsAnchorLtpRef.current;
+      if (anchor === null) levelsAnchorLtpRef.current = value;
+      else if (Math.abs(value - anchor) > 15 && aiEnabled && !tradingBlocked && Date.now() - lastForcedAiAtRef.current > 15_000) {
+        levelsAnchorLtpRef.current = value;
+        lastForcedAiAtRef.current = Date.now();
+        runTradingCycle().catch(() => {});
+      }
     }
     return market.data;
   };
