@@ -841,6 +841,18 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
           atProfitPts: PARTIAL_BOOK_PTS,
           fraction: PARTIAL_BOOK_FRACTION,
         },
+        protection: {
+          consecutiveLosses,
+          lossPauseActive,
+          lossPauseRemainingMin,
+          positionSizeMultiplier,
+          spikeBlock,
+          spikeAgeMin: pa.spikeAgeMin === Infinity ? null : pa.spikeAgeMin,
+          bullTrap: pa.bullTrap,
+          bearTrap: pa.bearTrap,
+          compression: pa.compression,
+          compressionBreakout: pa.compressionBreakout,
+        },
       },
     });
   } catch (error) {
