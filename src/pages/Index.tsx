@@ -231,6 +231,38 @@ const Index = () => {
   const slY = visualSlIndex !== null && chartValues.length ? indexToY(visualSlIndex) : null;
   const targetY = visualTargetIndex !== null && chartValues.length ? indexToY(visualTargetIndex) : null;
   const entryY = visualEntryIndex !== null && chartValues.length ? indexToY(visualEntryIndex) : null;
+  // Yesterday's levels + immediate S/R from latest signal
+  const yesterdayLevels = (latestData?.raw_payload as any)?.context?.yesterday ?? {};
+  const pdhVal = toNumber(yesterdayLevels?.pdh);
+  const pdlVal = toNumber(yesterdayLevels?.pdl);
+  const pdcVal = toNumber(yesterdayLevels?.pdc);
+  const immediateSupport = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15);
+  const immediateResistance = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance ?? (latestSignal?.ruleContext?.rules as any)?.resistance15);
+  const pdhY = pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
+  const pdlY = pdlVal !== null && chartValues.length && pdlVal >= chartMin && pdlVal <= chartMax ? indexToY(pdlVal) : null;
+  const pdcY = pdcVal !== null && chartValues.length && pdcVal >= chartMin && pdcVal <= chartMax ? indexToY(pdcVal) : null;
+  const atmContext = (latestData?.raw_payload as any)?.context?.atm ?? {};
+  const atmStrikeLive = toNumber(atmContext?.strike);
+  const atmExpiry = atmContext?.expiry ?? null;
+  const ceSymbol = atmContext?.ce?.tradingSymbol ?? (atmStrikeLive ? `Nifty ${atmStrikeLive} CE` : "ATM CE");
+  const peSymbol = atmContext?.pe?.tradingSymbol ?? (atmStrikeLive ? `Nifty ${atmStrikeLive} PE` : "ATM PE");
+  const ceLtpLive = toNumber(atmContext?.ce?.ltp);
+  const peLtpLive = toNumber(atmContext?.pe?.ltp);
+  const buildMiniPolyline = (series: MarketPoint[]) => {
+    if (series.length < 2) return { points: "", min: 0, max: 0 };
+    const vals = series.map((p) => p.value);
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const range = Math.max(max - min, 0.01);
+    const points = series.map((p, i) => {
+      const x = (i / (series.length - 1)) * 100;
+      const y = 92 - ((p.value - min) / range) * 84;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join(" ");
+    return { points, min, max };
+  };
+  const ceMini = buildMiniPolyline(ceSeries);
+  const peMini = buildMiniPolyline(peSeries);
   const marketIsOpen = isWithinMarketHours(marketClock);
   const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
