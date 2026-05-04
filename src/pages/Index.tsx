@@ -363,6 +363,8 @@ const Index = () => {
     const signalKey = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
     if (signalKey === lastSignalAutofillRef.current) return;
     lastSignalAutofillRef.current = signalKey;
+    // New signal → reset manual-edit flag so auto-fill can populate fresh values.
+    userEditedExitsRef.current = false;
     invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
       .then(({ premium, instrument }) => {
         const rules = latestSignal.ruleContext?.rules as any;
@@ -374,10 +376,18 @@ const Index = () => {
         }
         const tgtPts = slPts ? slPts * 2 : undefined;
         const exits = calculatePremiumExitPrices(premium, slPts, tgtPts);
+        // v6-safe: prefer backend-computed premiumTarget/premiumSL from signal when available.
+        const sigTarget = Number((latestSignal as any)?.premiumTarget);
+        const sigSl = Number((latestSignal as any)?.premiumSL);
+        const finalTarget = Number.isFinite(sigTarget) && sigTarget > 0 ? sigTarget : exits.targetPremium;
+        const finalSl = Number.isFinite(sigSl) && sigSl > 0 ? sigSl : exits.stopLossPremium;
         setSuggestedEntryPremium(premium);
-        setUserTargetPoints(formatPremiumInput(exits.targetPremium));
-        setUserSlPoints(formatPremiumInput(exits.stopLossPremium));
-        toast({ title: "Scalper auto-fill ready", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · SL ₹${exits.stopLossPremium.toFixed(2)} (prev candle) · Target ₹${exits.targetPremium.toFixed(2)} (1:2).` });
+        // Respect user manual edits: only auto-fill if user hasn't typed into the fields.
+        if (!userEditedExitsRef.current) {
+          setUserTargetPoints(formatPremiumInput(finalTarget));
+          setUserSlPoints(formatPremiumInput(finalSl));
+        }
+        toast({ title: "Scalper auto-fill ready", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · SL ₹${finalSl.toFixed(2)} · Target ₹${finalTarget.toFixed(2)}.` });
       })
       .catch((error) => {
         toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
