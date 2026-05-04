@@ -95,11 +95,41 @@ function buildRuleContext(latest: MarketRow, history: MarketRow[]) {
   const trend5MovePct = pctMove(trendMinuteCloses[0] ?? null, trendMinuteCloses[5] ?? trendMinuteCloses[trendMinuteCloses.length - 1] ?? null);
   const trend5 = trend5MovePct === null || trendMinuteCloses.length < 5 ? "pending" : trend5MovePct > 0.08 ? "bullish" : trend5MovePct < -0.08 ? "bearish" : "flat";
   const ema1mFallbackAligned = ltp !== null && ema9 !== null && ((entry1m === "bullish" && ltp > ema9) || (entry1m === "bearish" && ltp < ema9));
-  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || (trend5 === "pending" && ema1mFallbackAligned);
+  // Scalper Mode: 5m neutral/flat is acceptable if 1m shows clear breakout aligned with EMA9.
+  const strong1mBreakout = oneMinuteMovePct !== null && Math.abs(oneMinuteMovePct) > 0.05 && ema1mFallbackAligned;
+  const multiTimeframeAligned = (trend5 !== "pending" && entry1m !== "pending" && trend5 !== "flat" && trend5 === entry1m) || ((trend5 === "pending" || trend5 === "flat") && (ema1mFallbackAligned || strong1mBreakout));
   const minuteCloses = latestMinuteCloses(history);
   const sustainedBullish1m = minuteCloses.length >= 4 && minuteCloses[0] > minuteCloses[1] && minuteCloses[1] > minuteCloses[2] && minuteCloses[2] > minuteCloses[3];
   const sustainedBearish1m = minuteCloses.length >= 4 && minuteCloses[0] < minuteCloses[1] && minuteCloses[1] < minuteCloses[2] && minuteCloses[2] < minuteCloses[3];
   const vixStable = vixMovePct === null || vixMovePct <= 0;
+
+  // 15-minute Support/Resistance from last 15 rows
+  const last15 = history.slice(0, 15);
+  const highs15 = last15.map((r) => num(r?.high_price)).filter((v): v is number => v !== null);
+  const lows15 = last15.map((r) => num(r?.low_price)).filter((v): v is number => v !== null);
+  const resistance15 = highs15.length ? Math.max(...highs15) : null;
+  const support15 = lows15.length ? Math.min(...lows15) : null;
+  const highVolume = volumeAvailable && volume !== null && effectiveAvgVolume !== null && volume >= effectiveAvgVolume * 1.2;
+  const breakoutAboveR15 = ltp !== null && resistance15 !== null && ltp > resistance15 && highVolume;
+  const breakdownBelowS15 = ltp !== null && support15 !== null && ltp < support15 && highVolume;
+  const srBreakout = breakoutAboveR15 || breakdownBelowS15;
+
+  // Candlestick patterns on latest 1m vs previous (for Quick Scalp at S/R)
+  const prevOpen = num(previous?.open_price);
+  const prevClose = num(previous?.close_price);
+  const bodyTop = open !== null && close !== null ? Math.max(open, close) : null;
+  const bodyBottom = open !== null && close !== null ? Math.min(open, close) : null;
+  const bodySize = bodyTop !== null && bodyBottom !== null ? bodyTop - bodyBottom : 0;
+  const lowerWick = bodyBottom !== null && low !== null ? bodyBottom - low : 0;
+  const upperWick = bodyTop !== null && high !== null ? high - bodyTop : 0;
+  const bullishEngulfing = open !== null && close !== null && prevOpen !== null && prevClose !== null && prevClose < prevOpen && close > open && close >= prevOpen && open <= prevClose;
+  const bearishEngulfing = open !== null && close !== null && prevOpen !== null && prevClose !== null && prevClose > prevOpen && close < open && close <= prevOpen && open >= prevClose;
+  const hammer = bodySize > 0 && lowerWick >= bodySize * 2 && upperWick <= bodySize * 0.5 && close !== null && open !== null && close >= open;
+  const shootingStar = bodySize > 0 && upperWick >= bodySize * 2 && lowerWick <= bodySize * 0.5 && close !== null && open !== null && close <= open;
+  const nearSupport = support15 !== null && ltp !== null && Math.abs(ltp - support15) <= 15;
+  const nearResistance = resistance15 !== null && ltp !== null && Math.abs(ltp - resistance15) <= 15;
+  const quickScalpBuy = (bullishEngulfing || hammer) && nearSupport;
+  const quickScalpSell = (bearishEngulfing || shootingStar) && nearResistance;
 
   return {
     rules: { volumeValid, volume: effectiveVolume, volumeSource, avg5Volume, fakeBreakout, vixRising, vixMovePct, vixSizeCut, vixStable, europeanOpenCaution, overextended, noTradeRange, divergence, rawDivergence, niftyDrivenMomentum, priceAboveBothEmas, priceBelowBothEmas, pcr, pcrState: pcr === null ? "Unavailable" : pcr > 1.3 ? "Overbought" : pcr < 0.7 ? "Oversold" : "Neutral", ema9, ema21, priceAboveEma21, priceBelowEma21, emaTrend, emaAligned, trend5, trend5MovePct, entry1m, multiTimeframeAligned, sustainedBullish1m, sustainedBearish1m },
