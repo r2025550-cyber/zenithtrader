@@ -1386,9 +1386,71 @@ const Index = () => {
               </div>
             </section>
 
+            {/* ===== Execution Debug Panel ===== */}
+            <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Debug · Trace</p>
+                  <h2 className="text-lg font-semibold">Signal → Order → SL → Trailing</h2>
+                </div>
+                {debugEvents.length > 0 && (
+                  <button onClick={() => setDebugEvents([])} className="rounded-sm border border-border bg-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">Clear</button>
+                )}
+              </div>
+
+              {/* Status summary cards */}
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(() => {
+                  const ex = lastExecution?.execution ?? {};
+                  const lastSig = debugEvents.find((e) => e.stage === "SIGNAL");
+                  const lastOrder = debugEvents.find((e) => e.stage === "ORDER" && e.level === "success");
+                  const lastSl = debugEvents.find((e) => e.stage === "SL");
+                  const lastTrail = debugEvents.find((e) => e.stage === "TRAILING");
+                  const cells = [
+                    { k: "Signal", v: lastSig?.title ?? (latestSignal?.action ? `WAITING (${latestSignal.action})` : "Idle"), tone: lastSig ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
+                    { k: "Order", v: lastOrder?.title ?? (ex.orderPlaced ? "ORDER PLACED" : "Idle"), tone: lastOrder ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
+                    { k: "SL", v: ex.slActive ? "SL ACTIVE" : (lastSl?.title ?? "Idle"), tone: ex.slActive ? "border-primary/40 text-primary" : "border-border text-muted-foreground" },
+                    { k: "Trailing", v: lastTrail?.title ?? "Idle", tone: lastTrail ? "border-warning/40 text-warning" : "border-border text-muted-foreground" },
+                  ];
+                  return cells.map((c) => (
+                    <div key={c.k} className={`rounded-md border bg-surface p-2 ${c.tone}`}>
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.k}</p>
+                      <p className="text-[11px] font-bold leading-tight">{c.v}</p>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              {/* Event log */}
+              <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-surface">
+                {debugEvents.length === 0 ? (
+                  <p className="p-3 text-xs text-muted-foreground">No execution events yet. Events appear here in real-time as signals fire and orders are placed.</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {debugEvents.map((e) => {
+                      const tone = e.level === "error" ? "text-loss" : e.level === "warn" ? "text-warning" : e.level === "success" ? "text-profit" : "text-foreground";
+                      const stageTone = e.stage === "ERROR" ? "border-loss/40 bg-loss/10 text-loss" : e.stage === "TRAILING" ? "border-warning/40 bg-warning/10 text-warning" : e.stage === "SL" ? "border-primary/40 bg-primary/10 text-primary" : e.stage === "FILL" || e.stage === "ORDER" ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-panel text-muted-foreground";
+                      return (
+                        <li key={e.id} className="flex items-start gap-2 p-2 text-xs">
+                          <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${stageTone}`}>{e.stage}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className={`font-semibold ${tone}`}>{e.title}</p>
+                            {e.detail && <p className="truncate text-[11px] text-muted-foreground">{e.detail}</p>}
+                          </div>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(e.ts).toLocaleTimeString("en-IN", { hour12: false })}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">Full payloads also logged to browser console (F12) with [SIGNAL], [ORDER], [FILL], [SL], [TRAILING], [ERROR] tags.</p>
+            </section>
+
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
           </aside>
         </div>
+
 
         <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
