@@ -290,15 +290,32 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const modeTag = `[${tradingMode.toUpperCase()} MODE]`;
-    if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore < minScore)) {
+    // High-conviction overrides: in Scalping mode, a sniperConfirmationScore >= 75 bypasses overextended/noTradeRange/fakeBreakout filters.
+    // A score > 80 also overrides any divergence block.
+    const scalpingHighConviction = tradingMode === "scalping" && sniperConfirmationScore >= 75;
+    const divergenceOverride = sniperConfirmationScore > 80;
+    const buyGateOk = buySniperReady || scalpingHighConviction;
+    const sellGateOk = sellSniperReady || scalpingHighConviction;
+
+    if (signal.action === "BUY" && (!buyGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `${modeTag} WAITING — score ${sniperConfirmationScore}% (need ${minScore}%). Need bullish confirmation + stable VIX.`;
     }
-    if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore < minScore)) {
+    if (signal.action === "SELL" && (!sellGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `${modeTag} WAITING — score ${sniperConfirmationScore}% (need ${minScore}%). Need bearish confirmation + stable VIX.`;
+    }
+    // Force-promote WAIT → BUY/SELL when score clears threshold and a directional gate is ready (vixSizeCut/riskSizeDown only affect quantity, not the signal).
+    if (signal.action === "WAIT" && sniperConfirmationScore >= minScore) {
+      if (buyGateOk && !sellGateOk) {
+        signal.action = "BUY";
+        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+      } else if (sellGateOk && !buyGateOk) {
+        signal.action = "SELL";
+        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+      }
     }
     if (signal.action !== "WAIT" && !signal.reason?.includes(modeTag)) signal.reason = `${modeTag} ${signal.reason ?? ""}`.trim();
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
@@ -306,9 +323,13 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const divergenceWarningOnly = tradingMode === "scalping" && sniperConfirmationScore > 60;
+    const divergenceWarningOnly = (tradingMode === "scalping" && sniperConfirmationScore > 60) || divergenceOverride;
     const divergenceBlocks = ruleContext.rules.divergence && !divergenceWarningOnly;
-    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= minScore && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !divergenceBlocks;
+    // Relax filters when in scalping mode with high conviction (>=75): bypass overextended / noTradeRange / fakeBreakout.
+    const overextendedBlocks = ruleContext.rules.overextended && !scalpingHighConviction;
+    const noTradeRangeBlocks = ruleContext.rules.noTradeRange && !scalpingHighConviction;
+    const fakeBreakoutBlocks = ruleContext.rules.fakeBreakout && !scalpingHighConviction;
+    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= minScore && !fakeBreakoutBlocks && !overextendedBlocks && !noTradeRangeBlocks && !divergenceBlocks;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
