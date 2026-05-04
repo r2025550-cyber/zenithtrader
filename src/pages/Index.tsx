@@ -717,18 +717,32 @@ const Index = () => {
 
   const syncStopLossPremium = async (plan: NonNullable<ActiveTradePlan>) => {
     if (!plan.slOrderId || !plan.stopLossPremium || plan.lastSyncedStopLossPremium === plan.stopLossPremium) return;
-    await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
-    setActiveTradePlan((current) => {
-      if (!current || current.slOrderId !== plan.slOrderId) return current;
-      const currentStop = current.stopLossPremium ?? current.stopLoss;
-      const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
-      const sameStop = currentStop === syncedStop;
-      if (!sameStop) return current;
-      const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
-      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
-      return syncedPlan;
-    });
-    toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+    const previousSl = plan.lastSyncedStopLossPremium ?? plan.stopLoss;
+    const profitPts = plan.entryPremium ? (plan.currentPremium ?? plan.entryPremium) - plan.entryPremium : 0;
+    try {
+      await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
+      setActiveTradePlan((current) => {
+        if (!current || current.slOrderId !== plan.slOrderId) return current;
+        const currentStop = current.stopLossPremium ?? current.stopLoss;
+        const syncedStop = plan.stopLossPremium ?? plan.stopLoss;
+        const sameStop = currentStop === syncedStop;
+        if (!sameStop) return current;
+        const syncedPlan = { ...current, lastSyncedStopLossPremium: plan.stopLossPremium };
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(syncedPlan)}`);
+        return syncedPlan;
+      });
+      pushDebug({
+        stage: "TRAILING",
+        level: "success",
+        title: "TRAILING ACTIVE",
+        detail: `SL ₹${previousSl.toFixed(2)} → ₹${plan.stopLossPremium.toFixed(2)} · profit +${profitPts.toFixed(1)}pts`,
+        data: { orderId: plan.slOrderId, previousSl, newSl: plan.stopLossPremium, profitPoints: Number(profitPts.toFixed(2)) },
+      });
+      toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+    } catch (err) {
+      pushDebug({ stage: "ERROR", level: "error", title: "TRAILING FAILED", detail: err instanceof Error ? err.message : String(err), data: { previousSl, attemptedSl: plan.stopLossPremium } });
+      throw err;
+    }
   };
 
   const saveUpstoxSettings = async () => {
