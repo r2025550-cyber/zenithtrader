@@ -133,7 +133,16 @@ type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
 type MarketFetchResult = { data: NiftyData | null; fallback?: boolean; rateLimited?: boolean; retryAfterMs?: number; error?: string; details?: string };
 type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; error?: string; details?: string };
+type ExecutionMeta = { orderPlaced?: boolean; orderFilled?: boolean; orderStatus?: string; slActive?: boolean; trailingActive?: boolean; blocked?: string; slippageExit?: boolean };
+type SlippageMeta = { quotedLtp?: number; fillPrice?: number; slippagePct?: number; tolerancePct?: number; withinTolerance?: boolean };
+type LiquidityMeta = { ltp?: number; bid?: number; ask?: number; spread?: number; spreadPct?: number; volume?: number; maxSpreadPct?: number; minVolume?: number };
+type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; slType?: string; slTriggerPrice?: number; slLimitPrice?: number; execution?: ExecutionMeta; slippage?: SlippageMeta; liquidity?: LiquidityMeta; error?: string; details?: string };
+const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
+type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
+const DEFAULT_EXEC_SETTINGS: ExecSettings = { slippagePct: 1.5, maxSpreadPct: 2, retries: 2, liquidityFilter: true };
+const loadExecSettings = (): ExecSettings => {
+  try { const raw = storedValue(EXEC_SETTINGS_KEY); return raw ? { ...DEFAULT_EXEC_SETTINGS, ...JSON.parse(raw) } : DEFAULT_EXEC_SETTINGS; } catch { return DEFAULT_EXEC_SETTINGS; }
+};
 
 const Index = () => {
   const { toast } = useToast();
@@ -185,6 +194,15 @@ const Index = () => {
   const peStrikeRef = useRef<number | null>(null);
   const levelsAnchorLtpRef = useRef<number | null>(null);
   const lastForcedAiAtRef = useRef<number>(0);
+  const [lastExecution, setLastExecution] = useState<LiveOrderResult | null>(null);
+  const [execSettings, setExecSettings] = useState<ExecSettings>(() => loadExecSettings());
+  const updateExecSettings = (patch: Partial<ExecSettings>) => {
+    setExecSettings((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(EXEC_SETTINGS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
@@ -868,7 +886,8 @@ const Index = () => {
           return;
         }
         const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct });
+        setLastExecution(liveOrder);
         if (!liveOrder.success) {
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
@@ -1175,6 +1194,115 @@ const Index = () => {
                 <Button disabled={!session || isBusy || tradingBlocked || !upstoxReady} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
                 <Button disabled={!session || isBusy || ((tradingBlocked || !upstoxReady) && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
                 {activeTradePlan && <div className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm font-semibold">{exitAlertActive ? (activeTradePlan.exitAlertReason === "FINAL_TARGET" ? "FINAL TARGET HIT — EXIT NOW" : "TRAILING SL HIT — EXIT NOW") : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}</span><div className="text-left sm:text-right"><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p><span className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</span></div></div><p className="mt-2 text-xs font-semibold text-muted-foreground">Premium ₹{activeTradePlan.currentPremium?.toFixed(2) ?? activeTradePlan.entryPremium?.toFixed(2) ?? "—"} · Target ₹{(activeTradePlan.targetPremium ?? activeTradePlan.target).toFixed(2)} / Server TSL ₹{(activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss).toFixed(2)} · P/L ₹{currentTradePnlPoints.toFixed(2)}</p><div className={`mt-2 inline-flex items-center gap-2 rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${tslStatusTone}`}><span className={`h-1.5 w-1.5 rounded-full ${tslActivated ? "bg-profit" : "bg-warning"}`} />{tslStatusLabel}</div></div>}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Execution Layer · v6</p>
+                  <h2 className="text-lg font-semibold">Order Execution & Liquidity</h2>
+                </div>
+                <ShieldCheck className="h-5 w-5 text-primary" />
+              </div>
+
+              {/* Status Badges */}
+              <div className="mb-4 flex flex-wrap gap-2">
+                {(() => {
+                  const ex = lastExecution?.execution ?? {};
+                  const blocked = ex.blocked;
+                  const slipExit = ex.slippageExit;
+                  const badges: Array<{ label: string; tone: string; on: boolean }> = [
+                    { label: "Order Placed ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderPlaced },
+                    { label: "Order Filled ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderFilled },
+                    { label: "SL Active 🛡️", tone: "border-primary/40 bg-primary/10 text-primary", on: !!ex.slActive },
+                    { label: "Trailing Active 🔄", tone: "border-warning/40 bg-warning/10 text-warning", on: !!(activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0)) },
+                  ];
+                  return (
+                    <>
+                      {badges.map((b) => (
+                        <span key={b.label} className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${b.on ? b.tone : "border-border bg-surface text-muted-foreground opacity-60"}`}>{b.label}</span>
+                      ))}
+                      {blocked && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Blocked: {blocked} ⚠️</span>}
+                      {slipExit && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Slippage Exit ⚠️</span>}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Slippage / Liquidity grid */}
+              {lastExecution && (
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-md border border-border bg-surface p-3">
+                    <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Slippage</p>
+                    <p className="text-sm">
+                      Quoted <span className="font-semibold text-foreground">₹{lastExecution.slippage?.quotedLtp?.toFixed(2) ?? "—"}</span>
+                      {" → Fill "}
+                      <span className="font-semibold text-foreground">₹{lastExecution.slippage?.fillPrice?.toFixed(2) ?? "—"}</span>
+                    </p>
+                    <p className={`mt-1 text-sm font-bold ${(lastExecution.slippage?.slippagePct ?? 0) > execSettings.slippagePct ? "text-loss" : "text-profit"}`}>
+                      {lastExecution.slippage?.slippagePct?.toFixed(2) ?? "—"}% (max {execSettings.slippagePct}%)
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border bg-surface p-3">
+                    <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Liquidity</p>
+                    <p className="text-sm">Bid <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.bid?.toFixed(2) ?? "—"}</span> · Ask <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.ask?.toFixed(2) ?? "—"}</span></p>
+                    <p className="mt-1 text-sm">
+                      Spread <span className={`font-bold ${(lastExecution.liquidity?.spreadPct ?? 0) > execSettings.maxSpreadPct ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.spreadPct?.toFixed(2) ?? "—"}%</span>
+                      {" · Vol "}
+                      <span className={`font-bold ${(lastExecution.liquidity?.volume ?? 0) < (lastExecution.liquidity?.minVolume ?? 5000) ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.volume?.toLocaleString("en-IN") ?? "—"}</span>
+                      {" · "}
+                      <span className={`font-semibold ${(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "text-profit" : "text-loss"}`}>
+                        {(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "GOOD" : "LOW"}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Trade execution details */}
+              {activeTradePlan && lastExecution?.success && (
+                <div className="mb-4 rounded-md border border-border bg-surface p-3 text-sm">
+                  <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Trade Execution Details</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div><p className="text-[11px] text-muted-foreground">Entry</p><p className="font-bold">₹{activeTradePlan.entryPremium?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">SL Trigger / Limit</p><p className="font-bold text-loss">₹{lastExecution.slTriggerPrice?.toFixed(2) ?? activeTradePlan.stopLossPremium?.toFixed(2) ?? "—"} / ₹{lastExecution.slLimitPrice?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">Target</p><p className="font-bold text-profit">₹{activeTradePlan.targetPremium?.toFixed(2) ?? "—"}</p></div>
+                    <div><p className="text-[11px] text-muted-foreground">Live P&L</p><p className={`font-bold ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</p></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Block / error reason */}
+              {lastExecution && !lastExecution.success && (
+                <div className="mb-4 rounded-md border border-loss/40 bg-loss/10 p-3 text-sm">
+                  <p className="font-semibold text-loss">Trade Blocked: {lastExecution.error ?? "Unknown"}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{lastExecution.details ?? "No details provided."}</p>
+                </div>
+              )}
+
+              {/* Settings sub-panel */}
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">Execution Settings</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-slippage" className="text-xs text-muted-foreground">Slippage Tolerance (%)</Label>
+                    <Input id="exec-slippage" type="number" step="0.1" min="0.1" max="10" value={execSettings.slippagePct} onChange={(e) => updateExecSettings({ slippagePct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.slippagePct })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-spread" className="text-xs text-muted-foreground">Max Spread (%)</Label>
+                    <Input id="exec-spread" type="number" step="0.1" min="0.1" max="10" value={execSettings.maxSpreadPct} onChange={(e) => updateExecSettings({ maxSpreadPct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.maxSpreadPct })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="exec-retries" className="text-xs text-muted-foreground">Retry Attempts</Label>
+                    <Input id="exec-retries" type="number" step="1" min="0" max="5" value={execSettings.retries} onChange={(e) => updateExecSettings({ retries: Number(e.target.value) || 0 })} className="h-8 border-border bg-panel" />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border bg-panel p-2">
+                    <div><p className="text-xs font-semibold">Liquidity Filter</p><p className="text-[10px] text-muted-foreground">Skip low-volume / wide-spread strikes</p></div>
+                    <Switch checked={execSettings.liquidityFilter} onCheckedChange={(v) => updateExecSettings({ liquidityFilter: v })} aria-label="Liquidity filter" />
+                  </div>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">Slippage tolerance is sent to the order engine on every trade. Spread / retries / liquidity filter are enforced server-side; UI values reflect your preferences.</p>
               </div>
             </section>
 
