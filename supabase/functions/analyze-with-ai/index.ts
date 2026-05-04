@@ -403,6 +403,11 @@ serve(async (req) => {
     const maxDailyLoss = 2000;
     const userTargetPoints = num(body?.userTargetPoints);
     const userSlPoints = num(body?.userSlPoints);
+    // v5: optional recent trade outcomes from frontend (most-recent first), e.g. [-12, +25, -8]
+    const recentTradesPnl: number[] = Array.isArray(body?.recentTradesPnl)
+      ? body.recentTradesPnl.map((v: unknown) => Number(v)).filter((n: number) => Number.isFinite(n))
+      : [];
+    const lastClosedTradeAt = num(body?.lastClosedTradeAt); // unix ms, optional
 
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error;
