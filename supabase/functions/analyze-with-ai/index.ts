@@ -233,6 +233,52 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const liveBullBreakout = ltp !== null && resistance !== null && ltp > resistance && strongGreen && !longUpperWick;
   const liveBearBreakout = ltp !== null && support !== null && ltp < support && strongRed && !longLowerWick;
 
+  // ===== v4: MOMENTUM DETECTION (3 strong candles same direction) =====
+  let bullStreak = 0, bearStreak = 0;
+  for (let i = 0; i < Math.min(MOMENTUM_STREAK, history.length); i++) {
+    const r = history[i];
+    const o = num(r?.open_price), c = num(r?.close_price), h = num(r?.high_price), l = num(r?.low_price);
+    if (o === null || c === null || h === null || l === null) break;
+    const rng = Math.max(h - l, 0); const bd = Math.abs(c - o);
+    const strong = rng > 0 && bd / rng >= 0.55;
+    if (!strong) break;
+    if (c > o) { if (bearStreak > 0) break; bullStreak++; }
+    else if (c < o) { if (bullStreak > 0) break; bearStreak++; }
+    else break;
+  }
+  const momentumBull = bullStreak >= MOMENTUM_STREAK;
+  const momentumBear = bearStreak >= MOMENTUM_STREAK;
+
+  // ===== v4: TREND CONTINUATION (HH/HL or LH/LL on last ~6 candles) =====
+  const lastN = history.slice(1, 7);
+  const highsN = lastN.map(r => num(r?.high_price)).filter((v): v is number => v !== null);
+  const lowsN = lastN.map(r => num(r?.low_price)).filter((v): v is number => v !== null);
+  let trendUp = false, trendDown = false;
+  if (highsN.length >= 4 && lowsN.length >= 4) {
+    const firstHalfH = Math.max(...highsN.slice(Math.floor(highsN.length / 2)));
+    const secondHalfH = Math.max(...highsN.slice(0, Math.floor(highsN.length / 2)));
+    const firstHalfL = Math.min(...lowsN.slice(Math.floor(lowsN.length / 2)));
+    const secondHalfL = Math.min(...lowsN.slice(0, Math.floor(lowsN.length / 2)));
+    trendUp = secondHalfH > firstHalfH && secondHalfL > firstHalfL;
+    trendDown = secondHalfH < firstHalfH && secondHalfL < firstHalfL;
+  }
+  // Pullback to EMA21 in trend direction with confirmation
+  const pullbackBuy = trendUp && ema21 !== null && ltp !== null &&
+    Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongGreen || bullishEngulfing) && ema21Slope > 0;
+  const pullbackSell = trendDown && ema21 !== null && ltp !== null &&
+    Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongRed || bearishEngulfing) && ema21Slope < 0;
+
+  // ===== v4: EARLY ENTRY (strong breakout close, skip retest) =====
+  const earlyBuy = ltp !== null && resistance !== null && close !== null &&
+    close > resistance && strongGreen && body >= EARLY_ENTRY_MIN_BODY_PTS &&
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick && (emaBullish || ema21Slope > 0);
+  const earlySell = ltp !== null && support !== null && close !== null &&
+    close < support && strongRed && body >= EARLY_ENTRY_MIN_BODY_PTS &&
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick && (emaBearish || ema21Slope < 0);
+
+  // ===== v4: CHOPPY market (very tight range = downsize) =====
+  const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
+
   return {
     ltp, open, high, low, close,
     prevHigh: pHigh, prevLow: pLow, prevClose: pClose,
@@ -243,8 +289,12 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     nearSupport, nearResistance, midZone,
     recentBullBreakout, recentBearBreakout, retestBullOk, retestBearOk,
     liveBullBreakout, liveBearBreakout,
-    last30Range, sidewaysMarket,
+    last30Range, sidewaysMarket, choppyMarket,
     strongMomentum,
+    // v4 additions
+    momentumBull, momentumBear, bullStreak, bearStreak,
+    trendUp, trendDown, pullbackBuy, pullbackSell,
+    earlyBuy, earlySell,
   };
 }
 
