@@ -934,11 +934,25 @@ const Index = () => {
           return;
         }
         const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined });
+        const orderPayload = { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined };
+        pushDebug({ stage: "ORDER", level: "info", title: "ORDER PLACING", detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`, data: orderPayload });
+        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
         setLastExecution(liveOrder);
         if (!liveOrder.success) {
+          pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`, data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity } });
           toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
           return;
+        }
+        pushDebug({ stage: "ORDER", level: "success", title: "ORDER PLACED", detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`, data: { orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id, instrument: liveOrder.instrument } });
+        if (liveOrder.execution?.orderFilled) {
+          pushDebug({ stage: "FILL", level: "success", title: "ORDER FILLED", detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`, data: { fillPrice: liveOrder.entryPremium, quotedLtp: liveOrder.slippage?.quotedLtp, quantity: liveOrder.quantity, status: liveOrder.execution?.orderStatus } });
+        } else {
+          pushDebug({ stage: "FILL", level: "warn", title: "ORDER PENDING", detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}` });
+        }
+        if (liveOrder.execution?.slActive) {
+          pushDebug({ stage: "SL", level: "success", title: "SL ACTIVE", detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`, data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId } });
+        } else {
+          pushDebug({ stage: "ERROR", level: "warn", title: "SL FAILED", detail: "Server SL was not registered. Manual exit required if filled." });
         }
         const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
         const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
@@ -963,6 +977,7 @@ const Index = () => {
       }
       toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
     } catch (error) {
+      pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: error instanceof Error ? error.message : String(error) });
       toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
     } finally {
       setIsBusy(false);
