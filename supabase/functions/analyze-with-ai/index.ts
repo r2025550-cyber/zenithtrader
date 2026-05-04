@@ -616,7 +616,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       reason: signal.reason,
       raw_response: JSON.stringify({
         text: aiText,
-        engine: "price-action-scalper-v3",
+        engine: "price-action-scalper-v4",
         tradingMode,
         signal,
         ruleContext,
@@ -624,11 +624,23 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity,
         effectiveLotSize, effectiveTradingQuantity,
         userTargetPoints, userSlPoints,
+        riskSizeDown,
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
           lockPts: TRAIL_LOCK_PTS,
-          mode: "BE@+10, lock+10@+20, then last-candle trail",
+          mode: trailMode,
+          description: trailMode === "ema21"
+            ? "Strong trend: trail using EMA21"
+            : trailMode === "two-candle"
+              ? "Strong trend: trail using last 2 candle low/high"
+              : "Standard: BE@+10, lock+10@+20, then last-candle trail",
+        },
+        partialBook: {
+          enabled: true,
+          atProfitPts: PARTIAL_BOOK_PTS,
+          fraction: PARTIAL_BOOK_FRACTION,
+          description: `Book ${PARTIAL_BOOK_FRACTION * 100}% at +${PARTIAL_BOOK_PTS}pts, trail rest`,
         },
       }),
     }).select("*").single();
@@ -647,7 +659,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveLotSize,
         tradingQuantity,
         effectiveTradingQuantity,
-        riskSizeDown: false,
+        riskSizeDown,
         userTargetPoints, userSlPoints,
         optionType: signal.optionType,
         entry: signal.entry,
@@ -660,6 +672,12 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
           lockPts: TRAIL_LOCK_PTS,
+          mode: trailMode,
+          strongTrend,
+        },
+        partialBook: {
+          atProfitPts: PARTIAL_BOOK_PTS,
+          fraction: PARTIAL_BOOK_FRACTION,
         },
       },
     });
