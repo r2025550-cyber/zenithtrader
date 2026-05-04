@@ -241,7 +241,8 @@ serve(async (req) => {
     const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
 
-    const minScore = tradingMode === "scalping" ? 60 : 80;
+    // Nifty 50 scalping: minimum score lowered to 70 per execution-logic spec.
+    const minScore = tradingMode === "scalping" ? 70 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
 - SCALPER MODE: Generate BUY/SELL on either (a) sustained 1m trend, (b) 15m S/R breakout with high volume (overrides 21 EMA), or (c) Bullish Engulfing/Hammer at 15m support (Quick Scalp Buy) / Bearish Engulfing/Shooting-Star at 15m resistance (Quick Scalp Sell).
 - TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do NOT require both 1m and 5m same color.
