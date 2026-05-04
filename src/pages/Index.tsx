@@ -253,6 +253,13 @@ const Index = () => {
   const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
+  // TSL status: Armed (<+10pts) → Break-Even (>=+10pts) → Trailing +Npts (every additional 5pts)
+  const TSL_ACTIVATION_POINTS = 10;
+  const tslActivated = currentTradePnlPoints >= TSL_ACTIVATION_POINTS;
+  const tslLockedSteps = tslActivated ? Math.floor((currentTradePnlPoints - TSL_ACTIVATION_POINTS) / PREMIUM_TSL_STEP) : 0;
+  const tslLockedPoints = tslActivated ? tslLockedSteps * PREMIUM_TSL_STEP : 0;
+  const tslStatusLabel = !activeTradePlan ? "Idle" : !tslActivated ? `TSL Armed · activates at +${TSL_ACTIVATION_POINTS}pts (${Math.max(0, TSL_ACTIVATION_POINTS - currentTradePnlPoints).toFixed(1)} pts to go)` : tslLockedPoints === 0 ? "TSL Active · SL @ Break-Even" : `TSL Trailing · locked +${tslLockedPoints}pts above entry`;
+  const tslStatusTone = !activeTradePlan ? "border-border text-muted-foreground" : !tslActivated ? "border-warning/60 text-warning" : "border-profit/60 text-profit animate-pulse";
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
