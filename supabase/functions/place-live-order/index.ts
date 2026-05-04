@@ -234,8 +234,13 @@ serve(async (req) => {
       });
     }
 
-    const targetPremiumPoints = parsed.data.targetPremiumPoints ?? 25;
-    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints ?? 15;
+    // v6-safe: prefer chart-derived risk points + RR from analyze-with-ai signal
+    const v6RiskPoints = parsed.data.riskPoints;
+    const v6Rr = parsed.data.rrMultiplier ?? 1.8;
+    const targetPremiumPoints = parsed.data.targetPremiumPoints
+      ?? (v6RiskPoints ? Math.round(v6RiskPoints * v6Rr * 10) / 10 : 25);
+    const stopLossPremiumPoints = parsed.data.stopLossPremiumPoints
+      ?? (v6RiskPoints ?? 15);
     const targetPremium = optionLtp + targetPremiumPoints;
     const stopLossPremium = Math.max(0.05, optionLtp - stopLossPremiumPoints);
     const requiredCash = optionLtp * quantity;
