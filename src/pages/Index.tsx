@@ -179,6 +179,12 @@ const Index = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
+  const [ceSeries, setCeSeries] = useState<MarketPoint[]>([]);
+  const [peSeries, setPeSeries] = useState<MarketPoint[]>([]);
+  const ceStrikeRef = useRef<number | null>(null);
+  const peStrikeRef = useRef<number | null>(null);
+  const levelsAnchorLtpRef = useRef<number | null>(null);
+  const lastForcedAiAtRef = useRef<number>(0);
 
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
