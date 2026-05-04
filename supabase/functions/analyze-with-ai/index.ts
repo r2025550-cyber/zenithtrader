@@ -241,7 +241,8 @@ serve(async (req) => {
     const nineTwentyPenalty = r.nineTwentyOversized && !beyondNineTwentyHighWithVol && !beyondNineTwentyLowWithVol ? -20 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(0, Math.max(baseGateScore + nineTwentyPenalty, instantEmaBoost + srBoost + pdhPdlBoost + roundNumberBoost + nineTwentyPenalty + Math.round(baseGateScore * 0.6))));
 
-    const minScore = tradingMode === "scalping" ? 60 : 80;
+    // Nifty 50 scalping: minimum score lowered to 70 per execution-logic spec.
+    const minScore = tradingMode === "scalping" ? 70 : 80;
     const scalpingPrompt = `MODE: SCALPING (active). You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). IGNORE strict Sniper constraints. Apply Scalping logic:
 - SCALPER MODE: Generate BUY/SELL on either (a) sustained 1m trend, (b) 15m S/R breakout with high volume (overrides 21 EMA), or (c) Bullish Engulfing/Hammer at 15m support (Quick Scalp Buy) / Bearish Engulfing/Shooting-Star at 15m resistance (Quick Scalp Sell).
 - TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do NOT require both 1m and 5m same color.
@@ -250,7 +251,7 @@ serve(async (req) => {
 - 9:20 ORB CAP (Nifty 50): The 9:20 candle is capped at 30 points. If 9:20 range > 30 pts (oversized opening), DO NOT take fresh entries unless price clears the 9:20 high (BUY) / low (SELL) with high volume.
 - ROUND-NUMBER PRIORITY: Prioritise setups within 10 pts of a 50-point psychological level (24100, 24150, 24200…). Mention the round number in REASON when relevant.
 - VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
-- Trigger threshold: 60% score.`;
+- Trigger threshold: 70% score. If score >=75, override overextended/noTradeRange/fakeBreakout filters. If score >80, divergence does not block.`;
     const sniperPrompt = `MODE: SNIPER (active). You are the trading mind for a Nifty Options SNIPER (1–2 high-conviction trades/day). Apply STRICT Sniper constraints:
 - Require 1m AND 5m EMA alignment in the same direction (no relaxation).
 - Require Volume +20% above 5-period avg (no volume → WAIT).
@@ -289,15 +290,32 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const text = result.text || "ACTION: WAIT, STRIKE: Current ATM, REASON: No analysis returned.";
     const signal = parseSignal(text.includes("REASON") ? text : `${text}\nREASON: ${ruleContext.guidance.join(" ")}`);
     const modeTag = `[${tradingMode.toUpperCase()} MODE]`;
-    if (signal.action === "BUY" && (!buySniperReady || sniperConfirmationScore < minScore)) {
+    // High-conviction overrides: in Scalping mode, a sniperConfirmationScore >= 75 bypasses overextended/noTradeRange/fakeBreakout filters.
+    // A score > 80 also overrides any divergence block.
+    const scalpingHighConviction = tradingMode === "scalping" && sniperConfirmationScore >= 75;
+    const divergenceOverride = sniperConfirmationScore > 80;
+    const buyGateOk = buySniperReady || scalpingHighConviction;
+    const sellGateOk = sellSniperReady || scalpingHighConviction;
+
+    if (signal.action === "BUY" && (!buyGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `${modeTag} WAITING — score ${sniperConfirmationScore}% (need ${minScore}%). Need bullish confirmation + stable VIX.`;
     }
-    if (signal.action === "SELL" && (!sellSniperReady || sniperConfirmationScore < minScore)) {
+    if (signal.action === "SELL" && (!sellGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
       signal.strike = "WAIT";
       signal.reason = `${modeTag} WAITING — score ${sniperConfirmationScore}% (need ${minScore}%). Need bearish confirmation + stable VIX.`;
+    }
+    // Force-promote WAIT → BUY/SELL when score clears threshold and a directional gate is ready (vixSizeCut/riskSizeDown only affect quantity, not the signal).
+    if (signal.action === "WAIT" && sniperConfirmationScore >= minScore) {
+      if (buyGateOk && !sellGateOk) {
+        signal.action = "BUY";
+        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+      } else if (sellGateOk && !buyGateOk) {
+        signal.action = "SELL";
+        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+      }
     }
     if (signal.action !== "WAIT" && !signal.reason?.includes(modeTag)) signal.reason = `${modeTag} ${signal.reason ?? ""}`.trim();
     if (signal.action === "BUY" && ruleContext.atmStrike) signal.strike = `Buy Nifty ${ruleContext.atmStrike} CE`;
@@ -305,9 +323,13 @@ Latest market data:\n${JSON.stringify(latest)}`;
     const conviction = text.match(/CONVICTION\s*:\s*(HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() ?? (ruleContext.rules.divergence ? "LOW" : "MEDIUM");
     const effectiveLotSize = ruleContext.rules.vixSizeCut ? Math.max(1, Math.floor((tradingLotSize ?? 1) / 2)) : tradingLotSize;
     const effectiveTradingQuantity = effectiveLotSize ? effectiveLotSize * NIFTY_LOT_SIZE : tradingQuantity;
-    const divergenceWarningOnly = tradingMode === "scalping" && sniperConfirmationScore > 60;
+    const divergenceWarningOnly = (tradingMode === "scalping" && sniperConfirmationScore > 60) || divergenceOverride;
     const divergenceBlocks = ruleContext.rules.divergence && !divergenceWarningOnly;
-    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= minScore && !ruleContext.rules.fakeBreakout && !ruleContext.rules.overextended && !ruleContext.rules.noTradeRange && !divergenceBlocks;
+    // Relax filters when in scalping mode with high conviction (>=75): bypass overextended / noTradeRange / fakeBreakout.
+    const overextendedBlocks = ruleContext.rules.overextended && !scalpingHighConviction;
+    const noTradeRangeBlocks = ruleContext.rules.noTradeRange && !scalpingHighConviction;
+    const fakeBreakoutBlocks = ruleContext.rules.fakeBreakout && !scalpingHighConviction;
+    const highProbability = signal.action !== "WAIT" && sniperConfirmationScore >= minScore && !fakeBreakoutBlocks && !overextendedBlocks && !noTradeRangeBlocks && !divergenceBlocks;
 
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
@@ -315,11 +337,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
+      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
+    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
