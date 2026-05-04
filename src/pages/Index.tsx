@@ -207,6 +207,22 @@ const Index = () => {
     });
   };
 
+  // ===== Execution Debug / Visibility Layer =====
+  type DebugLevel = "info" | "success" | "warn" | "error";
+  type DebugStage = "SIGNAL" | "ORDER" | "FILL" | "SL" | "TRAILING" | "ERROR";
+  type DebugEvent = { id: string; ts: number; stage: DebugStage; level: DebugLevel; title: string; detail?: string; data?: Record<string, unknown> };
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const lastDebugSignalKeyRef = useRef<string>("");
+  const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
+    const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
+    setDebugEvents((prev) => [evt, ...prev].slice(0, 25));
+    const tag = `[${evt.stage}]`;
+    const payload = { detail: evt.detail, ...(evt.data ?? {}) };
+    if (evt.level === "error") console.error(tag, evt.title, payload);
+    else if (evt.level === "warn") console.warn(tag, evt.title, payload);
+    else console.log(tag, evt.title, payload);
+  };
+
   const applySniperSignal = (signal: Signal) => {
     const locked = signalLockRef.current;
     const now = Date.now();
