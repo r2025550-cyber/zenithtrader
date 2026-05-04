@@ -350,11 +350,15 @@ serve(async (req) => {
       requiredCash,
       optionLtp,
       entryPremium: fillPrice,
-      targetPremium,
-      stopLossPremium,
+      targetPremium: effectiveTargetPremium,
+      stopLossPremium: effectiveStopPremium,
+      premiumSL: effectiveStopPremium,
+      premiumTarget: effectiveTargetPremium,
       targetPremiumPoints,
       stopLossPremiumPoints,
-      version: "execution-layer-v6",
+      riskPoints: v6RiskPoints ?? null,
+      rrMultiplier: v6Rr,
+      version: "execution-layer-v6-safe",
     });
   } catch (error) {
     console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });
