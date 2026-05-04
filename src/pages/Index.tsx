@@ -913,8 +913,11 @@ const Index = () => {
         const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
         const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
         const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
-        setUserTargetPoints(formatPremiumInput(targetPremium));
-        setUserSlPoints(formatPremiumInput(stopLossPremium));
+        // Sync inputs to ACTUAL fill-based SL/Target from backend (v6-safe), unless user manually edited.
+        if (!userEditedExitsRef.current) {
+          setUserTargetPoints(formatPremiumInput(targetPremium));
+          setUserSlPoints(formatPremiumInput(stopLossPremium));
+        }
         const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
         setExecutedTrades(nextCount);
         setActiveTrade(true);
