@@ -302,8 +302,8 @@ Latest market data:\n${JSON.stringify(latest)}`;
     // A score > 80 also overrides any divergence block.
     const scalpingHighConviction = tradingMode === "scalping" && sniperConfirmationScore >= 75;
     const divergenceOverride = sniperConfirmationScore > 80;
-    const buyGateOk = buySniperReady || scalpingHighConviction;
-    const sellGateOk = sellSniperReady || scalpingHighConviction;
+    const buyGateOk = buySniperReady || (scalpingHighConviction && directionalBias === "BUY");
+    const sellGateOk = sellSniperReady || (scalpingHighConviction && directionalBias === "SELL");
 
     if (signal.action === "BUY" && (!buyGateOk || sniperConfirmationScore < minScore)) {
       signal.action = "WAIT";
@@ -319,10 +319,10 @@ Latest market data:\n${JSON.stringify(latest)}`;
     if (signal.action === "WAIT" && sniperConfirmationScore >= minScore) {
       if (buyGateOk && !sellGateOk) {
         signal.action = "BUY";
-        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+        signal.reason = `${modeTag} AUTO-BUY @ score ${sniperConfirmationScore}% — bullish votes ${bullishVotes}:${bearishVotes}; gates ready (force-promoted from WAIT).`;
       } else if (sellGateOk && !buyGateOk) {
         signal.action = "SELL";
-        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — gates ready (force-promoted from WAIT).`;
+        signal.reason = `${modeTag} AUTO-SELL @ score ${sniperConfirmationScore}% — bearish votes ${bearishVotes}:${bullishVotes}; gates ready (force-promoted from WAIT).`;
       }
     }
     if (signal.action !== "WAIT" && !signal.reason?.includes(modeTag)) signal.reason = `${modeTag} ${signal.reason ?? ""}`.trim();
@@ -345,11 +345,11 @@ Latest market data:\n${JSON.stringify(latest)}`;
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
-      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
+      raw_response: JSON.stringify({ text, model: result.modelName, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, directionalBias, bullishVotes, bearishVotes, ruleContext, executionIntent, tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity, effectiveLotSize, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints }),
     }).select("*").single();
     if (error) throw error;
 
-    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
+    return json({ success: true, signal: { ...data, tradingMode, conviction, highProbability, scalpingHighConviction, divergenceOverride, sniperConfirmationScore, minScore, directionalBias, bullishVotes, bearishVotes, ruleContext, raw_text: text, tradingLotSize, effectiveLotSize, tradingQuantity, effectiveTradingQuantity, riskSizeDown: ruleContext.rules.vixSizeCut, userTargetPoints, userSlPoints } });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
   }
