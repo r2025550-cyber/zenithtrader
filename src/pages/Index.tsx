@@ -214,6 +214,16 @@ const Index = () => {
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(" ");
+  // Visual SL/Target overlay on index chart (mapped from previous candle distance used by auto-fill)
+  const signalRules = latestSignal?.ruleContext?.rules as any;
+  const signalAction = parseSuggestedAction(latestSignal);
+  const visualEntryIndex = hasLivePrice ? latestLtp : null;
+  const visualSlIndex = signalAction === "BUY" && Number.isFinite(signalRules?.previousLow) ? Number(signalRules.previousLow) : signalAction === "SELL" && Number.isFinite(signalRules?.previousHigh) ? Number(signalRules.previousHigh) : null;
+  const visualTargetIndex = visualEntryIndex !== null && visualSlIndex !== null && signalAction ? (signalAction === "BUY" ? visualEntryIndex + 2 * (visualEntryIndex - visualSlIndex) : visualEntryIndex - 2 * (visualSlIndex - visualEntryIndex)) : null;
+  const indexToY = (value: number) => 96 - ((value - chartMin) / chartRange) * 88;
+  const slY = visualSlIndex !== null && chartValues.length ? indexToY(visualSlIndex) : null;
+  const targetY = visualTargetIndex !== null && chartValues.length ? indexToY(visualTargetIndex) : null;
+  const entryY = visualEntryIndex !== null && chartValues.length ? indexToY(visualEntryIndex) : null;
   const marketIsOpen = isWithinMarketHours(marketClock);
   const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
   const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
