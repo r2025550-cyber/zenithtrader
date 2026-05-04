@@ -282,6 +282,84 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   // ===== v4: CHOPPY market (very tight range = downsize) =====
   const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
 
+  // ===== v5: LIQUIDITY TRAP DETECTION =====
+  // Bull trap: a recent candle closed above resistance, but a SUBSEQUENT candle closed back below it.
+  // Bear trap: a recent candle closed below support, but a SUBSEQUENT candle closed back above it.
+  let bullTrap = false;
+  let bearTrap = false;
+  if (resistance !== null) {
+    for (let i = 1; i <= Math.min(TRAP_LOOKBACK_CANDLES, history.length - 2); i++) {
+      const breakoutBar = history[i + 1];
+      const followBar = history[i];
+      const bc = num(breakoutBar?.close_price);
+      const fc = num(followBar?.close_price);
+      if (bc !== null && fc !== null && bc > resistance && fc < resistance) { bullTrap = true; break; }
+    }
+  }
+  if (support !== null) {
+    for (let i = 1; i <= Math.min(TRAP_LOOKBACK_CANDLES, history.length - 2); i++) {
+      const breakoutBar = history[i + 1];
+      const followBar = history[i];
+      const bc = num(breakoutBar?.close_price);
+      const fc = num(followBar?.close_price);
+      if (bc !== null && fc !== null && bc < support && fc > support) { bearTrap = true; break; }
+    }
+  }
+  // Live trap (current candle reverses immediately)
+  const liveBullTrap = resistance !== null && close !== null && open !== null &&
+    high !== null && high > resistance && close < resistance;
+  const liveBearTrap = support !== null && close !== null && open !== null &&
+    low !== null && low < support && close > support;
+  bullTrap = bullTrap || liveBullTrap;
+  bearTrap = bearTrap || liveBearTrap;
+
+  // ===== v5: NEWS / SPIKE FILTER =====
+  // Find largest candle range in last 5 candles; if >= SPIKE_RANGE_PTS within cooldown, block.
+  let spikeDetected = false;
+  let spikeAgeMin = Infinity;
+  for (let i = 0; i < Math.min(5, history.length); i++) {
+    const r = history[i];
+    const h = num(r?.high_price), l = num(r?.low_price);
+    if (h === null || l === null) continue;
+    const rng = h - l;
+    if (rng >= SPIKE_RANGE_PTS) {
+      const t = new Date((r?.source_timestamp ?? r?.created_at) as string).getTime();
+      const ageMin = (Date.now() - t) / 60000;
+      if (ageMin <= SPIKE_COOLDOWN_MIN) { spikeDetected = true; spikeAgeMin = Math.min(spikeAgeMin, ageMin); }
+    }
+  }
+
+  // ===== v5: COMPRESSION DETECTION =====
+  // Last N candle ranges shrinking on average; recent breakout from compression = high-prob.
+  let compression = false;
+  let compressionBreakout: "BULL" | "BEAR" | null = null;
+  if (history.length >= COMPRESSION_LOOKBACK + 1) {
+    const ranges: number[] = [];
+    for (let i = 1; i <= COMPRESSION_LOOKBACK; i++) {
+      const r = history[i];
+      const h = num(r?.high_price), l = num(r?.low_price);
+      if (h !== null && l !== null) ranges.push(h - l);
+    }
+    if (ranges.length === COMPRESSION_LOOKBACK) {
+      // ranges[0] = most recent prior candle ... ranges[N-1] = oldest
+      // Compression: oldest avg > newest avg by shrink ratio
+      const oldHalf = ranges.slice(Math.floor(ranges.length / 2));
+      const newHalf = ranges.slice(0, Math.floor(ranges.length / 2));
+      const oldAvg = oldHalf.reduce((a, b) => a + b, 0) / oldHalf.length;
+      const newAvg = newHalf.reduce((a, b) => a + b, 0) / newHalf.length;
+      compression = oldAvg > 0 && newAvg / oldAvg <= COMPRESSION_SHRINK_RATIO;
+      // Live candle breaking out of the compression range = high-prob trigger
+      const compHigh = Math.max(...history.slice(1, COMPRESSION_LOOKBACK + 1)
+        .map(r => num(r?.high_price)).filter((v): v is number => v !== null));
+      const compLow = Math.min(...history.slice(1, COMPRESSION_LOOKBACK + 1)
+        .map(r => num(r?.low_price)).filter((v): v is number => v !== null));
+      if (compression && close !== null) {
+        if (close > compHigh && strongGreen) compressionBreakout = "BULL";
+        else if (close < compLow && strongRed) compressionBreakout = "BEAR";
+      }
+    }
+  }
+
   return {
     ltp, open, high, low, close,
     prevHigh: pHigh, prevLow: pLow, prevClose: pClose,
@@ -298,6 +376,10 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     momentumBull, momentumBear, bullStreak, bearStreak,
     trendUp, trendDown, pullbackBuy, pullbackSell,
     earlyBuy, earlySell,
+    // v5 additions
+    bullTrap, bearTrap, liveBullTrap, liveBearTrap,
+    spikeDetected, spikeAgeMin,
+    compression, compressionBreakout,
   };
 }
 
