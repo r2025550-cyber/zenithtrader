@@ -33,6 +33,14 @@ const PARTIAL_BOOK_PTS = 15;             // book 50% at +15
 const PARTIAL_BOOK_FRACTION = 0.5;
 const MOMENTUM_STREAK = 3;               // N consecutive strong candles
 const CHOPPY_RANGE_PTS = 20;             // very tight = choppy
+// v5 constants
+const TRAP_LOOKBACK_CANDLES = 3;         // confirm trap within last N candles
+const LOSS_PAUSE_MIN = 60;               // pause minutes after 2 losses
+const LOSS_STREAK_THRESHOLD = 2;         // consecutive losses
+const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
+const SPIKE_COOLDOWN_MIN = 5;            // cooldown minutes after spike
+const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
+const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
