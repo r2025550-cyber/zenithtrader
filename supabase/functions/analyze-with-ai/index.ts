@@ -192,34 +192,25 @@ serve(async (req) => {
     const srBoost = (r.srBreakout || r.quickScalpBuy || r.quickScalpSell) ? 30 : 0;
     const sniperConfirmationScore = Math.min(100, Math.max(baseGateScore, instantEmaBoost + srBoost + Math.round(baseGateScore * 0.6)));
 
-    const prompt = `You are the institutional-risk trading mind for a Nifty Options Scalper. Apply these hard rules before any signal:
-- SNIPER MODE: High conviction only. Ignore minor zig-zags. Generate BUY/SELL only when the trend is sustained for at least 3 consecutive completed 1-minute candles.
-- WAIT BUFFER: If status is WAIT, do not switch to BUY/SELL unless conviction score is at least 60% and every Sniper Mode gate is confirmed.
-- TREND ALIGNMENT: Use 1m execution plus 5m trend confirmation only. BUY requires Price > 21 EMA, VIX Stable, Volume > 10% average, sustained bullish 1m candles, and bullish 5m trend. SELL requires Price < 21 EMA, VIX Stable, Volume > 10% average, sustained bearish 1m candles, and bearish 5m trend. If any condition is missing, return ACTION: WAIT and STRIKE: WAIT with reason "WAITING FOR CONFIRMATION".
-- Fake breakout/breakdown with low volume = POTENTIAL TRAP and usually WAIT.
-- Valid signal requires current volume at least 10% above the 5-period average when Upstox provides volume; if volume/PCR is temporarily unavailable, treat it as neutral instead of an automatic failure.
-- Analyze PCR and India VIX together: PCR extremes plus rising VIX lower conviction; if India VIX rises more than 5%, automatically reduce position size by 50% in the reason.
-- 12:30 PM to 1:30 PM IST is a cautious European Market Open block.
-- If Nifty has moved more than 1.5% without pullback, mark Overextended Zone and stop new entries.
-- PCR > 1.3 is Overbought; PCR < 0.7 is Oversold. If PCR is unavailable, state unavailable.
-- No-Trade Zone if the last 60 minutes remain inside a 40-point range.
-- Multi-timeframe rule: 5-minute trend must confirm the 1-minute entry direction before BUY/SELL; do not use 15-minute trend as a blocker.
-- Smart indicator rule: 9 EMA / 21 EMA crossover must align with price action for HIGH Conviction; if not aligned, cap conviction below HIGH.
-- Entry must wait for minor retracement: dip for CALL, bounce for PUT.
-- Risk reward must be strict 1:2.
-- Manual override: if User Target Points or User SL Points are provided, use those exact point values instead of AI-generated target/SL.
-- Trailing Stop Loss: at 1:1 RR lock profits by moving SL to entry, then every 10 points additional gain trails SL by 5 points.
-- Divergence Guard (relaxed): if Nifty 1m price is above BOTH 9 EMA and 21 EMA (or below both for bearish), Nifty momentum drives the signal — DO NOT downgrade for Bank Nifty / heavyweight divergence. Only flag divergence when Nifty itself is not in clear EMA-aligned momentum.
-- Sensitivity: trigger threshold lowered to 60% sniper score (was 80%). Volume filter relaxed to +10% above 5-period average (was +20%).
-- Strike freshness: always recompute the ATM strike from the latest spot every cycle so the option leg moves with the index instantly.
+    const prompt = `You are the trading mind for a Nifty Options SCALPER (4–5 quality trades/day target). Apply these rules:
+- SCALPER MODE: Generate BUY/SELL on either (a) sustained 1m trend, (b) 15m S/R breakout with high volume (overrides 21 EMA), or (c) Bullish Engulfing/Hammer at 15m support (Quick Scalp Buy) / Bearish Engulfing/Shooting-Star at 15m resistance (Quick Scalp Sell).
+- TREND ALIGNMENT (relaxed): If 5m is Neutral/Flat and 1m shows a strong EMA-aligned breakout, that counts as aligned. Do not require both 1m and 5m same color.
+- 15m S/R OVERRIDE: If price breaks the 15m high/low with high volume, IGNORE the 21 EMA rule and trigger the trade.
+- QUICK SCALP: If a Bullish Engulfing or Hammer forms at 15m support on the 1m chart, trigger Quick Scalp Buy. Mirror for Bearish Engulfing/Shooting Star at 15m resistance for Quick Scalp Sell.
+- VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
+- Trigger threshold: 60% sniper score.
+- 1:2 Risk-Reward: SL = previous 1m candle low (BUY) / high (SELL). Target = entry + 2 * (entry - SL).
+- Strike freshness: always recompute ATM from latest spot.
+- Manual override: if User Target/SL Points provided, use those exact point values.
+- Hard guards still apply: Hard Kill-Switch, Overextended (>1.5%), No-Trade Range (<40 pts in 60m), European Open caution (12:30–13:30 IST size-down).
 
-Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, explicitly write the tradable ATM option phrase: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
+Current Nifty spot is ${latest.ltp}; ATM strike is ${ruleContext.atmStrike ?? "unavailable"}. In STRIKE, write: "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} CE" for BUY, "Buy Nifty ${ruleContext.atmStrike ?? "ATM"} PE" for SELL, or WAIT.
 
 Respond exactly with:
 ACTION: BUY/SELL/WAIT
 STRIKE: Buy Nifty <ATM strike> CE/PE or WAIT
 CONVICTION: HIGH/MEDIUM/LOW
-REASON: concise rule-trigger explanation including entry, RR, and TSL logic.
+REASON: concise rule trigger including entry, SL (prev candle low/high), 1:2 target, and which mode fired (Trend / S/R Breakout / Quick Scalp).
 
 Computed Sniper Mode gates:\n${JSON.stringify({ buySniperReady, sellSniperReady, sniperConfirmationScore, minimumScoreToSwitchFromWait: 60 })}
 
