@@ -765,7 +765,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       reason: signal.reason,
       raw_response: JSON.stringify({
         text: aiText,
-        engine: "price-action-scalper-v4",
+        engine: "price-action-scalper-v5",
         tradingMode,
         signal,
         ruleContext,
@@ -774,6 +774,19 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveLotSize, effectiveTradingQuantity,
         userTargetPoints, userSlPoints,
         riskSizeDown,
+        // v5
+        protection: {
+          consecutiveLosses,
+          lossPauseActive,
+          lossPauseRemainingMin,
+          positionSizeMultiplier,
+          spikeBlock,
+          spikeAgeMin: pa.spikeAgeMin === Infinity ? null : pa.spikeAgeMin,
+          bullTrap: pa.bullTrap,
+          bearTrap: pa.bearTrap,
+          compression: pa.compression,
+          compressionBreakout: pa.compressionBreakout,
+        },
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
