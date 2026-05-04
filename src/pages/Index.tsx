@@ -908,7 +908,7 @@ const Index = () => {
       if (aiEnabled) {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
-          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
             .then((ai) => applySniperSignal(ai.signal))
             .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
         }, AI_REASONING_INTERVAL_MS);
