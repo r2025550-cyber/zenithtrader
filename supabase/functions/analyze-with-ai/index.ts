@@ -251,7 +251,7 @@ serve(async (req) => {
 - 9:20 ORB CAP (Nifty 50): The 9:20 candle is capped at 30 points. If 9:20 range > 30 pts (oversized opening), DO NOT take fresh entries unless price clears the 9:20 high (BUY) / low (SELL) with high volume.
 - ROUND-NUMBER PRIORITY: Prioritise setups within 10 pts of a 50-point psychological level (24100, 24150, 24200…). Mention the round number in REASON when relevant.
 - VIX must be Stable. Volume should be +10% above 5-period avg OR clearly high during S/R breakout.
-- Trigger threshold: 60% score.`;
+- Trigger threshold: 70% score. If score >=75, override overextended/noTradeRange/fakeBreakout filters. If score >80, divergence does not block.`;
     const sniperPrompt = `MODE: SNIPER (active). You are the trading mind for a Nifty Options SNIPER (1–2 high-conviction trades/day). Apply STRICT Sniper constraints:
 - Require 1m AND 5m EMA alignment in the same direction (no relaxation).
 - Require Volume +20% above 5-period avg (no volume → WAIT).
