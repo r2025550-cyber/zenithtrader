@@ -781,7 +781,7 @@ const Index = () => {
       if (!status.upstox.ok) return;
     }
     await fetchLiveNifty(false, true);
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
     applySniperSignal(ai.signal);
   };
 
