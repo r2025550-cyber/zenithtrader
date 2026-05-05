@@ -319,11 +319,25 @@ serve(async (req) => {
       is_amo: false,
     };
     const sl = await placeOrderWithRetry(headers, slPayload, "SL-LMT").catch((e) => {
-      // SL placement failure is reported but does not invalidate the entry
       return { result: { error: e instanceof Error ? e.message : String(e) }, attempts: [], failed: true } as any;
     });
     const slOrderId = readOrderId(sl.result);
     const slActive = !!slOrderId && !(sl as any).failed;
+
+    // ===== v7 FAIL-SAFE: if SL didn't activate after fill, immediately exit position =====
+    if (fill.filled && !slActive) {
+      const exitPayload = { ...entryPayload, transaction_type: "SELL", tag: "zenith-sl-failsafe-exit" };
+      const exit = await placeOrderWithRetry(headers, exitPayload, "SL-failsafe exit").catch((e) => ({ result: { error: e instanceof Error ? e.message : String(e) }, attempts: [] }));
+      return json({
+        success: false,
+        error: "SL Activation Failed",
+        details: `Stop-loss order could not be registered after fill. Position auto-exited as fail-safe.`,
+        execution: { orderPlaced: true, orderFilled: true, slActive: false, trailingActive: false, slFailsafeExit: true },
+        slippage: { quotedLtp: optionLtp, fillPrice, slippagePct: Number(slippagePct.toFixed(3)), tolerancePct: slippageTolerancePct },
+        entry: entry.result, slOrder: sl.result, exit: (exit as any)?.result,
+        instrument: option, quantity,
+      });
+    }
 
     return json({
       success: true,
