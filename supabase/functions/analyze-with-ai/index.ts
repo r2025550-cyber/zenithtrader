@@ -529,7 +529,10 @@ serve(async (req) => {
       trendPullbackBuy || trendPullbackSell || momentumStreakBuy || momentumStreakSell ||
       boostBuy || boostSell ||
       // v5
-      trapBuy || trapSell || compressionBreakoutBuy || compressionBreakoutSell;
+      trapBuy || trapSell || compressionBreakoutBuy || compressionBreakoutSell ||
+      // v7-aggressive
+      confluenceBuy || confluenceSell ||
+      spikeContinuationBuy || spikeContinuationSell || spikeReversalBuy || spikeReversalSell;
 
     // v4: re-entry bypasses trade-gap (still respects daily cap)
     const gapBypassedByReEntry = (reEntryBuy || reEntrySell) && !tradeGapOk;
@@ -540,16 +543,20 @@ serve(async (req) => {
       reasonParts.push("Max daily loss reached — kill-switch active.");
     } else if (lossPauseActive) {
       reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
-    } else if (spikeBlock) {
-      reasonParts.push(`Spike/news filter: candle range ≥ ${SPIKE_RANGE_PTS}pts within last ${SPIKE_COOLDOWN_MIN}m — cooldown active.`);
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
     } else if (!tradeGapOk && !gapBypassedByReEntry) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
     } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
       reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
-    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell && !trapBuy && !trapSell && !compressionBreakoutBuy && !compressionBreakoutSell) {
-      reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (spikeReversalSell) {
+      action = "SELL"; reasonParts.push(`SPIKE REVERSAL SELL: bull-trap after spike — fade the move.`);
+    } else if (spikeReversalBuy) {
+      action = "BUY"; reasonParts.push(`SPIKE REVERSAL BUY: bear-trap after spike — fade the move.`);
+    } else if (spikeContinuationBuy) {
+      action = "BUY"; reasonParts.push(`SPIKE CONTINUATION BUY: ride the strong upward spike with EMA aligned.`);
+    } else if (spikeContinuationSell) {
+      action = "SELL"; reasonParts.push(`SPIKE CONTINUATION SELL: ride the strong downward spike with EMA aligned.`);
     } else if (trapSell) {
       action = "SELL"; reasonParts.push(`LIQUIDITY TRAP SELL: failed breakout above R=${pa.resistance?.toFixed(2)} reversed back below — bull trap.`);
     } else if (trapBuy) {
