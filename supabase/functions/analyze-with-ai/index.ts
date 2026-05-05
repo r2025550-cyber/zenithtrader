@@ -39,7 +39,7 @@ const TRAP_LOOKBACK_CANDLES = 3;         // confirm trap within last N candles
 const LOSS_PAUSE_MIN = 60;               // pause minutes after 2 losses
 const LOSS_STREAK_THRESHOLD = 2;         // consecutive losses
 const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
-const SPIKE_COOLDOWN_MIN = 5;            // cooldown minutes after spike
+const SPIKE_COOLDOWN_MIN = 1.5;          // v7: was 5 — short cooldown, then trade spike
 const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
 const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
 
