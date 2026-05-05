@@ -60,7 +60,7 @@ const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
 const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
-const PREMIUM_TSL_STEP = 5;
+const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 15 * 60 * 1000;
 const SIGNAL_LOCK_MS = 10_000;
 
