@@ -330,7 +330,7 @@ const Index = () => {
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
   // TSL status: Armed (<+10pts) → Break-Even (>=+10pts) → Trailing +Npts (every additional 5pts)
-  const TSL_ACTIVATION_POINTS = 10;
+  const TSL_ACTIVATION_POINTS = 6; // v7-aggressive: BE at +6pts (was 10)
   const tslActivated = currentTradePnlPoints >= TSL_ACTIVATION_POINTS;
   const tslLockedSteps = tslActivated ? Math.floor((currentTradePnlPoints - TSL_ACTIVATION_POINTS) / PREMIUM_TSL_STEP) : 0;
   const tslLockedPoints = tslActivated ? tslLockedSteps * PREMIUM_TSL_STEP : 0;
