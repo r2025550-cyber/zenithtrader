@@ -15,12 +15,13 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } 
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-const MIN_TRADE_GAP_MIN = 12;
-const MAX_TRADES_PER_DAY = 5;
-const SIDEWAYS_RANGE_PTS = 30;
-const TRAIL_TRIGGER_PTS = 10;     // move SL to break-even
-const TRAIL_LOCK_PTS = 10;        // lock min +10 after +20
-const TRAIL_LOCK_AT_PROFIT = 20;
+// v7-aggressive: faster scalping cadence
+const MIN_TRADE_GAP_MIN = 4;      // was 12 — allow more trades
+const MAX_TRADES_PER_DAY = 12;    // was 5 — capture more intraday moves
+const SIDEWAYS_RANGE_PTS = 20;    // was 30 — fewer sideways blocks
+const TRAIL_TRIGGER_PTS = 6;      // was 10 — break-even sooner
+const TRAIL_LOCK_PTS = 6;         // was 10 — lock smaller profit
+const TRAIL_LOCK_AT_PROFIT = 12;  // was 20 — lock earlier
 const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
 const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
 const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
