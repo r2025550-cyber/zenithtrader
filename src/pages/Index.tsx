@@ -62,7 +62,8 @@ const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
-const SIGNAL_LOCK_MS = 10_000;
+const SIGNAL_LOCK_MS = 20_000;
+const SIGNAL_STALE_MS = 30_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
@@ -933,63 +934,82 @@ const Index = () => {
         toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
         return;
       }
-      const liveMarket = await fetchLiveNifty(true, true);
-      const liveSpot = Number(liveMarket?.ltp);
-      const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, executionIntent: true, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; execution cycle will retry.");
-      applySniperSignal(ai.signal);
-      if (ai.signal.action !== "WAIT") {
-        if (!Number.isFinite(liveSpot)) {
-          toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
-          return;
-        }
-        const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
-        if (liveAvailableCash <= 0) {
-          toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
-          return;
-        }
-        const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-        const orderPayload = { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined };
-        pushDebug({ stage: "ORDER", level: "info", title: "ORDER PLACING", detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`, data: orderPayload });
-        const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
-        setLastExecution(liveOrder);
-        if (!liveOrder.success) {
-          pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`, data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity } });
-          toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
-          return;
-        }
-        pushDebug({ stage: "ORDER", level: "success", title: "ORDER PLACED", detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`, data: { orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id, instrument: liveOrder.instrument } });
-        if (liveOrder.execution?.orderFilled) {
-          pushDebug({ stage: "FILL", level: "success", title: "ORDER FILLED", detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`, data: { fillPrice: liveOrder.entryPremium, quotedLtp: liveOrder.slippage?.quotedLtp, quantity: liveOrder.quantity, status: liveOrder.execution?.orderStatus } });
-        } else {
-          pushDebug({ stage: "FILL", level: "warn", title: "ORDER PENDING", detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}` });
-        }
-        if (liveOrder.execution?.slActive) {
-          pushDebug({ stage: "SL", level: "success", title: "SL ACTIVE", detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`, data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId } });
-        } else {
-          pushDebug({ stage: "ERROR", level: "warn", title: "SL FAILED", detail: "Server SL was not registered. Manual exit required if filled." });
-        }
-        const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
-        const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
-        const stopLossPremium = shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
-        const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
-        const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
-        const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
-        // Sync inputs to ACTUAL fill-based SL/Target from backend (v6-safe), unless user manually edited.
-        if (!userEditedExitsRef.current) {
-          setUserTargetPoints(formatPremiumInput(targetPremium));
-          setUserSlPoints(formatPremiumInput(stopLossPremium));
-        }
-        const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
-        setExecutedTrades(nextCount);
-        setActiveTrade(true);
-        setActiveTradePlan(plan);
-        localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
-        localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
-        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
-        toast({ title: "LIVE ORDER + SERVER SL PLACED", description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.` });
+
+      // ===== SIGNAL LOCK: use locked signal, do NOT re-call AI =====
+      const locked = signalLockRef.current;
+      const lockedSignal: Signal | null = (locked?.signal && isTradeSignal(locked.signal.action))
+        ? locked.signal
+        : (latestSignal && isTradeSignal(latestSignal.action) ? latestSignal : null);
+
+      if (!lockedSignal) {
+        toast({ title: "No active signal", description: "Wait for a BUY/SELL signal before executing.", variant: "destructive" });
         return;
       }
-      toast({ title: "No live order", description: "AI returned WAIT, so no Upstox order was placed." });
+
+      // Optional staleness check (do NOT auto-cancel; warn user)
+      const sigTs = locked?.lockedUntil ? locked.lockedUntil - SIGNAL_LOCK_MS : Date.parse(lockedSignal.created_at ?? "") || Date.now();
+      const sigAgeMs = Date.now() - sigTs;
+      if (sigAgeMs > SIGNAL_STALE_MS) {
+        const ok = typeof window !== "undefined" ? window.confirm(`Signal is ${Math.round(sigAgeMs / 1000)}s old. Execute anyway?`) : true;
+        if (!ok) return;
+      }
+
+      pushDebug({ stage: "SIGNAL", level: "info", title: "Executing locked signal...", detail: `${lockedSignal.action} ${lockedSignal.strike}`, data: { ageMs: sigAgeMs } });
+      toast({ title: "Executing locked signal...", description: `${lockedSignal.action} ${lockedSignal.strike}` });
+
+      const liveMarket = await fetchLiveNifty(true, true);
+      const liveSpot = Number(liveMarket?.ltp);
+      const ai = { signal: lockedSignal };
+
+      if (!Number.isFinite(liveSpot)) {
+        toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
+        return;
+      }
+      const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
+      if (liveAvailableCash <= 0) {
+        toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
+        return;
+      }
+      const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
+      const orderPayload = { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined };
+      pushDebug({ stage: "ORDER", level: "info", title: "ORDER PLACING", detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`, data: orderPayload });
+      const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+      setLastExecution(liveOrder);
+      if (!liveOrder.success) {
+        pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`, data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity } });
+        toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
+        return;
+      }
+      pushDebug({ stage: "ORDER", level: "success", title: "ORDER PLACED", detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`, data: { orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id, instrument: liveOrder.instrument } });
+      if (liveOrder.execution?.orderFilled) {
+        pushDebug({ stage: "FILL", level: "success", title: "ORDER FILLED", detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`, data: { fillPrice: liveOrder.entryPremium, quotedLtp: liveOrder.slippage?.quotedLtp, quantity: liveOrder.quantity, status: liveOrder.execution?.orderStatus } });
+      } else {
+        pushDebug({ stage: "FILL", level: "warn", title: "ORDER PENDING", detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}` });
+      }
+      if (liveOrder.execution?.slActive) {
+        pushDebug({ stage: "SL", level: "success", title: "SL ACTIVE", detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`, data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId } });
+      } else {
+        pushDebug({ stage: "ERROR", level: "warn", title: "SL FAILED", detail: "Server SL was not registered. Manual exit required if filled." });
+      }
+      const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
+      const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
+      const stopLossPremium = shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
+      const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
+      const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
+      const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
+      if (!userEditedExitsRef.current) {
+        setUserTargetPoints(formatPremiumInput(targetPremium));
+        setUserSlPoints(formatPremiumInput(stopLossPremium));
+      }
+      const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
+      setExecutedTrades(nextCount);
+      setActiveTrade(true);
+      setActiveTradePlan(plan);
+      localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
+      localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
+      toast({ title: "LIVE ORDER + SERVER SL PLACED", description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.` });
+      return;
     } catch (error) {
       pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: error instanceof Error ? error.message : String(error) });
       toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
