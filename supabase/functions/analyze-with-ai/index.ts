@@ -593,6 +593,10 @@ serve(async (req) => {
       action = "BUY"; reasonParts.push(`Frequency boost BUY: 30m+ idle, medium setup near support with strong green candle.`);
     } else if (boostSell) {
       action = "SELL"; reasonParts.push(`Frequency boost SELL: 30m+ idle, medium setup near resistance with strong red candle.`);
+    } else if (confluenceBuy) {
+      action = "BUY"; reasonParts.push(`CONFLUENCE BUY (${buyFactors}/4): nearS=${pa.nearSupport} strong=${pa.strongGreen||pa.bullishEngulfing} mom=${pa.momentumBull||pa.bullStreak>=2} ema=${pa.emaBullish||pa.ema21Slope>0}.`);
+    } else if (confluenceSell) {
+      action = "SELL"; reasonParts.push(`CONFLUENCE SELL (${sellFactors}/4): nearR=${pa.nearResistance} strong=${pa.strongRed||pa.bearishEngulfing} mom=${pa.momentumBear||pa.bearStreak>=2} ema=${pa.emaBearish||pa.ema21Slope<0}.`);
     } else {
       const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
