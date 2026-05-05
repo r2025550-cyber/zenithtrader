@@ -499,6 +499,30 @@ serve(async (req) => {
     const boostBuy = frequencyBoostActive && mediumBuySetup;
     const boostSell = frequencyBoostActive && mediumSellSetup;
 
+    // ===== v7-aggressive: ANY-2-of-4 confluence setup =====
+    // Confluence factors: near S/R, strong candle body, momentum streak, EMA alignment.
+    const buyFactors = [
+      pa.nearSupport,
+      pa.strongGreen || pa.bullishEngulfing,
+      pa.momentumBull || pa.bullStreak >= 2,
+      pa.emaBullish || pa.ema21Slope > 0,
+    ].filter(Boolean).length;
+    const sellFactors = [
+      pa.nearResistance,
+      pa.strongRed || pa.bearishEngulfing,
+      pa.momentumBear || pa.bearStreak >= 2,
+      pa.emaBearish || pa.ema21Slope < 0,
+    ].filter(Boolean).length;
+    const confluenceBuy = buyFactors >= 2 && !pa.longUpperWick;
+    const confluenceSell = sellFactors >= 2 && !pa.longLowerWick;
+
+    // ===== v7-aggressive: SPIKE = OPPORTUNITY (not block) =====
+    // If a spike fires, allow continuation or pullback-reversal entries.
+    const spikeContinuationBuy = pa.spikeDetected && (pa.strongGreen || pa.momentumBull) && (pa.emaBullish || pa.ema21Slope > 0);
+    const spikeContinuationSell = pa.spikeDetected && (pa.strongRed || pa.momentumBear) && (pa.emaBearish || pa.ema21Slope < 0);
+    const spikeReversalBuy = pa.spikeDetected && pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing);
+    const spikeReversalSell = pa.spikeDetected && pa.bullTrap && (pa.strongRed || pa.bearishEngulfing);
+
     const anySetup =
       buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest ||
       buyLiveMomentum || sellLiveMomentum || earlyBuy || earlySell ||
