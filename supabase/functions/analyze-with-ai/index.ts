@@ -15,12 +15,13 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } 
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-const MIN_TRADE_GAP_MIN = 12;
-const MAX_TRADES_PER_DAY = 5;
-const SIDEWAYS_RANGE_PTS = 30;
-const TRAIL_TRIGGER_PTS = 10;     // move SL to break-even
-const TRAIL_LOCK_PTS = 10;        // lock min +10 after +20
-const TRAIL_LOCK_AT_PROFIT = 20;
+// v7-aggressive: faster scalping cadence
+const MIN_TRADE_GAP_MIN = 4;      // was 12 — allow more trades
+const MAX_TRADES_PER_DAY = 12;    // was 5 — capture more intraday moves
+const SIDEWAYS_RANGE_PTS = 20;    // was 30 — fewer sideways blocks
+const TRAIL_TRIGGER_PTS = 6;      // was 10 — break-even sooner
+const TRAIL_LOCK_PTS = 6;         // was 10 — lock smaller profit
+const TRAIL_LOCK_AT_PROFIT = 12;  // was 20 — lock earlier
 const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
 const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
 const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
@@ -38,7 +39,7 @@ const TRAP_LOOKBACK_CANDLES = 3;         // confirm trap within last N candles
 const LOSS_PAUSE_MIN = 60;               // pause minutes after 2 losses
 const LOSS_STREAK_THRESHOLD = 2;         // consecutive losses
 const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
-const SPIKE_COOLDOWN_MIN = 5;            // cooldown minutes after spike
+const SPIKE_COOLDOWN_MIN = 1.5;          // v7: was 5 — short cooldown, then trade spike
 const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
 const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
 
@@ -498,13 +499,40 @@ serve(async (req) => {
     const boostBuy = frequencyBoostActive && mediumBuySetup;
     const boostSell = frequencyBoostActive && mediumSellSetup;
 
+    // ===== v7-aggressive: ANY-2-of-4 confluence setup =====
+    // Confluence factors: near S/R, strong candle body, momentum streak, EMA alignment.
+    const buyFactors = [
+      pa.nearSupport,
+      pa.strongGreen || pa.bullishEngulfing,
+      pa.momentumBull || pa.bullStreak >= 2,
+      pa.emaBullish || pa.ema21Slope > 0,
+    ].filter(Boolean).length;
+    const sellFactors = [
+      pa.nearResistance,
+      pa.strongRed || pa.bearishEngulfing,
+      pa.momentumBear || pa.bearStreak >= 2,
+      pa.emaBearish || pa.ema21Slope < 0,
+    ].filter(Boolean).length;
+    const confluenceBuy = buyFactors >= 2 && !pa.longUpperWick;
+    const confluenceSell = sellFactors >= 2 && !pa.longLowerWick;
+
+    // ===== v7-aggressive: SPIKE = OPPORTUNITY (not block) =====
+    // If a spike fires, allow continuation or pullback-reversal entries.
+    const spikeContinuationBuy = pa.spikeDetected && (pa.strongGreen || pa.momentumBull) && (pa.emaBullish || pa.ema21Slope > 0);
+    const spikeContinuationSell = pa.spikeDetected && (pa.strongRed || pa.momentumBear) && (pa.emaBearish || pa.ema21Slope < 0);
+    const spikeReversalBuy = pa.spikeDetected && pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing);
+    const spikeReversalSell = pa.spikeDetected && pa.bullTrap && (pa.strongRed || pa.bearishEngulfing);
+
     const anySetup =
       buyBounce || sellRejection || buyBreakoutRetest || sellBreakdownRetest ||
       buyLiveMomentum || sellLiveMomentum || earlyBuy || earlySell ||
       trendPullbackBuy || trendPullbackSell || momentumStreakBuy || momentumStreakSell ||
       boostBuy || boostSell ||
       // v5
-      trapBuy || trapSell || compressionBreakoutBuy || compressionBreakoutSell;
+      trapBuy || trapSell || compressionBreakoutBuy || compressionBreakoutSell ||
+      // v7-aggressive
+      confluenceBuy || confluenceSell ||
+      spikeContinuationBuy || spikeContinuationSell || spikeReversalBuy || spikeReversalSell;
 
     // v4: re-entry bypasses trade-gap (still respects daily cap)
     const gapBypassedByReEntry = (reEntryBuy || reEntrySell) && !tradeGapOk;
@@ -515,16 +543,20 @@ serve(async (req) => {
       reasonParts.push("Max daily loss reached — kill-switch active.");
     } else if (lossPauseActive) {
       reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
-    } else if (spikeBlock) {
-      reasonParts.push(`Spike/news filter: candle range ≥ ${SPIKE_RANGE_PTS}pts within last ${SPIKE_COOLDOWN_MIN}m — cooldown active.`);
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
     } else if (!tradeGapOk && !gapBypassedByReEntry) {
       reasonParts.push(`Trade-gap guard: ${Math.round(minutesSinceLastTrade)}m since last trade (need ${MIN_TRADE_GAP_MIN}m).`);
     } else if (pa.sidewaysMarket && !anySetup && !pa.strongMomentum) {
       reasonParts.push(`Sideways market: 30m range ${pa.last30Range?.toFixed(1) ?? "?"} pts < ${SIDEWAYS_RANGE_PTS} (no breakout/momentum).`);
-    } else if (pa.midZone && !pa.strongMomentum && !buyBreakoutRetest && !sellBreakdownRetest && !buyLiveMomentum && !sellLiveMomentum && !earlyBuy && !earlySell && !trendPullbackBuy && !trendPullbackSell && !momentumStreakBuy && !momentumStreakSell && !trapBuy && !trapSell && !compressionBreakoutBuy && !compressionBreakoutSell) {
-      reasonParts.push(`Mid-zone: LTP between S=${pa.support?.toFixed(2)} and R=${pa.resistance?.toFixed(2)} without momentum — skip.`);
+    } else if (spikeReversalSell) {
+      action = "SELL"; reasonParts.push(`SPIKE REVERSAL SELL: bull-trap after spike — fade the move.`);
+    } else if (spikeReversalBuy) {
+      action = "BUY"; reasonParts.push(`SPIKE REVERSAL BUY: bear-trap after spike — fade the move.`);
+    } else if (spikeContinuationBuy) {
+      action = "BUY"; reasonParts.push(`SPIKE CONTINUATION BUY: ride the strong upward spike with EMA aligned.`);
+    } else if (spikeContinuationSell) {
+      action = "SELL"; reasonParts.push(`SPIKE CONTINUATION SELL: ride the strong downward spike with EMA aligned.`);
     } else if (trapSell) {
       action = "SELL"; reasonParts.push(`LIQUIDITY TRAP SELL: failed breakout above R=${pa.resistance?.toFixed(2)} reversed back below — bull trap.`);
     } else if (trapBuy) {
@@ -561,6 +593,10 @@ serve(async (req) => {
       action = "BUY"; reasonParts.push(`Frequency boost BUY: 30m+ idle, medium setup near support with strong green candle.`);
     } else if (boostSell) {
       action = "SELL"; reasonParts.push(`Frequency boost SELL: 30m+ idle, medium setup near resistance with strong red candle.`);
+    } else if (confluenceBuy) {
+      action = "BUY"; reasonParts.push(`CONFLUENCE BUY (${buyFactors}/4): nearS=${pa.nearSupport} strong=${pa.strongGreen||pa.bullishEngulfing} mom=${pa.momentumBull||pa.bullStreak>=2} ema=${pa.emaBullish||pa.ema21Slope>0}.`);
+    } else if (confluenceSell) {
+      action = "SELL"; reasonParts.push(`CONFLUENCE SELL (${sellFactors}/4): nearR=${pa.nearResistance} strong=${pa.strongRed||pa.bearishEngulfing} mom=${pa.momentumBear||pa.bearStreak>=2} ema=${pa.emaBearish||pa.ema21Slope<0}.`);
     } else {
       const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);

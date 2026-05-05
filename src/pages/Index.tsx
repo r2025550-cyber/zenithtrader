@@ -60,8 +60,8 @@ const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
 const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
-const PREMIUM_TSL_STEP = 5;
-const COOLDOWN_MS = 15 * 60 * 1000;
+const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
+const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
 const SIGNAL_LOCK_MS = 10_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
@@ -330,7 +330,7 @@ const Index = () => {
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
   // TSL status: Armed (<+10pts) → Break-Even (>=+10pts) → Trailing +Npts (every additional 5pts)
-  const TSL_ACTIVATION_POINTS = 10;
+  const TSL_ACTIVATION_POINTS = 6; // v7-aggressive: BE at +6pts (was 10)
   const tslActivated = currentTradePnlPoints >= TSL_ACTIVATION_POINTS;
   const tslLockedSteps = tslActivated ? Math.floor((currentTradePnlPoints - TSL_ACTIVATION_POINTS) / PREMIUM_TSL_STEP) : 0;
   const tslLockedPoints = tslActivated ? tslLockedSteps * PREMIUM_TSL_STEP : 0;
