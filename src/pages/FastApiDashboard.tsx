@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Activity, ArrowDownCircle, ArrowUpCircle, Bot, Hand, Loader2, RefreshCw, Server } from "lucide-react";
 
-const BASE_URL = "http://165.22.212.105:8000";
+const BASE_URL = "https://beautifully-timeline-freight-ads.trycloudflare.com";
 
 type Mode = "AUTO" | "MANUAL" | "UNKNOWN";
 type LogEntry = { id: string; ts: number; kind: "info" | "success" | "error"; text: string };
@@ -247,8 +247,7 @@ export default function FastApiDashboard() {
         </Card>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Note: Backend is served over HTTP. If your dashboard runs on HTTPS, your browser may block requests due to
-          mixed content. Use HTTPS on the backend or open this page over HTTP for full functionality.
+          Backend: secure HTTPS tunnel · Mixed-content safe.
         </p>
       </div>
     </div>
