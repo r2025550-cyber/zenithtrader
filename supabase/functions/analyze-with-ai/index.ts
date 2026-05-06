@@ -467,6 +467,15 @@ serve(async (req) => {
     const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing || pa.liveBearTrap);
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
+
+    // AGGRESSIVE ENTRY MODE
+    if (pa.momentumBull || pa.emaBullish || pa.trendUp) {
+      action = "BUY";
+    }
+
+    if (pa.momentumBear || pa.emaBearish || pa.trendDown) {
+      action = "SELL";
+    }
     const reasonParts: string[] = [];
 
     // Setup detection (v3 retained)
