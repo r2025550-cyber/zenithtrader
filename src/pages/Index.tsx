@@ -18,7 +18,14 @@ import {
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -30,14 +37,21 @@ import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
 
 const history = [
-  { time: "09:31:22", instrument: "Nifty 22500 CE", entry: "₹132.40", exit: "₹148.10", pnl: "+₹7,850", result: "profit" },
+  {
+    time: "09:31:22",
+    instrument: "Nifty 22500 CE",
+    entry: "₹132.40",
+    exit: "₹148.10",
+    pnl: "+₹7,850",
+    result: "profit",
+  },
   { time: "10:08:47", instrument: "Nifty 22400 PE", entry: "₹96.75", exit: "₹90.20", pnl: "-₹3,275", result: "loss" },
   { time: "11:42:03", instrument: "Nifty 22600 CE", entry: "₹78.15", exit: "₹85.65", pnl: "+₹3,750", result: "profit" },
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://expand-seen-trunk-holdings.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://inspector-uri-juvenile-emotional.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
@@ -79,7 +93,12 @@ const SIGNAL_LOCK_MS = 20_000;
 const SIGNAL_STALE_MS = 30_000;
 
 const getIndiaMarketMinute = (date = new Date()) => {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
   const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
   return hour * 60 + minute;
@@ -90,7 +109,8 @@ const isWithinMarketHours = (date = new Date()) => {
   return minute >= MARKET_OPEN_MINUTE && minute <= MARKET_CLOSE_MINUTE;
 };
 
-const storedValue = (key: string, fallback = "") => (typeof window === "undefined" ? fallback : localStorage.getItem(key) ?? fallback);
+const storedValue = (key: string, fallback = "") =>
+  typeof window === "undefined" ? fallback : (localStorage.getItem(key) ?? fallback);
 const todayKey = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const datedStorageValue = (key: string, fallback = "0") => {
   const [date, value] = storedValue(key).split(":");
@@ -116,7 +136,8 @@ const formatMoney = (value: unknown) => {
   const parsed = toNumber(value);
   return parsed === null ? "—" : `₹${parsed.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 };
-const clampMeter = (value: number | null, max: number) => value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
+const clampMeter = (value: number | null, max: number) =>
+  value === null ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
 const parseSuggestedStrike = (strike?: string) => {
   const match = strike?.match(/Nifty\s+(\d{4,6})\s+(CE|PE)/i);
   return match ? Number(match[1]) : null;
@@ -127,8 +148,14 @@ const parseSuggestedAction = (signal?: Signal | null) => {
   return optionType === "CE" ? "BUY" : optionType === "PE" ? "SELL" : null;
 };
 const calculatePremiumExitPrices = (entryPremium: number, slPointsOverride?: number, targetPointsOverride?: number) => {
-  const slPts = Number.isFinite(slPointsOverride) && (slPointsOverride as number) > 0 ? (slPointsOverride as number) : DEFAULT_PREMIUM_SL_POINTS;
-  const tgtPts = Number.isFinite(targetPointsOverride) && (targetPointsOverride as number) > 0 ? (targetPointsOverride as number) : Math.max(DEFAULT_PREMIUM_TARGET_POINTS, slPts * 2);
+  const slPts =
+    Number.isFinite(slPointsOverride) && (slPointsOverride as number) > 0
+      ? (slPointsOverride as number)
+      : DEFAULT_PREMIUM_SL_POINTS;
+  const tgtPts =
+    Number.isFinite(targetPointsOverride) && (targetPointsOverride as number) > 0
+      ? (targetPointsOverride as number)
+      : Math.max(DEFAULT_PREMIUM_TARGET_POINTS, slPts * 2);
   return {
     targetPremium: Number((entryPremium + tgtPts).toFixed(2)),
     stopLossPremium: Number(Math.max(0.05, entryPremium - slPts).toFixed(2)),
@@ -137,25 +164,166 @@ const calculatePremiumExitPrices = (entryPremium: number, slPointsOverride?: num
 const formatPremiumInput = (value: number) => String(Number(value.toFixed(2)));
 const isTradeSignal = (action?: string | null) => action === "BUY" || action === "SELL";
 
-type RuleContext = { rules?: { volumeValid?: boolean | null; fakeBreakout?: boolean; vixRising?: boolean; vixMovePct?: number | null; vixSizeCut?: boolean; vixStable?: boolean; europeanOpenCaution?: boolean; overextended?: boolean; noTradeRange?: boolean; divergence?: boolean; pcr?: number | null; pcrState?: string; emaAligned?: boolean; emaTrend?: string; priceAboveEma21?: boolean; priceBelowEma21?: boolean; sustainedBullish1m?: boolean; sustainedBearish1m?: boolean; multiTimeframeAligned?: boolean; trend5?: string; entry1m?: string } };
-type Signal = { action: string; strike: string; reason: string; conviction?: "HIGH" | "MEDIUM" | "LOW"; highProbability?: boolean; ruleContext?: RuleContext; created_at?: string; tradingLotSize?: number; effectiveLotSize?: number; effectiveTradingQuantity?: number; riskSizeDown?: boolean };
-type NiftyData = { ltp?: number | string | null; open_price?: number | string | null; high_price?: number | string | null; low_price?: number | string | null; close_price?: number | string | null; raw_payload?: { volume?: number | string | null; optionChain?: { pcr?: number | string | null }; account?: { margin?: { availableCash?: number | string | null; usedMargin?: number | string | null }; todayPnl?: number | string | null } ; context?: { indiaVix?: { ltp?: number | string | null }; bankNifty?: { ltp?: number | string | null }; heavyweights?: Array<{ ltp?: number | string | null }>; yesterday?: { pdh?: number | null; pdl?: number | null; pdc?: number | null; pdo?: number | null; date?: string | null }; atm?: { strike?: number | null; expiry?: string | null; ce?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null; pe?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null } } }; created_at?: string; source_timestamp?: string };
+type RuleContext = {
+  rules?: {
+    volumeValid?: boolean | null;
+    fakeBreakout?: boolean;
+    vixRising?: boolean;
+    vixMovePct?: number | null;
+    vixSizeCut?: boolean;
+    vixStable?: boolean;
+    europeanOpenCaution?: boolean;
+    overextended?: boolean;
+    noTradeRange?: boolean;
+    divergence?: boolean;
+    pcr?: number | null;
+    pcrState?: string;
+    emaAligned?: boolean;
+    emaTrend?: string;
+    priceAboveEma21?: boolean;
+    priceBelowEma21?: boolean;
+    sustainedBullish1m?: boolean;
+    sustainedBearish1m?: boolean;
+    multiTimeframeAligned?: boolean;
+    trend5?: string;
+    entry1m?: string;
+  };
+};
+type Signal = {
+  action: string;
+  strike: string;
+  reason: string;
+  conviction?: "HIGH" | "MEDIUM" | "LOW";
+  highProbability?: boolean;
+  ruleContext?: RuleContext;
+  created_at?: string;
+  tradingLotSize?: number;
+  effectiveLotSize?: number;
+  effectiveTradingQuantity?: number;
+  riskSizeDown?: boolean;
+};
+type NiftyData = {
+  ltp?: number | string | null;
+  open_price?: number | string | null;
+  high_price?: number | string | null;
+  low_price?: number | string | null;
+  close_price?: number | string | null;
+  raw_payload?: {
+    volume?: number | string | null;
+    optionChain?: { pcr?: number | string | null };
+    account?: {
+      margin?: { availableCash?: number | string | null; usedMargin?: number | string | null };
+      todayPnl?: number | string | null;
+    };
+    context?: {
+      indiaVix?: { ltp?: number | string | null };
+      bankNifty?: { ltp?: number | string | null };
+      heavyweights?: Array<{ ltp?: number | string | null }>;
+      yesterday?: {
+        pdh?: number | null;
+        pdl?: number | null;
+        pdc?: number | null;
+        pdo?: number | null;
+        date?: string | null;
+      };
+      atm?: {
+        strike?: number | null;
+        expiry?: string | null;
+        ce?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+        pe?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+      };
+    };
+  };
+  created_at?: string;
+  source_timestamp?: string;
+};
 type MarketPoint = { value: number; time: string };
 type PulseCheck = { ok: boolean; message: string; details?: Record<string, unknown> };
 type SystemStatus = { ready: boolean; upstox: PulseCheck; gemini: PulseCheck; checkedAt: string };
 type OpenAIStatus = { gemini: PulseCheck; checkedAt: string };
 type UpstoxStatus = { upstox: PulseCheck; checkedAt: string };
-type MarketFetchResult = { data: NiftyData | null; fallback?: boolean; rateLimited?: boolean; retryAfterMs?: number; error?: string; details?: string };
-type ActiveTradePlan = { action: "BUY" | "SELL"; entry: number; target: number; stopLoss: number; strike: string; quantity: number; initialTargetPoints: number; initialSlPoints: number; instrumentToken?: string; slOrderId?: string; entryPremium?: number; currentPremium?: number; targetPremium?: number; stopLossPremium?: number; lastSyncedStopLossPremium?: number; exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET" } | null;
-type ExecutionMeta = { orderPlaced?: boolean; orderFilled?: boolean; orderStatus?: string; slActive?: boolean; trailingActive?: boolean; blocked?: string; slippageExit?: boolean };
-type SlippageMeta = { quotedLtp?: number; fillPrice?: number; slippagePct?: number; tolerancePct?: number; withinTolerance?: boolean };
-type LiquidityMeta = { ltp?: number; bid?: number; ask?: number; spread?: number; spreadPct?: number; volume?: number; maxSpreadPct?: number; minVolume?: number };
-type LiveOrderResult = { success: boolean; instrument: { tradingSymbol: string; strike: number; optionType: string }; instrumentToken?: string; quantity: number; availableCash: number; requiredCash: number; entryPremium: number; targetPremium: number; stopLossPremium: number; slOrderId?: string; slType?: string; slTriggerPrice?: number; slLimitPrice?: number; execution?: ExecutionMeta; slippage?: SlippageMeta; liquidity?: LiquidityMeta; error?: string; details?: string };
+type MarketFetchResult = {
+  data: NiftyData | null;
+  fallback?: boolean;
+  rateLimited?: boolean;
+  retryAfterMs?: number;
+  error?: string;
+  details?: string;
+};
+type ActiveTradePlan = {
+  action: "BUY" | "SELL";
+  entry: number;
+  target: number;
+  stopLoss: number;
+  strike: string;
+  quantity: number;
+  initialTargetPoints: number;
+  initialSlPoints: number;
+  instrumentToken?: string;
+  slOrderId?: string;
+  entryPremium?: number;
+  currentPremium?: number;
+  targetPremium?: number;
+  stopLossPremium?: number;
+  lastSyncedStopLossPremium?: number;
+  exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET";
+} | null;
+type ExecutionMeta = {
+  orderPlaced?: boolean;
+  orderFilled?: boolean;
+  orderStatus?: string;
+  slActive?: boolean;
+  trailingActive?: boolean;
+  blocked?: string;
+  slippageExit?: boolean;
+};
+type SlippageMeta = {
+  quotedLtp?: number;
+  fillPrice?: number;
+  slippagePct?: number;
+  tolerancePct?: number;
+  withinTolerance?: boolean;
+};
+type LiquidityMeta = {
+  ltp?: number;
+  bid?: number;
+  ask?: number;
+  spread?: number;
+  spreadPct?: number;
+  volume?: number;
+  maxSpreadPct?: number;
+  minVolume?: number;
+};
+type LiveOrderResult = {
+  success: boolean;
+  instrument: { tradingSymbol: string; strike: number; optionType: string };
+  instrumentToken?: string;
+  quantity: number;
+  availableCash: number;
+  requiredCash: number;
+  entryPremium: number;
+  targetPremium: number;
+  stopLossPremium: number;
+  slOrderId?: string;
+  slType?: string;
+  slTriggerPrice?: number;
+  slLimitPrice?: number;
+  execution?: ExecutionMeta;
+  slippage?: SlippageMeta;
+  liquidity?: LiquidityMeta;
+  error?: string;
+  details?: string;
+};
 const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
 type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
 const DEFAULT_EXEC_SETTINGS: ExecSettings = { slippagePct: 1.5, maxSpreadPct: 2, retries: 2, liquidityFilter: true };
 const loadExecSettings = (): ExecSettings => {
-  try { const raw = storedValue(EXEC_SETTINGS_KEY); return raw ? { ...DEFAULT_EXEC_SETTINGS, ...JSON.parse(raw) } : DEFAULT_EXEC_SETTINGS; } catch { return DEFAULT_EXEC_SETTINGS; }
+  try {
+    const raw = storedValue(EXEC_SETTINGS_KEY);
+    return raw ? { ...DEFAULT_EXEC_SETTINGS, ...JSON.parse(raw) } : DEFAULT_EXEC_SETTINGS;
+  } catch {
+    return DEFAULT_EXEC_SETTINGS;
+  }
 };
 
 const Index = () => {
@@ -178,20 +346,33 @@ const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [aiEnabled, setAiEnabled] = useState(() => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours());
+  const [aiEnabled, setAiEnabled] = useState(
+    () => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours(),
+  );
   const [riskMode, setRiskMode] = useState("moderate");
-  const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(() => (storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper"));
+  const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(
+    () => storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper",
+  );
   const [tradingLotSize, setTradingLotSize] = useState(() => storedValue(TRADING_LOT_SIZE_STORAGE_KEY, "1"));
-  const [executedTrades, setExecutedTrades] = useState(() => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0);
+  const [executedTrades, setExecutedTrades] = useState(
+    () => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0,
+  );
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
   const [activeTradePlan, setActiveTradePlan] = useState<ActiveTradePlan>(() => parseActiveTradePlan());
   const [userTargetPoints, setUserTargetPoints] = useState("");
   const [userSlPoints, setUserSlPoints] = useState("");
   const [dailyProfitTarget, setDailyProfitTarget] = useState(() => storedValue(DAILY_TARGET_STORAGE_KEY, "15000"));
-  const [maxDailyLoss, setMaxDailyLoss] = useState(() => storedValue(MAX_DAILY_LOSS_STORAGE_KEY, String(DAILY_STOP_LOSS)));
+  const [maxDailyLoss, setMaxDailyLoss] = useState(() =>
+    storedValue(MAX_DAILY_LOSS_STORAGE_KEY, String(DAILY_STOP_LOSS)),
+  );
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
   const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
-  const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
+  const [settings, setSettings] = useState({
+    upstoxApiKey: "",
+    upstoxApiSecret: "",
+    openaiApiKey: "",
+    redirectUri: UPSTOX_OAUTH_REDIRECT_URI,
+  });
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -218,7 +399,9 @@ const Index = () => {
   const updateExecSettings = (patch: Partial<ExecSettings>) => {
     setExecSettings((prev) => {
       const next = { ...prev, ...patch };
-      try { localStorage.setItem(EXEC_SETTINGS_KEY, JSON.stringify(next)); } catch {}
+      try {
+        localStorage.setItem(EXEC_SETTINGS_KEY, JSON.stringify(next));
+      } catch {}
       return next;
     });
   };
@@ -226,7 +409,15 @@ const Index = () => {
   // ===== Execution Debug / Visibility Layer =====
   type DebugLevel = "info" | "success" | "warn" | "error";
   type DebugStage = "SIGNAL" | "ORDER" | "FILL" | "SL" | "TRAILING" | "ERROR";
-  type DebugEvent = { id: string; ts: number; stage: DebugStage; level: DebugLevel; title: string; detail?: string; data?: Record<string, unknown> };
+  type DebugEvent = {
+    id: string;
+    ts: number;
+    stage: DebugStage;
+    level: DebugLevel;
+    title: string;
+    detail?: string;
+    data?: Record<string, unknown>;
+  };
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const lastDebugSignalKeyRef = useRef<string>("");
   const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
@@ -244,7 +435,9 @@ const Index = () => {
     const now = Date.now();
     if (locked && now < locked.lockedUntil) {
       const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
-      const majorBreak = signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 || signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
+      const majorBreak =
+        signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 ||
+        signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
       if (signal.action === "WAIT" && !majorBreak) {
         setLatestSignal(locked.signal);
         return;
@@ -278,8 +471,18 @@ const Index = () => {
   const signalRules = latestSignal?.ruleContext?.rules as any;
   const signalAction = parseSuggestedAction(latestSignal);
   const visualEntryIndex = hasLivePrice ? latestLtp : null;
-  const visualSlIndex = signalAction === "BUY" && Number.isFinite(signalRules?.previousLow) ? Number(signalRules.previousLow) : signalAction === "SELL" && Number.isFinite(signalRules?.previousHigh) ? Number(signalRules.previousHigh) : null;
-  const visualTargetIndex = visualEntryIndex !== null && visualSlIndex !== null && signalAction ? (signalAction === "BUY" ? visualEntryIndex + 2 * (visualEntryIndex - visualSlIndex) : visualEntryIndex - 2 * (visualSlIndex - visualEntryIndex)) : null;
+  const visualSlIndex =
+    signalAction === "BUY" && Number.isFinite(signalRules?.previousLow)
+      ? Number(signalRules.previousLow)
+      : signalAction === "SELL" && Number.isFinite(signalRules?.previousHigh)
+        ? Number(signalRules.previousHigh)
+        : null;
+  const visualTargetIndex =
+    visualEntryIndex !== null && visualSlIndex !== null && signalAction
+      ? signalAction === "BUY"
+        ? visualEntryIndex + 2 * (visualEntryIndex - visualSlIndex)
+        : visualEntryIndex - 2 * (visualSlIndex - visualEntryIndex)
+      : null;
   const indexToY = (value: number) => 96 - ((value - chartMin) / chartRange) * 88;
   const slY = visualSlIndex !== null && chartValues.length ? indexToY(visualSlIndex) : null;
   const targetY = visualTargetIndex !== null && chartValues.length ? indexToY(visualTargetIndex) : null;
@@ -289,11 +492,19 @@ const Index = () => {
   const pdhVal = toNumber(yesterdayLevels?.pdh);
   const pdlVal = toNumber(yesterdayLevels?.pdl);
   const pdcVal = toNumber(yesterdayLevels?.pdc);
-  const immediateSupport = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15);
-  const immediateResistance = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance ?? (latestSignal?.ruleContext?.rules as any)?.resistance15);
-  const pdhY = pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
-  const pdlY = pdlVal !== null && chartValues.length && pdlVal >= chartMin && pdlVal <= chartMax ? indexToY(pdlVal) : null;
-  const pdcY = pdcVal !== null && chartValues.length && pdcVal >= chartMin && pdcVal <= chartMax ? indexToY(pdcVal) : null;
+  const immediateSupport = toNumber(
+    (latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15,
+  );
+  const immediateResistance = toNumber(
+    (latestSignal?.ruleContext?.rules as any)?.immediateResistance ??
+      (latestSignal?.ruleContext?.rules as any)?.resistance15,
+  );
+  const pdhY =
+    pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
+  const pdlY =
+    pdlVal !== null && chartValues.length && pdlVal >= chartMin && pdlVal <= chartMax ? indexToY(pdlVal) : null;
+  const pdcY =
+    pdcVal !== null && chartValues.length && pdcVal >= chartMin && pdcVal <= chartMax ? indexToY(pdcVal) : null;
   const atmContext = (latestData?.raw_payload as any)?.context?.atm ?? {};
   const atmStrikeLive = toNumber(atmContext?.strike);
   const atmExpiry = atmContext?.expiry ?? null;
@@ -307,27 +518,63 @@ const Index = () => {
     const min = Math.min(...vals);
     const max = Math.max(...vals);
     const range = Math.max(max - min, 0.01);
-    const points = series.map((p, i) => {
-      const x = (i / (series.length - 1)) * 100;
-      const y = 92 - ((p.value - min) / range) * 84;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join(" ");
+    const points = series
+      .map((p, i) => {
+        const x = (i / (series.length - 1)) * 100;
+        const y = 92 - ((p.value - min) / range) * 84;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(" ");
     return { points, min, max };
   };
   const ceMini = buildMiniPolyline(ceSeries);
   const peMini = buildMiniPolyline(peSeries);
   const marketIsOpen = isWithinMarketHours(marketClock);
-  const connectionLabel = !session ? "Sign In Required" : systemStatus?.ready ? (marketIsOpen ? "System Live (Market Open)" : "System Ready (Market Closed)") : "Action Required";
-  const connectionTone = !session ? "text-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "text-profit" : "text-primary") : "text-loss";
-  const connectionDot = !session ? "bg-muted-foreground" : systemStatus?.ready ? (marketIsOpen ? "bg-profit" : "bg-primary") : "bg-loss";
+  const connectionLabel = !session
+    ? "Sign In Required"
+    : systemStatus?.ready
+      ? marketIsOpen
+        ? "System Live (Market Open)"
+        : "System Ready (Market Closed)"
+      : "Action Required";
+  const connectionTone = !session
+    ? "text-muted-foreground"
+    : systemStatus?.ready
+      ? marketIsOpen
+        ? "text-profit"
+        : "text-primary"
+      : "text-loss";
+  const connectionDot = !session
+    ? "bg-muted-foreground"
+    : systemStatus?.ready
+      ? marketIsOpen
+        ? "bg-profit"
+        : "bg-primary"
+      : "bg-loss";
   const highProbabilitySignal = Boolean(latestSignal?.highProbability);
   const normalizedTradingLotSize = Math.max(1, Number.parseInt(tradingLotSize, 10) || 1);
   const totalTradingQuantity = normalizedTradingLotSize * NIFTY_LOT_SIZE;
   const pcrValue = toNumber(latestSignal?.ruleContext?.rules?.pcr ?? latestData?.raw_payload?.optionChain?.pcr);
   const vixValue = toNumber(latestData?.raw_payload?.context?.indiaVix?.ltp);
-  const suggestedQuantity = latestSignal?.riskSizeDown ? Math.max(NIFTY_LOT_SIZE, latestSignal.effectiveTradingQuantity ?? Math.floor(totalTradingQuantity / 2)) : totalTradingQuantity;
-  const aiPanelTone = latestSignal?.action === "BUY" ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]" : latestSignal?.action === "WAIT" ? "border-warning/70" : highProbabilitySignal ? "animate-golden-blink border-warning/70" : "border-primary/25";
-  const aiTextTone = latestSignal?.action === "BUY" ? "border-profit/60 text-foreground" : latestSignal?.action === "WAIT" ? "border-warning/70 text-foreground" : highProbabilitySignal ? "border-warning/70 text-foreground" : "border-border text-muted-foreground";
+  const suggestedQuantity = latestSignal?.riskSizeDown
+    ? Math.max(NIFTY_LOT_SIZE, latestSignal.effectiveTradingQuantity ?? Math.floor(totalTradingQuantity / 2))
+    : totalTradingQuantity;
+  const aiPanelTone =
+    latestSignal?.action === "BUY"
+      ? "animate-pulse border-profit/70 shadow-[0_0_24px_hsl(var(--profit)/0.22)]"
+      : latestSignal?.action === "WAIT"
+        ? "border-warning/70"
+        : highProbabilitySignal
+          ? "animate-golden-blink border-warning/70"
+          : "border-primary/25";
+  const aiTextTone =
+    latestSignal?.action === "BUY"
+      ? "border-profit/60 text-foreground"
+      : latestSignal?.action === "WAIT"
+        ? "border-warning/70 text-foreground"
+        : highProbabilitySignal
+          ? "border-warning/70 text-foreground"
+          : "border-border text-muted-foreground";
   const upstoxTodayPnl = toNumber(latestData?.raw_payload?.account?.todayPnl);
   const dailyPnl = upstoxTodayPnl ?? 0;
   const availableCash = toNumber(latestData?.raw_payload?.account?.margin?.availableCash) ?? 0;
@@ -342,16 +589,31 @@ const Index = () => {
   const cooldownActive = cooldownUntil > Date.now();
   const cooldownRemainingMinutes = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 60_000));
   const tradingBlocked = targetAchieved || hardKillActive || maxTradesHit || cooldownActive;
-  const currentTradePnlPoints = activeTradePlan?.entryPremium && activeTradePlan?.currentPremium ? activeTradePlan.currentPremium - activeTradePlan.entryPremium : 0;
+  const currentTradePnlPoints =
+    activeTradePlan?.entryPremium && activeTradePlan?.currentPremium
+      ? activeTradePlan.currentPremium - activeTradePlan.entryPremium
+      : 0;
   const currentTradePnlMoney = activeTradePlan ? currentTradePnlPoints * activeTradePlan.quantity : 0;
   const exitAlertActive = Boolean(activeTradePlan?.exitAlertReason) || exitFlashUntil > Date.now();
   // TSL status: Armed (<+10pts) → Break-Even (>=+10pts) → Trailing +Npts (every additional 5pts)
   const TSL_ACTIVATION_POINTS = 6; // v7-aggressive: BE at +6pts (was 10)
   const tslActivated = currentTradePnlPoints >= TSL_ACTIVATION_POINTS;
-  const tslLockedSteps = tslActivated ? Math.floor((currentTradePnlPoints - TSL_ACTIVATION_POINTS) / PREMIUM_TSL_STEP) : 0;
+  const tslLockedSteps = tslActivated
+    ? Math.floor((currentTradePnlPoints - TSL_ACTIVATION_POINTS) / PREMIUM_TSL_STEP)
+    : 0;
   const tslLockedPoints = tslActivated ? tslLockedSteps * PREMIUM_TSL_STEP : 0;
-  const tslStatusLabel = !activeTradePlan ? "Idle" : !tslActivated ? `TSL Armed · activates at +${TSL_ACTIVATION_POINTS}pts (${Math.max(0, TSL_ACTIVATION_POINTS - currentTradePnlPoints).toFixed(1)} pts to go)` : tslLockedPoints === 0 ? "TSL Active · SL @ Break-Even" : `TSL Trailing · locked +${tslLockedPoints}pts above entry`;
-  const tslStatusTone = !activeTradePlan ? "border-border text-muted-foreground" : !tslActivated ? "border-warning/60 text-warning" : "border-profit/60 text-profit animate-pulse";
+  const tslStatusLabel = !activeTradePlan
+    ? "Idle"
+    : !tslActivated
+      ? `TSL Armed · activates at +${TSL_ACTIVATION_POINTS}pts (${Math.max(0, TSL_ACTIVATION_POINTS - currentTradePnlPoints).toFixed(1)} pts to go)`
+      : tslLockedPoints === 0
+        ? "TSL Active · SL @ Break-Even"
+        : `TSL Trailing · locked +${tslLockedPoints}pts above entry`;
+  const tslStatusTone = !activeTradePlan
+    ? "border-border text-muted-foreground"
+    : !tslActivated
+      ? "border-warning/60 text-warning"
+      : "border-profit/60 text-profit animate-pulse";
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -383,10 +645,37 @@ const Index = () => {
     if (tradingBlocked && aiEnabled) {
       setAiEnabled(false);
       localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
-      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI trading paused for ${cooldownRemainingMinutes} more minutes.` : targetAchieved ? "Daily profit target reached. AI trading is stopped for the day." : hardKillActive ? "₹2000 daily stop loss reached. Trading is locked for the day." : "4-trade daily cap reached. AI trading is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
+      toast({
+        title: cooldownActive
+          ? "Cooldown Active"
+          : targetAchieved
+            ? "Target Achieved"
+            : hardKillActive
+              ? "Hard Kill-Switch Active"
+              : "Max Trades Reached",
+        description: cooldownActive
+          ? `AI trading paused for ${cooldownRemainingMinutes} more minutes.`
+          : targetAchieved
+            ? "Daily profit target reached. AI trading is stopped for the day."
+            : hardKillActive
+              ? "₹2000 daily stop loss reached. Trading is locked for the day."
+              : "4-trade daily cap reached. AI trading is stopped for the day.",
+        variant: targetAchieved || cooldownActive ? "default" : "destructive",
+      });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrade, aiEnabled, cooldownActive, cooldownRemainingMinutes, hardKillActive, killSwitchDate, maxTradesHit, targetAchieved, toast, tradingBlocked]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeTrade,
+    aiEnabled,
+    cooldownActive,
+    cooldownRemainingMinutes,
+    hardKillActive,
+    killSwitchDate,
+    maxTradesHit,
+    targetAchieved,
+    toast,
+    tradingBlocked,
+  ]);
 
   useEffect(() => {
     const strike = parseSuggestedStrike(latestSignal?.strike);
@@ -397,14 +686,19 @@ const Index = () => {
     lastSignalAutofillRef.current = signalKey;
     // New signal → reset manual-edit flag so auto-fill can populate fresh values.
     userEditedExitsRef.current = false;
-    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", { strike, action })
+    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", {
+      strike,
+      action,
+    })
       .then(({ premium, instrument }) => {
         const rules = latestSignal.ruleContext?.rules as any;
         const ltpNow = Number(latestData?.ltp);
         let slPts: number | undefined;
         if (Number.isFinite(ltpNow)) {
-          if (action === "BUY" && Number.isFinite(rules?.previousLow)) slPts = Math.max(5, Math.round(ltpNow - rules.previousLow));
-          if (action === "SELL" && Number.isFinite(rules?.previousHigh)) slPts = Math.max(5, Math.round(rules.previousHigh - ltpNow));
+          if (action === "BUY" && Number.isFinite(rules?.previousLow))
+            slPts = Math.max(5, Math.round(ltpNow - rules.previousLow));
+          if (action === "SELL" && Number.isFinite(rules?.previousHigh))
+            slPts = Math.max(5, Math.round(rules.previousHigh - ltpNow));
         }
         const tgtPts = slPts ? slPts * 2 : undefined;
         const exits = calculatePremiumExitPrices(premium, slPts, tgtPts);
@@ -419,12 +713,19 @@ const Index = () => {
           setUserTargetPoints(formatPremiumInput(finalTarget));
           setUserSlPoints(formatPremiumInput(finalSl));
         }
-        toast({ title: "Scalper auto-fill ready", description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · SL ₹${finalSl.toFixed(2)} · Target ₹${finalTarget.toFixed(2)}.` });
+        toast({
+          title: "Scalper auto-fill ready",
+          description: `${instrument?.tradingSymbol ?? latestSignal.strike} LTP ₹${premium.toFixed(2)} · SL ₹${finalSl.toFixed(2)} · Target ₹${finalTarget.toFixed(2)}.`,
+        });
       })
       .catch((error) => {
-        toast({ title: "Premium LTP fetch failed", description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.", variant: "destructive" });
+        toast({
+          title: "Premium LTP fetch failed",
+          description: error instanceof Error ? error.message : "Could not fetch option premium from Upstox.",
+          variant: "destructive",
+        });
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
   // Instant Strike Update: when live ATM moves and there's no active trade, drop stale suggested premium and force a re-autofill on the next signal.
@@ -464,19 +765,29 @@ const Index = () => {
     }
     if (premiumProfit >= PREMIUM_TSL_STEP) {
       const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop = activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
-      const candidateTarget = activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const candidateStop =
+        activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
+      const candidateTarget =
+        activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP;
       const shouldTrail = candidateStop > currentStop;
       if (shouldTrail) {
-        const nextPlan = { ...activeTradePlan, targetPremium: candidateTarget, target: candidateTarget, stopLossPremium: candidateStop, stopLoss: candidateStop };
+        const nextPlan = {
+          ...activeTradePlan,
+          targetPremium: candidateTarget,
+          target: candidateTarget,
+          stopLossPremium: candidateStop,
+          stopLoss: candidateStop,
+        };
         setActiveTradePlan(nextPlan);
         setUserTargetPoints(formatPremiumInput(candidateTarget));
         setUserSlPoints(formatPremiumInput(candidateStop));
         localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-        syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
+        syncStopLossPremium(nextPlan).catch((error) =>
+          showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."),
+        );
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTradePlan]);
 
   useEffect(() => {
@@ -504,7 +815,7 @@ const Index = () => {
         },
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestSignal?.action, latestSignal?.created_at, latestSignal?.strike]);
 
   const handleTargetPointsChange = (value: string) => {
@@ -529,11 +840,15 @@ const Index = () => {
     const nextPlan = { ...activeTradePlan, stopLossPremium, stopLoss: stopLossPremium, initialSlPoints: points };
     setActiveTradePlan(nextPlan);
     localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-    syncStopLossPremium(nextPlan).catch((error) => showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."));
+    syncStopLossPremium(nextPlan).catch((error) =>
+      showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."),
+    );
   };
 
   const unlockAudio = () => {
-    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioCtor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtor) return null;
     const context = audioContextRef.current ?? new AudioCtor();
     audioContextRef.current = context;
@@ -608,13 +923,13 @@ const Index = () => {
     pollPremium();
     const timer = setInterval(pollPremium, UPSTOX_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTradePlan?.instrumentToken, activeTradePlan?.exitAlertReason]);
 
   useEffect(() => {
     if (!activeTrade || getIndiaMarketMinute(marketClock) < AUTO_SQUAREOFF_MINUTE) return;
     emergencyExit(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTrade, marketClock]);
 
   const showRetryToast = (message: string) => {
@@ -625,21 +940,27 @@ const Index = () => {
   };
 
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-  const isUpstoxRateLimitError = (message: string) => message.includes(UPSTOX_RATE_LIMIT_ERROR) || message.toLowerCase().includes("too many requests");
+  const isUpstoxRateLimitError = (message: string) =>
+    message.includes(UPSTOX_RATE_LIMIT_ERROR) || message.toLowerCase().includes("too many requests");
   const applyUpstoxBackoff = (retryAfterMs = UPSTOX_RATE_LIMIT_BACKOFF_MS) => {
-    upstoxBackoffUntilRef.current = Math.max(upstoxBackoffUntilRef.current, Date.now() + Math.max(retryAfterMs, UPSTOX_RATE_LIMIT_BACKOFF_MS));
+    upstoxBackoffUntilRef.current = Math.max(
+      upstoxBackoffUntilRef.current,
+      Date.now() + Math.max(retryAfterMs, UPSTOX_RATE_LIMIT_BACKOFF_MS),
+    );
     showRetryToast("Upstox rate limit hit (UDAPI10005). Waiting 5 seconds before retrying to avoid IP block.");
   };
 
   const throttleUpstoxRequest = async () => {
-    upstoxRequestQueueRef.current = upstoxRequestQueueRef.current.catch(() => undefined).then(async () => {
-      const now = Date.now();
-      const waitForBackoff = Math.max(0, upstoxBackoffUntilRef.current - now);
-      if (waitForBackoff > 0) await delay(waitForBackoff);
-      const waitForThrottle = Math.max(0, UPSTOX_POLL_INTERVAL_MS - (Date.now() - lastUpstoxRequestAtRef.current));
-      if (waitForThrottle > 0) await delay(waitForThrottle);
-      lastUpstoxRequestAtRef.current = Date.now();
-    });
+    upstoxRequestQueueRef.current = upstoxRequestQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const now = Date.now();
+        const waitForBackoff = Math.max(0, upstoxBackoffUntilRef.current - now);
+        if (waitForBackoff > 0) await delay(waitForBackoff);
+        const waitForThrottle = Math.max(0, UPSTOX_POLL_INTERVAL_MS - (Date.now() - lastUpstoxRequestAtRef.current));
+        if (waitForThrottle > 0) await delay(waitForThrottle);
+        lastUpstoxRequestAtRef.current = Date.now();
+      });
     await upstoxRequestQueueRef.current;
   };
 
@@ -671,14 +992,21 @@ const Index = () => {
         rules?.multiTimeframeAligned && `5m confirms 1m ${rules.entry1m}`,
         rules?.vixSizeCut && "VIX >5% size -50%",
         rules?.pcrState && `PCR ${rules.pcrState}`,
-      ].filter(Boolean).join(" · ");
+      ]
+        .filter(Boolean)
+        .join(" · ");
       return `Current Mode: ${modeLabel} — ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
     }
-    if (targetAchieved) return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
-    if (hardKillActive) return `Current Mode: ${modeLabel} — Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.`;
-    if (!aiEnabled) return `Current Mode: ${modeLabel} — Analyzing market trends... AI engine is standing by for confirmation.`;
-    if (riskMode === "conservative") return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
-    if (riskMode === "aggressive") return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
+    if (targetAchieved)
+      return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
+    if (hardKillActive)
+      return `Current Mode: ${modeLabel} — Hard Kill-Switch Active: max daily loss reached. Trading is disabled for the day.`;
+    if (!aiEnabled)
+      return `Current Mode: ${modeLabel} — Analyzing market trends... AI engine is standing by for confirmation.`;
+    if (riskMode === "conservative")
+      return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
+    if (riskMode === "aggressive")
+      return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
     return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.`;
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
@@ -687,18 +1015,31 @@ const Index = () => {
     const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
     if (error) {
       const signup = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      if (signup.error) toast({ title: "Authentication failed", description: signup.error.message, variant: "destructive" });
-      else toast({ title: "Check your inbox", description: "Confirm your email, then sign in to manage trading settings." });
+      if (signup.error)
+        toast({ title: "Authentication failed", description: signup.error.message, variant: "destructive" });
+      else
+        toast({
+          title: "Check your inbox",
+          description: "Confirm your email, then sign in to manage trading settings.",
+        });
     }
   };
 
   const signInWithGoogle = async () => {
     const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
-    if (result.error) toast({ title: "Google sign-in failed", description: result.error.message, variant: "destructive" });
+    if (result.error)
+      toast({ title: "Google sign-in failed", description: result.error.message, variant: "destructive" });
   };
 
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
-    const touchesUpstox = ["fetch-nifty-data", "fetch-option-premium", "system-status", "place-live-order", "modify-stop-loss-order", "emergency-exit"].includes(name);
+    const touchesUpstox = [
+      "fetch-nifty-data",
+      "fetch-option-premium",
+      "system-status",
+      "place-live-order",
+      "modify-stop-loss-order",
+      "emergency-exit",
+    ].includes(name);
     if (touchesUpstox) await throttleUpstoxRequest();
 
     // Route Upstox execution + OAuth through the VPS FastAPI backend (static IPv4).
@@ -719,12 +1060,21 @@ const Index = () => {
           body: JSON.stringify(body ?? {}),
         });
         const text = await res.text();
-        const payload = text ? (() => { try { return JSON.parse(text); } catch { return { error: text }; } })() : {};
+        const payload = text
+          ? (() => {
+              try {
+                return JSON.parse(text);
+              } catch {
+                return { error: text };
+              }
+            })()
+          : {};
         if (!res.ok) {
           const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
+                serverMessage.toLowerCase().includes("upstox oauth reconnect required")
               ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
               : serverMessage;
           markUpstoxRateLimited(message);
@@ -745,14 +1095,18 @@ const Index = () => {
       let serverMessage = error.message;
       const context = (error as unknown as { context?: Response }).context;
       if (context) {
-        const payload = await context.clone().json().catch(() => null);
+        const payload = await context
+          .clone()
+          .json()
+          .catch(() => null);
         serverMessage = [payload?.error, payload?.details].filter(Boolean).join(" — ") || serverMessage;
       }
       const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
         ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-        : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+        : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
+            serverMessage.toLowerCase().includes("upstox oauth reconnect required")
           ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
-        : serverMessage;
+          : serverMessage;
       markUpstoxRateLimited(message);
       throw new Error(message);
     }
@@ -776,7 +1130,11 @@ const Index = () => {
     const previousSl = plan.lastSyncedStopLossPremium ?? plan.stopLoss;
     const profitPts = plan.entryPremium ? (plan.currentPremium ?? plan.entryPremium) - plan.entryPremium : 0;
     try {
-      await invokeFunction("modify-stop-loss-order", { orderId: plan.slOrderId, quantity: plan.quantity, triggerPrice: plan.stopLossPremium });
+      await invokeFunction("modify-stop-loss-order", {
+        orderId: plan.slOrderId,
+        quantity: plan.quantity,
+        triggerPrice: plan.stopLossPremium,
+      });
       setActiveTradePlan((current) => {
         if (!current || current.slOrderId !== plan.slOrderId) return current;
         const currentStop = current.stopLossPremium ?? current.stopLoss;
@@ -792,11 +1150,25 @@ const Index = () => {
         level: "success",
         title: "TRAILING ACTIVE",
         detail: `SL ₹${previousSl.toFixed(2)} → ₹${plan.stopLossPremium.toFixed(2)} · profit +${profitPts.toFixed(1)}pts`,
-        data: { orderId: plan.slOrderId, previousSl, newSl: plan.stopLossPremium, profitPoints: Number(profitPts.toFixed(2)) },
+        data: {
+          orderId: plan.slOrderId,
+          previousSl,
+          newSl: plan.stopLossPremium,
+          profitPoints: Number(profitPts.toFixed(2)),
+        },
       });
-      toast({ title: "Server SL updated", description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.` });
+      toast({
+        title: "Server SL updated",
+        description: `Upstox SL-M trigger moved to ₹${plan.stopLossPremium.toFixed(2)}.`,
+      });
     } catch (err) {
-      pushDebug({ stage: "ERROR", level: "error", title: "TRAILING FAILED", detail: err instanceof Error ? err.message : String(err), data: { previousSl, attemptedSl: plan.stopLossPremium } });
+      pushDebug({
+        stage: "ERROR",
+        level: "error",
+        title: "TRAILING FAILED",
+        detail: err instanceof Error ? err.message : String(err),
+        data: { previousSl, attemptedSl: plan.stopLossPremium },
+      });
       throw err;
     }
   };
@@ -804,12 +1176,24 @@ const Index = () => {
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
     try {
-      await invokeFunction("save-trading-settings", { provider: "upstox", upstoxApiKey: settings.upstoxApiKey, upstoxApiSecret: settings.upstoxApiSecret, redirectUri: settings.redirectUri });
+      await invokeFunction("save-trading-settings", {
+        provider: "upstox",
+        upstoxApiKey: settings.upstoxApiKey,
+        upstoxApiSecret: settings.upstoxApiSecret,
+        redirectUri: settings.redirectUri,
+      });
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
-      toast({ title: "Upstox keys saved", description: "Existing OpenAI settings were left unchanged. Complete OAuth if the token needs reconnecting." });
+      toast({
+        title: "Upstox keys saved",
+        description: "Existing OpenAI settings were left unchanged. Complete OAuth if the token needs reconnecting.",
+      });
       await retestUpstox(false).catch(() => null);
     } catch (error) {
-      toast({ title: "Unable to save Upstox", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({
+        title: "Unable to save Upstox",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsBusy(false);
     }
@@ -822,9 +1206,16 @@ const Index = () => {
       await invokeFunction("save-trading-settings", { provider: "openai", openaiApiKey: settings.openaiApiKey });
       setSettings((prev) => ({ ...prev, openaiApiKey: "" }));
       const status = await retestOpenAI(false).catch(() => null);
-      toast({ title: status?.gemini.ok ? "OpenAI verified" : "OpenAI key saved", description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged." });
+      toast({
+        title: status?.gemini.ok ? "OpenAI verified" : "OpenAI key saved",
+        description: status?.gemini.message ?? "Existing Upstox token and settings were left unchanged.",
+      });
     } catch (error) {
-      toast({ title: "Unable to save OpenAI", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      toast({
+        title: "Unable to save OpenAI",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setIsBusy(false);
     }
@@ -837,46 +1228,83 @@ const Index = () => {
       setAuthorizationUrl(data.url);
       setSettings((prev) => ({ ...prev, redirectUri }));
       setOauthCode("");
-      setOauthDebugLog(`Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`);
+      setOauthDebugLog(
+        `Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`,
+      );
       window.open(data.url, "_blank", "noopener,noreferrer");
-      toast({ title: "Upstox login opened", description: "After login, copy the code value from the redirected URL bar and paste it back here." });
+      toast({
+        title: "Upstox login opened",
+        description: "After login, copy the code value from the redirected URL bar and paste it back here.",
+      });
     } catch (error) {
-      toast({ title: "OAuth start failed", description: error instanceof Error ? error.message : "Save settings first.", variant: "destructive" });
+      toast({
+        title: "OAuth start failed",
+        description: error instanceof Error ? error.message : "Save settings first.",
+        variant: "destructive",
+      });
     }
   };
 
   const completeUpstoxOAuth = async () => {
     const debugRedirectUri = UPSTOX_OAUTH_REDIRECT_URI;
     const trimmedCode = oauthCode.trim();
-    setOauthDebugLog(`Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`);
+    setOauthDebugLog(
+      `Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`,
+    );
     try {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
-      setOauthDebugLog(`Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`);
+      setOauthDebugLog(
+        `Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`,
+      );
       await checkSystemStatus(false).catch(() => null);
       await fetchLiveNifty(false, true);
-      toast({ title: "Upstox connected", description: "Access token saved securely for server-side market data calls." });
+      toast({
+        title: "Upstox connected",
+        description: "Access token saved securely for server-side market data calls.",
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Check the authorization code.";
-      const isInvalidCode = message.includes(UPSTOX_INVALID_CODE_ERROR) || message.toLowerCase().includes("invalid auth code");
+      const isInvalidCode =
+        message.includes(UPSTOX_INVALID_CODE_ERROR) || message.toLowerCase().includes("invalid auth code");
       if (isInvalidCode) {
         setOauthCode("");
-        setOauthDebugLog(`Upstox rejected this code as invalid or already used.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nNext step: tap Get Code, complete login again, and paste the brand-new code.`);
+        setOauthDebugLog(
+          `Upstox rejected this code as invalid or already used.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nNext step: tap Get Code, complete login again, and paste the brand-new code.`,
+        );
       }
-      toast({ title: isInvalidCode ? "Fresh OAuth code required" : "OAuth exchange failed", description: message, variant: "destructive" });
+      toast({
+        title: isInvalidCode ? "Fresh OAuth code required" : "OAuth exchange failed",
+        description: message,
+        variant: "destructive",
+      });
     }
   };
 
   const fetchLiveNifty = async (executionIntent = false, skipReadyCheck = false) => {
     if (!skipReadyCheck && !upstoxReady) {
-      throw new Error(systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.");
+      throw new Error(
+        systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.",
+      );
     }
-    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", { tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity, executionIntent });
+    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
+      tradingLotSize: normalizedTradingLotSize,
+      tradingQuantity: totalTradingQuantity,
+      executionIntent,
+    });
     if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
-    if (!market.data) throw new Error([market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.");
+    if (!market.data)
+      throw new Error(
+        [market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
+      );
     setSystemStatus((prev) => ({
-      ready: prev?.gemini?.ok ? true : prev?.ready ?? true,
-      upstox: { ok: true, message: market.fallback ? "Upstox rate-limited; using last cached market data while waiting 5 seconds." : "Upstox token verified by live market data fetch." },
+      ready: prev?.gemini?.ok ? true : (prev?.ready ?? true),
+      upstox: {
+        ok: true,
+        message: market.fallback
+          ? "Upstox rate-limited; using last cached market data while waiting 5 seconds."
+          : "Upstox token verified by live market data fetch.",
+      },
       gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." },
       checkedAt: new Date().toISOString(),
     }));
@@ -891,14 +1319,25 @@ const Index = () => {
       const peLtp = Number(atm?.pe?.ltp);
       const ceStrike = Number(atm?.ce?.strike ?? atm?.strike);
       const peStrike = Number(atm?.pe?.strike ?? atm?.strike);
-      if (Number.isFinite(ceStrike) && ceStrikeRef.current !== ceStrike) { ceStrikeRef.current = ceStrike; setCeSeries([]); }
-      if (Number.isFinite(peStrike) && peStrikeRef.current !== peStrike) { peStrikeRef.current = peStrike; setPeSeries([]); }
+      if (Number.isFinite(ceStrike) && ceStrikeRef.current !== ceStrike) {
+        ceStrikeRef.current = ceStrike;
+        setCeSeries([]);
+      }
+      if (Number.isFinite(peStrike) && peStrikeRef.current !== peStrike) {
+        peStrikeRef.current = peStrike;
+        setPeSeries([]);
+      }
       if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
       if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
       // Force a fresh AI cycle when price moves >15pts from anchor (re-baseline immediate S/R reasoning)
       const anchor = levelsAnchorLtpRef.current;
       if (anchor === null) levelsAnchorLtpRef.current = value;
-      else if (Math.abs(value - anchor) > 15 && aiEnabled && !tradingBlocked && Date.now() - lastForcedAiAtRef.current > 15_000) {
+      else if (
+        Math.abs(value - anchor) > 15 &&
+        aiEnabled &&
+        !tradingBlocked &&
+        Date.now() - lastForcedAiAtRef.current > 15_000
+      ) {
         levelsAnchorLtpRef.current = value;
         lastForcedAiAtRef.current = Date.now();
         runTradingCycle().catch(() => {});
@@ -913,7 +1352,10 @@ const Index = () => {
       const status = await invokeFunction<SystemStatus>("system-status");
       setSystemStatus(status);
       if (showToast) {
-        const failures = [status.upstox, status.gemini].filter((item) => !item.ok).map((item) => item.message).join(" ");
+        const failures = [status.upstox, status.gemini]
+          .filter((item) => !item.ok)
+          .map((item) => item.message)
+          .join(" ");
         toast({
           title: status.ready ? "System ready for market open" : "Connection needs attention",
           description: status.ready ? "Upstox and OpenAI both verified successfully." : failures,
@@ -939,10 +1381,20 @@ const Index = () => {
         const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
         return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
       });
-      if (showToast) toast({ title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth", description: status.upstox.message, variant: status.upstox.ok ? "default" : "destructive" });
+      if (showToast)
+        toast({
+          title: status.upstox.ok ? "Upstox verified" : "Upstox needs OAuth",
+          description: status.upstox.message,
+          variant: status.upstox.ok ? "default" : "destructive",
+        });
       return status;
     } catch (error) {
-      if (showToast) toast({ title: "Upstox re-test failed", description: error instanceof Error ? error.message : "Unable to test Upstox.", variant: "destructive" });
+      if (showToast)
+        toast({
+          title: "Upstox re-test failed",
+          description: error instanceof Error ? error.message : "Unable to test Upstox.",
+          variant: "destructive",
+        });
       throw error;
     } finally {
       setIsCheckingStatus(false);
@@ -957,10 +1409,20 @@ const Index = () => {
         const upstox = prev?.upstox ?? { ok: false, message: "Run Verify Now to confirm Upstox API status." };
         return { ready: upstox.ok && status.gemini.ok, upstox, gemini: status.gemini, checkedAt: status.checkedAt };
       });
-      if (showToast) toast({ title: status.gemini.ok ? "OpenAI connected" : "OpenAI still failing", description: status.gemini.message, variant: status.gemini.ok ? "default" : "destructive" });
+      if (showToast)
+        toast({
+          title: status.gemini.ok ? "OpenAI connected" : "OpenAI still failing",
+          description: status.gemini.message,
+          variant: status.gemini.ok ? "default" : "destructive",
+        });
       return status;
     } catch (error) {
-      if (showToast) toast({ title: "OpenAI re-test failed", description: error instanceof Error ? error.message : "Unable to test OpenAI.", variant: "destructive" });
+      if (showToast)
+        toast({
+          title: "OpenAI re-test failed",
+          description: error instanceof Error ? error.message : "Unable to test OpenAI.",
+          variant: "destructive",
+        });
       throw error;
     } finally {
       setIsCheckingStatus(false);
@@ -974,7 +1436,19 @@ const Index = () => {
       if (!status.upstox.ok) return;
     }
     await fetchLiveNifty(false, true);
-    const ai = await withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.");
+    const ai = await withTimeout(
+      invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+        tradingMode,
+        tradingLotSize: normalizedTradingLotSize,
+        dailyProfitTarget: normalizedDailyTarget,
+        maxDailyLoss: normalizedMaxDailyLoss,
+        dailyPnl,
+        userTargetPoints: Number(userTargetPoints) || null,
+        userSlPoints: Number(userSlPoints) || null,
+      }),
+      25_000,
+      "OpenAI analysis timed out; continuing Upstox polling.",
+    );
     applySniperSignal(ai.signal);
   };
 
@@ -986,30 +1460,60 @@ const Index = () => {
         if (!status.upstox.ok) return;
       }
       if (tradingBlocked) {
-        toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `Next entry allowed in ${cooldownRemainingMinutes} min.` : "Trading activity is stopped for the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
+        toast({
+          title: cooldownActive
+            ? "Cooldown Active"
+            : targetAchieved
+              ? "Target Achieved"
+              : hardKillActive
+                ? "Hard Kill-Switch Active"
+                : "Max Trades Reached",
+          description: cooldownActive
+            ? `Next entry allowed in ${cooldownRemainingMinutes} min.`
+            : "Trading activity is stopped for the day.",
+          variant: targetAchieved || cooldownActive ? "default" : "destructive",
+        });
         return;
       }
 
       // ===== SIGNAL LOCK: use locked signal, do NOT re-call AI =====
       const locked = signalLockRef.current;
-      const lockedSignal: Signal | null = (locked?.signal && isTradeSignal(locked.signal.action))
-        ? locked.signal
-        : (latestSignal && isTradeSignal(latestSignal.action) ? latestSignal : null);
+      const lockedSignal: Signal | null =
+        locked?.signal && isTradeSignal(locked.signal.action)
+          ? locked.signal
+          : latestSignal && isTradeSignal(latestSignal.action)
+            ? latestSignal
+            : null;
 
       if (!lockedSignal) {
-        toast({ title: "No active signal", description: "Wait for a BUY/SELL signal before executing.", variant: "destructive" });
+        toast({
+          title: "No active signal",
+          description: "Wait for a BUY/SELL signal before executing.",
+          variant: "destructive",
+        });
         return;
       }
 
       // Optional staleness check (do NOT auto-cancel; warn user)
-      const sigTs = locked?.lockedUntil ? locked.lockedUntil - SIGNAL_LOCK_MS : Date.parse(lockedSignal.created_at ?? "") || Date.now();
+      const sigTs = locked?.lockedUntil
+        ? locked.lockedUntil - SIGNAL_LOCK_MS
+        : Date.parse(lockedSignal.created_at ?? "") || Date.now();
       const sigAgeMs = Date.now() - sigTs;
       if (sigAgeMs > SIGNAL_STALE_MS) {
-        const ok = typeof window !== "undefined" ? window.confirm(`Signal is ${Math.round(sigAgeMs / 1000)}s old. Execute anyway?`) : true;
+        const ok =
+          typeof window !== "undefined"
+            ? window.confirm(`Signal is ${Math.round(sigAgeMs / 1000)}s old. Execute anyway?`)
+            : true;
         if (!ok) return;
       }
 
-      pushDebug({ stage: "SIGNAL", level: "info", title: "Executing locked signal...", detail: `${lockedSignal.action} ${lockedSignal.strike}`, data: { ageMs: sigAgeMs } });
+      pushDebug({
+        stage: "SIGNAL",
+        level: "info",
+        title: "Executing locked signal...",
+        detail: `${lockedSignal.action} ${lockedSignal.strike}`,
+        data: { ageMs: sigAgeMs },
+      });
       toast({ title: "Executing locked signal...", description: `${lockedSignal.action} ${lockedSignal.strike}` });
 
       const liveMarket = await fetchLiveNifty(true, true);
@@ -1017,41 +1521,131 @@ const Index = () => {
       const ai = { signal: lockedSignal };
 
       if (!Number.isFinite(liveSpot)) {
-        toast({ title: "Live price missing", description: "Cannot place a live order until Nifty spot is available.", variant: "destructive" });
+        toast({
+          title: "Live price missing",
+          description: "Cannot place a live order until Nifty spot is available.",
+          variant: "destructive",
+        });
         return;
       }
       const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
       if (liveAvailableCash <= 0) {
-        toast({ title: "Low Margin", description: "Available Cash from Upstox is zero or unavailable. Live order blocked.", variant: "destructive" });
+        toast({
+          title: "Low Margin",
+          description: "Available Cash from Upstox is zero or unavailable. Live order blocked.",
+          variant: "destructive",
+        });
         return;
       }
       const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
-      const orderPayload = { action: ai.signal.action, spotPrice: liveSpot, strike: suggestedStrike ?? undefined, tradingLotSize: normalizedTradingLotSize, effectiveLotSize: ai.signal.effectiveLotSize, targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS, stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS, maxSlippagePct: execSettings.slippagePct, riskPoints: (ai.signal as any).riskPoints ?? undefined, rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined };
-      pushDebug({ stage: "ORDER", level: "info", title: "ORDER PLACING", detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`, data: orderPayload });
+      const orderPayload = {
+        action: ai.signal.action,
+        spotPrice: liveSpot,
+        strike: suggestedStrike ?? undefined,
+        tradingLotSize: normalizedTradingLotSize,
+        effectiveLotSize: ai.signal.effectiveLotSize,
+        targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
+        stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
+        maxSlippagePct: execSettings.slippagePct,
+        riskPoints: (ai.signal as any).riskPoints ?? undefined,
+        rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined,
+      };
+      pushDebug({
+        stage: "ORDER",
+        level: "info",
+        title: "ORDER PLACING",
+        detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
+        data: orderPayload,
+      });
       const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
       setLastExecution(liveOrder);
       if (!liveOrder.success) {
-        pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`, data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity } });
-        toast({ title: liveOrder.error ?? "Live order blocked", description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.", variant: "destructive" });
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: "ORDER FAILED",
+          detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`,
+          data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity },
+        });
+        toast({
+          title: liveOrder.error ?? "Live order blocked",
+          description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.",
+          variant: "destructive",
+        });
         return;
       }
-      pushDebug({ stage: "ORDER", level: "success", title: "ORDER PLACED", detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`, data: { orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id, instrument: liveOrder.instrument } });
+      pushDebug({
+        stage: "ORDER",
+        level: "success",
+        title: "ORDER PLACED",
+        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`,
+        data: {
+          orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id,
+          instrument: liveOrder.instrument,
+        },
+      });
       if (liveOrder.execution?.orderFilled) {
-        pushDebug({ stage: "FILL", level: "success", title: "ORDER FILLED", detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`, data: { fillPrice: liveOrder.entryPremium, quotedLtp: liveOrder.slippage?.quotedLtp, quantity: liveOrder.quantity, status: liveOrder.execution?.orderStatus } });
+        pushDebug({
+          stage: "FILL",
+          level: "success",
+          title: "ORDER FILLED",
+          detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`,
+          data: {
+            fillPrice: liveOrder.entryPremium,
+            quotedLtp: liveOrder.slippage?.quotedLtp,
+            quantity: liveOrder.quantity,
+            status: liveOrder.execution?.orderStatus,
+          },
+        });
       } else {
-        pushDebug({ stage: "FILL", level: "warn", title: "ORDER PENDING", detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}` });
+        pushDebug({
+          stage: "FILL",
+          level: "warn",
+          title: "ORDER PENDING",
+          detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}`,
+        });
       }
       if (liveOrder.execution?.slActive) {
-        pushDebug({ stage: "SL", level: "success", title: "SL ACTIVE", detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`, data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId } });
+        pushDebug({
+          stage: "SL",
+          level: "success",
+          title: "SL ACTIVE",
+          detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`,
+          data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId },
+        });
       } else {
-        pushDebug({ stage: "ERROR", level: "warn", title: "SL FAILED", detail: "Server SL was not registered. Manual exit required if filled." });
+        pushDebug({
+          stage: "ERROR",
+          level: "warn",
+          title: "SL FAILED",
+          detail: "Server SL was not registered. Manual exit required if filled.",
+        });
       }
-      const shouldUseManualExitPrices = suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
-      const targetPremium = shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
-      const stopLossPremium = shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
+      const shouldUseManualExitPrices =
+        suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
+      const targetPremium =
+        shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
+      const stopLossPremium =
+        shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
       const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
       const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
-      const plan: NonNullable<ActiveTradePlan> = { action: ai.signal.action as "BUY" | "SELL", entry: liveSpot, target: targetPremium, stopLoss: stopLossPremium, strike: liveOrder.instrument.tradingSymbol, quantity: liveOrder.quantity, initialTargetPoints: targetPoints, initialSlPoints: slPoints, instrumentToken: liveOrder.instrumentToken, slOrderId: liveOrder.slOrderId, entryPremium: liveOrder.entryPremium, currentPremium: liveOrder.entryPremium, targetPremium, stopLossPremium, lastSyncedStopLossPremium: liveOrder.stopLossPremium };
+      const plan: NonNullable<ActiveTradePlan> = {
+        action: ai.signal.action as "BUY" | "SELL",
+        entry: liveSpot,
+        target: targetPremium,
+        stopLoss: stopLossPremium,
+        strike: liveOrder.instrument.tradingSymbol,
+        quantity: liveOrder.quantity,
+        initialTargetPoints: targetPoints,
+        initialSlPoints: slPoints,
+        instrumentToken: liveOrder.instrumentToken,
+        slOrderId: liveOrder.slOrderId,
+        entryPremium: liveOrder.entryPremium,
+        currentPremium: liveOrder.entryPremium,
+        targetPremium,
+        stopLossPremium,
+        lastSyncedStopLossPremium: liveOrder.stopLossPremium,
+      };
       if (!userEditedExitsRef.current) {
         setUserTargetPoints(formatPremiumInput(targetPremium));
         setUserSlPoints(formatPremiumInput(stopLossPremium));
@@ -1063,11 +1657,23 @@ const Index = () => {
       localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
-      toast({ title: "LIVE ORDER + SERVER SL PLACED", description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.` });
+      toast({
+        title: "LIVE ORDER + SERVER SL PLACED",
+        description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.`,
+      });
       return;
     } catch (error) {
-      pushDebug({ stage: "ERROR", level: "error", title: "ORDER FAILED", detail: error instanceof Error ? error.message : String(error) });
-      toast({ title: "Live execution failed", description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.", variant: "destructive" });
+      pushDebug({
+        stage: "ERROR",
+        level: "error",
+        title: "ORDER FAILED",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      toast({
+        title: "Live execution failed",
+        description: error instanceof Error ? error.message : "Execution cycle will retry on the next poll.",
+        variant: "destructive",
+      });
     } finally {
       setIsBusy(false);
     }
@@ -1091,9 +1697,16 @@ const Index = () => {
         localStorage.setItem(KILL_SWITCH_STORAGE_KEY, today);
         localStorage.setItem(AI_ARMED_STORAGE_KEY, "false");
       }
-      toast({ title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent", description: "Open positions exit request was sent to Upstox. New entries are blocked for 15 minutes." });
+      toast({
+        title: lockForDay ? "Emergency exit + lock active" : "Emergency exit sent",
+        description: "Open positions exit request was sent to Upstox. New entries are blocked for 15 minutes.",
+      });
     } catch (error) {
-      toast({ title: "Emergency exit failed", description: error instanceof Error ? error.message : "Please check Upstox and retry.", variant: "destructive" });
+      toast({
+        title: "Emergency exit failed",
+        description: error instanceof Error ? error.message : "Please check Upstox and retry.",
+        variant: "destructive",
+      });
     } finally {
       setIsBusy(false);
     }
@@ -1101,13 +1714,30 @@ const Index = () => {
 
   const toggleAiTrading = async (checked: boolean) => {
     if (checked && tradingBlocked) {
-      toast({ title: cooldownActive ? "Cooldown Active" : targetAchieved ? "Target Achieved" : hardKillActive ? "Hard Kill-Switch Active" : "Max Trades Reached", description: cooldownActive ? `AI entry blocked for ${cooldownRemainingMinutes} more minutes.` : "AI trading is disabled for the rest of the day.", variant: targetAchieved || cooldownActive ? "default" : "destructive" });
+      toast({
+        title: cooldownActive
+          ? "Cooldown Active"
+          : targetAchieved
+            ? "Target Achieved"
+            : hardKillActive
+              ? "Hard Kill-Switch Active"
+              : "Max Trades Reached",
+        description: cooldownActive
+          ? `AI entry blocked for ${cooldownRemainingMinutes} more minutes.`
+          : "AI trading is disabled for the rest of the day.",
+        variant: targetAchieved || cooldownActive ? "default" : "destructive",
+      });
       return;
     }
     setIsBusy(true);
     localStorage.setItem(AI_ARMED_STORAGE_KEY, String(checked));
     try {
-      await invokeFunction("toggle-ai-trading", { isActive: checked, riskMode, tradingLotSize: normalizedTradingLotSize, tradingQuantity: totalTradingQuantity });
+      await invokeFunction("toggle-ai-trading", {
+        isActive: checked,
+        riskMode,
+        tradingLotSize: normalizedTradingLotSize,
+        tradingQuantity: totalTradingQuantity,
+      });
       setAiEnabled(checked);
       if (checked) {
         const status = await retestUpstox(false);
@@ -1119,7 +1749,12 @@ const Index = () => {
         }
         await fetchLiveNifty(false, true);
       }
-      toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
+      toast({
+        title: checked ? "AI trading loop started" : "AI trading loop stopped",
+        description: checked
+          ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open."
+          : "Automation is paused.",
+      });
 
       // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
       try {
@@ -1128,11 +1763,18 @@ const Index = () => {
         setBackendOnline(true);
         const m = (result.mode || "").toUpperCase();
         if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
-        toast({ title: checked ? "AUTO MODE ENABLED" : "MANUAL MODE ENABLED", description: `Backend status: ${result.status}` });
+        toast({
+          title: checked ? "AUTO MODE ENABLED" : "MANUAL MODE ENABLED",
+          description: `Backend status: ${result.status}`,
+        });
       } catch (err) {
         setBackendOnline(false);
         setBackendMode("UNKNOWN");
-        toast({ title: "Backend Offline", description: err instanceof Error ? err.message : "Could not reach FastAPI backend.", variant: "destructive" });
+        toast({
+          title: "Backend Offline",
+          description: err instanceof Error ? err.message : "Could not reach FastAPI backend.",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       if (checked) setAiEnabled(true);
@@ -1148,14 +1790,32 @@ const Index = () => {
     if (session && upstoxReady) {
       marketIntervalRef.current = setInterval(() => {
         if (Date.now() < upstoxBackoffUntilRef.current) return;
-        fetchLiveNifty().catch((error) => showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."));
+        fetchLiveNifty().catch((error) =>
+          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."),
+        );
       }, UPSTOX_POLL_INTERVAL_MS);
       if (aiEnabled) {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
-          withTimeout(invokeFunction<{ signal: Signal }>("analyze-with-ai", { tradingMode, tradingLotSize: normalizedTradingLotSize, dailyProfitTarget: normalizedDailyTarget, maxDailyLoss: normalizedMaxDailyLoss, dailyPnl, userTargetPoints: Number(userTargetPoints) || null, userSlPoints: Number(userSlPoints) || null }), 25_000, "OpenAI analysis timed out; continuing Upstox polling.")
+          withTimeout(
+            invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+              tradingMode,
+              tradingLotSize: normalizedTradingLotSize,
+              dailyProfitTarget: normalizedDailyTarget,
+              maxDailyLoss: normalizedMaxDailyLoss,
+              dailyPnl,
+              userTargetPoints: Number(userTargetPoints) || null,
+              userSlPoints: Number(userSlPoints) || null,
+            }),
+            25_000,
+            "OpenAI analysis timed out; continuing Upstox polling.",
+          )
             .then((ai) => applySniperSignal(ai.signal))
-            .catch((error) => showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."));
+            .catch((error) =>
+              showRetryToast(
+                error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll.",
+              ),
+            );
         }, AI_REASONING_INTERVAL_MS);
       }
     }
@@ -1163,23 +1823,39 @@ const Index = () => {
       if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, upstoxReady, aiEnabled, normalizedTradingLotSize, totalTradingQuantity, tradingBlocked, normalizedDailyTarget, normalizedMaxDailyLoss, dailyPnl, userTargetPoints, userSlPoints]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    session,
+    upstoxReady,
+    aiEnabled,
+    normalizedTradingLotSize,
+    totalTradingQuantity,
+    tradingBlocked,
+    normalizedDailyTarget,
+    normalizedMaxDailyLoss,
+    dailyPnl,
+    userTargetPoints,
+    userSlPoints,
+  ]);
 
   useEffect(() => {
     if (!session) return;
-    checkSystemStatus(false).then((status) => {
-      if (status.upstox.ok) return fetchLiveNifty(false, true);
-      return null;
-    }).catch(() => {
-      // Connection Pulse will show missing setup after a manual check.
-    });
+    checkSystemStatus(false)
+      .then((status) => {
+        if (status.upstox.ok) return fetchLiveNifty(false, true);
+        return null;
+      })
+      .catch(() => {
+        // Connection Pulse will show missing setup after a manual check.
+      });
     if (aiEnabled && !marketIsOpen) setAiEnabled(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   return (
-    <main className={`min-h-screen overflow-hidden bg-terminal text-foreground ${exitAlertActive ? "animate-pulse bg-loss" : ""}`}>
+    <main
+      className={`min-h-screen overflow-hidden bg-terminal text-foreground ${exitAlertActive ? "animate-pulse bg-loss" : ""}`}
+    >
       <div className="pointer-events-none fixed inset-0 noise-overlay opacity-30" />
       <section className="relative mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-4 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 rounded-lg border border-border bg-panel/80 p-4 shadow-panel backdrop-blur md:flex-row md:items-center md:justify-between">
@@ -1187,14 +1863,20 @@ const Index = () => {
             <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
               <Radio className="h-3.5 w-3.5 text-primary" /> Options Command Desk
             </p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-normal text-foreground sm:text-3xl">Nifty Options Trading Dashboard</h1>
+            <h1 className="mt-2 text-2xl font-semibold tracking-normal text-foreground sm:text-3xl">
+              Nifty Options Trading Dashboard
+            </h1>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:min-w-[430px]">
             <div className="rounded-md border border-border bg-surface px-4 py-3">
               <p className="text-xs uppercase text-muted-foreground">Live Nifty 50</p>
               <div className="mt-1 flex items-end gap-2">
-                <span className="text-2xl font-bold text-foreground">{hasLivePrice ? latestLtp.toLocaleString("en-IN") : "—"}</span>
-                <span className="flex items-center text-sm font-semibold text-profit"><TrendingUp className="h-4 w-4" /> {hasLivePrice ? "Live" : "Waiting"}</span>
+                <span className="text-2xl font-bold text-foreground">
+                  {hasLivePrice ? latestLtp.toLocaleString("en-IN") : "—"}
+                </span>
+                <span className="flex items-center text-sm font-semibold text-profit">
+                  <TrendingUp className="h-4 w-4" /> {hasLivePrice ? "Live" : "Waiting"}
+                </span>
               </div>
             </div>
             <div className="rounded-md border border-primary/30 bg-primary/10 px-4 py-3">
@@ -1203,8 +1885,12 @@ const Index = () => {
                 <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
               <div className="mt-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em]">
-                <span className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${backendOnline === false ? "border-loss/40 bg-loss/10 text-loss" : backendOnline ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-surface text-muted-foreground"}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${backendOnline === false ? "bg-loss" : backendOnline ? "bg-profit" : "bg-muted-foreground"}`} />
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${backendOnline === false ? "border-loss/40 bg-loss/10 text-loss" : backendOnline ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-surface text-muted-foreground"}`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${backendOnline === false ? "bg-loss" : backendOnline ? "bg-profit" : "bg-muted-foreground"}`}
+                  />
                   {backendOnline === false ? "Backend Offline" : backendOnline ? "Backend Online" : "Backend ?"}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-1.5 py-0.5 font-semibold text-foreground">
@@ -1229,14 +1915,18 @@ const Index = () => {
                 </span>
               </div>
             </div>
-              <div className="rounded-md border border-border bg-surface px-4 py-3">
-                <p className="text-xs uppercase text-muted-foreground">Available Cash</p>
-                <p className="mt-1 text-2xl font-bold text-profit">{formatMoney(latestData?.raw_payload?.account?.margin?.availableCash)}</p>
-              </div>
-              <div className="rounded-md border border-border bg-surface px-4 py-3">
-                <p className="text-xs uppercase text-muted-foreground">Today's P&L</p>
-                <p className={`mt-1 text-2xl font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(dailyPnl)}</p>
-              </div>
+            <div className="rounded-md border border-border bg-surface px-4 py-3">
+              <p className="text-xs uppercase text-muted-foreground">Available Cash</p>
+              <p className="mt-1 text-2xl font-bold text-profit">
+                {formatMoney(latestData?.raw_payload?.account?.margin?.availableCash)}
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-surface px-4 py-3">
+              <p className="text-xs uppercase text-muted-foreground">Today's P&L</p>
+              <p className={`mt-1 text-2xl font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>
+                {formatMoney(dailyPnl)}
+              </p>
+            </div>
           </div>
           {session && (
             <Button type="button" variant="terminal" className="md:w-auto" onClick={() => setSettingsOpen(true)}>
@@ -1247,12 +1937,34 @@ const Index = () => {
 
         {!session && (
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
-            <div className="mb-4 flex items-center gap-2"><LogIn className="h-5 w-5 text-primary" /><h2 className="text-xl font-semibold">Secure Access</h2></div>
+            <div className="mb-4 flex items-center gap-2">
+              <LogIn className="h-5 w-5 text-primary" />
+              <h2 className="text-xl font-semibold">Secure Access</h2>
+            </div>
             <form onSubmit={signIn} className="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
-              <Input type="email" placeholder="Email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} required className="border-border bg-surface" />
-              <Input type="password" placeholder="Password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} required minLength={8} className="border-border bg-surface" />
-              <Button type="submit" variant="trading">Sign in</Button>
-              <Button type="button" variant="terminal" onClick={signInWithGoogle}>Google</Button>
+              <Input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+                required
+                className="border-border bg-surface"
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                required
+                minLength={8}
+                className="border-border bg-surface"
+              />
+              <Button type="submit" variant="trading">
+                Sign in
+              </Button>
+              <Button type="button" variant="terminal" onClick={signInWithGoogle}>
+                Google
+              </Button>
             </form>
           </section>
         )}
@@ -1260,52 +1972,153 @@ const Index = () => {
         <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
           <DialogContent className="h-dvh w-screen max-w-none overflow-y-auto rounded-none border-border bg-panel text-foreground shadow-panel sm:h-auto sm:max-h-[92vh] sm:max-w-2xl sm:rounded-lg">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-xl"><KeyRound className="h-5 w-5 text-primary" /> API Settings</DialogTitle>
-              <DialogDescription>Keys are submitted only to the secure backend function and are cleared from this form after saving.</DialogDescription>
+              <DialogTitle className="flex items-center gap-2 text-xl">
+                <KeyRound className="h-5 w-5 text-primary" /> API Settings
+              </DialogTitle>
+              <DialogDescription>
+                Keys are submitted only to the secure backend function and are cleared from this form after saving.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={saveOpenAISettings} className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-key" className="flex items-center gap-2">Upstox API Key {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
-                  <Input id="upstox-api-key" type="text" autoComplete="off" placeholder="Enter Upstox API Key" value={settings.upstoxApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))} className="border-border bg-surface" />
+                  <Label htmlFor="upstox-api-key" className="flex items-center gap-2">
+                    Upstox API Key{" "}
+                    {systemStatus?.upstox?.ok && (
+                      <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />
+                    )}
+                  </Label>
+                  <Input
+                    id="upstox-api-key"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter Upstox API Key"
+                    value={settings.upstoxApiKey}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiKey: event.target.value }))}
+                    className="border-border bg-surface"
+                  />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="upstox-api-secret" className="flex items-center gap-2">Upstox API Secret {systemStatus?.upstox?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />}</Label>
-                  <Input id="upstox-api-secret" type="text" autoComplete="off" placeholder="Enter Upstox API Secret" value={settings.upstoxApiSecret} onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))} className="border-border bg-surface" />
+                  <Label htmlFor="upstox-api-secret" className="flex items-center gap-2">
+                    Upstox API Secret{" "}
+                    {systemStatus?.upstox?.ok && (
+                      <CheckCircle2 className="h-4 w-4 text-profit" aria-label="Upstox verified" />
+                    )}
+                  </Label>
+                  <Input
+                    id="upstox-api-secret"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter Upstox API Secret"
+                    value={settings.upstoxApiSecret}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))}
+                    className="border-border bg-surface"
+                  />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">OpenAI API Key {systemStatus?.gemini?.ok && <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />}</Label>
-                  <Input id="openai-api-key" type="text" autoComplete="off" placeholder="Enter OpenAI API Key" value={settings.openaiApiKey} onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))} className="border-border bg-surface" />
+                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">
+                    OpenAI API Key{" "}
+                    {systemStatus?.gemini?.ok && (
+                      <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />
+                    )}
+                  </Label>
+                  <Input
+                    id="openai-api-key"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Enter OpenAI API Key"
+                    value={settings.openaiApiKey}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, openaiApiKey: event.target.value }))}
+                    className="border-border bg-surface"
+                  />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
-                  <Input id="redirect-uri" type="url" autoComplete="off" value={settings.redirectUri} readOnly className="border-border bg-surface" />
-                  <p className="text-xs leading-5 text-muted-foreground">Get Code and Connect both use this exact value. In the Authorization URL it is encoded as <span className="text-foreground">redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}</span>.</p>
+                  <Input
+                    id="redirect-uri"
+                    type="url"
+                    autoComplete="off"
+                    value={settings.redirectUri}
+                    readOnly
+                    className="border-border bg-surface"
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Get Code and Connect both use this exact value. In the Authorization URL it is encoded as{" "}
+                    <span className="text-foreground">
+                      redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}
+                    </span>
+                    .
+                  </p>
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}><ExternalLink className="h-4 w-4" /> Get Code</Button>
-                <Button disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret} type="button" variant="terminal" onClick={saveUpstoxSettings}>Save Upstox</Button>
-                <Button disabled={isBusy || !settings.openaiApiKey} type="submit" variant="trading">Save OpenAI</Button>
+                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>
+                  <ExternalLink className="h-4 w-4" /> Get Code
+                </Button>
+                <Button
+                  disabled={isBusy || !settings.upstoxApiKey || !settings.upstoxApiSecret}
+                  type="button"
+                  variant="terminal"
+                  onClick={saveUpstoxSettings}
+                >
+                  Save Upstox
+                </Button>
+                <Button disabled={isBusy || !settings.openaiApiKey} type="submit" variant="trading">
+                  Save OpenAI
+                </Button>
               </DialogFooter>
             </form>
             <div className="rounded-md border border-border bg-surface p-3">
-              <Label htmlFor="authorization-url" className="text-muted-foreground">Authorization URL generated right now</Label>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">This is the exact full link returned by the secure backend. Tap Get Code to refresh it, then finish login and copy the <span className="font-semibold text-foreground">code</span> from the redirected URL bar.</p>
-              <Textarea id="authorization-url" readOnly value={authorizationUrl || "Tap Get Code to generate the full Upstox Authorization URL."} className="mt-2 min-h-[120px] resize-none break-all border-border bg-panel font-mono text-xs" />
+              <Label htmlFor="authorization-url" className="text-muted-foreground">
+                Authorization URL generated right now
+              </Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                This is the exact full link returned by the secure backend. Tap Get Code to refresh it, then finish
+                login and copy the <span className="font-semibold text-foreground">code</span> from the redirected URL
+                bar.
+              </p>
+              <Textarea
+                id="authorization-url"
+                readOnly
+                value={authorizationUrl || "Tap Get Code to generate the full Upstox Authorization URL."}
+                className="mt-2 min-h-[120px] resize-none break-all border-border bg-panel font-mono text-xs"
+              />
             </div>
             <div className="rounded-md border border-border bg-surface p-3">
-              <Label htmlFor="oauth-code" className="text-muted-foreground">Upstox OAuth code</Label>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Tap Get Code, finish Upstox login, then copy a fresh <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste it here.</p>
+              <Label htmlFor="oauth-code" className="text-muted-foreground">
+                Upstox OAuth code
+              </Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Tap Get Code, finish Upstox login, then copy a fresh{" "}
+                <span className="font-semibold text-foreground">code</span> value from the redirected URL bar and paste
+                it here.
+              </p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                <Input id="oauth-code" placeholder="Paste OAuth code" value={oauthCode} onChange={(event) => setOauthCode(event.target.value)} className="border-border bg-panel" />
-                <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>Connect</Button>
+                <Input
+                  id="oauth-code"
+                  placeholder="Paste OAuth code"
+                  value={oauthCode}
+                  onChange={(event) => setOauthCode(event.target.value)}
+                  className="border-border bg-panel"
+                />
+                <Button disabled={!oauthCode || isBusy} type="button" variant="terminal" onClick={completeUpstoxOAuth}>
+                  Connect
+                </Button>
               </div>
             </div>
             <div className="rounded-md border border-border bg-surface p-3">
-              <Label htmlFor="oauth-debug-log" className="text-muted-foreground">Debug Log</Label>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">This shows the exact token exchange payload. Generate a fresh OAuth code before tapping Connect again.</p>
-              <Textarea id="oauth-debug-log" readOnly value={oauthDebugLog} className="mt-2 min-h-[96px] resize-none border-border bg-panel font-mono text-xs" />
+              <Label htmlFor="oauth-debug-log" className="text-muted-foreground">
+                Debug Log
+              </Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                This shows the exact token exchange payload. Generate a fresh OAuth code before tapping Connect again.
+              </p>
+              <Textarea
+                id="oauth-debug-log"
+                readOnly
+                value={oauthDebugLog}
+                className="mt-2 min-h-[96px] resize-none border-border bg-panel font-mono text-xs"
+              />
             </div>
           </DialogContent>
         </Dialog>
@@ -1313,61 +2126,259 @@ const Index = () => {
         {session && (
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Connection Pulse</p><h2 className="text-xl font-semibold">System Status</h2></div>
-              <Button type="button" variant="terminal" disabled={isCheckingStatus} onClick={() => checkSystemStatus(true)}>
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Connection Pulse</p>
+                <h2 className="text-xl font-semibold">System Status</h2>
+              </div>
+              <Button
+                type="button"
+                variant="terminal"
+                disabled={isCheckingStatus}
+                onClick={() => checkSystemStatus(true)}
+              >
                 <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Verify Now
               </Button>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className={`rounded-md border p-4 ${systemStatus?.upstox?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+              <div
+                className={`rounded-md border p-4 ${systemStatus?.upstox?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}
+              >
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
-                    {systemStatus?.upstox?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    {systemStatus?.upstox?.ok ? (
+                      <CheckCircle2 className="h-5 w-5 text-profit" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-loss" />
+                    )}
                     <span>Upstox API Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestUpstox()}>
+                  <Button
+                    type="button"
+                    variant="terminal"
+                    size="sm"
+                    disabled={isCheckingStatus}
+                    onClick={() => retestUpstox()}
+                  >
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test Upstox
                   </Button>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}</p>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {systemStatus?.upstox?.message ?? "Confirms the OAuth access token can reach Upstox right now."}
+                </p>
               </div>
-              <div className={`rounded-md border p-4 ${systemStatus?.gemini?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}>
+              <div
+                className={`rounded-md border p-4 ${systemStatus?.gemini?.ok ? "border-profit/30 bg-profit/10" : "border-border bg-surface"}`}
+              >
                 <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 font-semibold">
-                    {systemStatus?.gemini?.ok ? <CheckCircle2 className="h-5 w-5 text-profit" /> : <XCircle className="h-5 w-5 text-loss" />}
+                    {systemStatus?.gemini?.ok ? (
+                      <CheckCircle2 className="h-5 w-5 text-profit" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-loss" />
+                    )}
                     <span>OpenAI GPT-4o Status</span>
                   </div>
-                  <Button type="button" variant="terminal" size="sm" disabled={isCheckingStatus} onClick={() => retestOpenAI()}>
+                  <Button
+                    type="button"
+                    variant="terminal"
+                    size="sm"
+                    disabled={isCheckingStatus}
+                    onClick={() => retestOpenAI()}
+                  >
                     <RefreshCw className={`h-4 w-4 ${isCheckingStatus ? "animate-spin" : ""}`} /> Re-test OpenAI
                   </Button>
                 </div>
-                <p className="text-sm leading-6 text-muted-foreground">{systemStatus?.gemini?.message ?? "Runs a small OpenAI GPT-4o response test using the saved key."}</p>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {systemStatus?.gemini?.message ?? "Runs a small OpenAI GPT-4o response test using the saved key."}
+                </p>
               </div>
             </div>
-            {systemStatus?.checkedAt && <p className="mt-3 text-xs text-muted-foreground">Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}</p>}
+            {systemStatus?.checkedAt && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Last checked: {new Date(systemStatus.checkedAt).toLocaleString("en-IN")}
+              </p>
+            )}
           </section>
         )}
 
         <div className="grid gap-5 xl:grid-cols-[1.55fr_0.85fr]">
           <section className="relative min-h-[430px] overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
             <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Real-time Upstox feed</p><h2 className="text-xl font-semibold">NIFTY 50 · 1m Live Price</h2></div>
-              <div className="flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">{latestSignal?.action ?? "WAIT"} Bias</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">Vol: {latestSignal?.ruleContext?.rules?.volumeValid === true ? "Valid +20%" : latestSignal?.ruleContext?.rules?.volumeValid === false ? "Below +20%" : "Pending"}</span><span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">VIX: {latestData?.raw_payload?.context?.indiaVix?.ltp ?? "—"}</span></div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Real-time Upstox feed</p>
+                <h2 className="text-xl font-semibold">NIFTY 50 · 1m Live Price</h2>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                <span className="rounded-sm border border-profit/30 bg-profit/10 px-2 py-1 text-profit">
+                  {latestSignal?.action ?? "WAIT"} Bias
+                </span>
+                <span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">
+                  Vol:{" "}
+                  {latestSignal?.ruleContext?.rules?.volumeValid === true
+                    ? "Valid +20%"
+                    : latestSignal?.ruleContext?.rules?.volumeValid === false
+                      ? "Below +20%"
+                      : "Pending"}
+                </span>
+                <span className="rounded-sm border border-border bg-surface px-2 py-1 text-muted-foreground">
+                  VIX: {latestData?.raw_payload?.context?.indiaVix?.ltp ?? "—"}
+                </span>
+              </div>
             </div>
             <div className="market-grid relative h-[360px] p-5">
-              <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">{chartLevels.map((level, index) => <span key={`${level}-${index}`}>{marketHistory.length ? level.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}</span>)}</div>
+              <div className="absolute inset-y-5 right-5 flex flex-col justify-between text-xs text-muted-foreground">
+                {chartLevels.map((level, index) => (
+                  <span key={`${level}-${index}`}>
+                    {marketHistory.length ? level.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "—"}
+                  </span>
+                ))}
+              </div>
               <div className="absolute left-0 top-1/2 h-px w-full bg-profit/40" />
               <div className="absolute left-0 top-0 h-full w-1/3 bg-gradient-to-r from-primary/10 to-transparent animate-scan motion-reduce:animate-none" />
-              {marketHistory.length ? <div className="absolute bottom-8 left-5 right-14 flex h-64 items-end gap-2">{chartBars.map((height, index) => <div key={`${marketHistory[index].time}-${index}`} className="flex flex-1 items-end justify-center"><span className={`w-full max-w-3 rounded-t-sm ${index > 0 && marketHistory[index].value < marketHistory[index - 1].value ? "bg-loss" : "bg-profit"}`} style={{ height: `${height}%` }} /></div>)}</div> : <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">Connect Upstox OAuth to stream live Nifty 50 prices.</div>}
+              {marketHistory.length ? (
+                <div className="absolute bottom-8 left-5 right-14 flex h-64 items-end gap-2">
+                  {chartBars.map((height, index) => (
+                    <div key={`${marketHistory[index].time}-${index}`} className="flex flex-1 items-end justify-center">
+                      <span
+                        className={`w-full max-w-3 rounded-t-sm ${index > 0 && marketHistory[index].value < marketHistory[index - 1].value ? "bg-loss" : "bg-profit"}`}
+                        style={{ height: `${height}%` }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">
+                  Connect Upstox OAuth to stream live Nifty 50 prices.
+                </div>
+              )}
               {chartPolyline && (
-                <svg className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
-                  <polyline points={chartPolyline} fill="none" stroke="hsl(var(--chart-line))" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
-                  {targetY !== null && targetY >= 0 && targetY <= 100 && (<><line x1="0" x2="100" y1={targetY} y2={targetY} stroke="hsl(var(--profit))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, targetY - 1)} fill="hsl(var(--profit))" fontSize="3.2" fontWeight="700">TGT {visualTargetIndex?.toFixed(1)}</text></>)}
-                  {entryY !== null && entryY >= 0 && entryY <= 100 && signalAction && (<><line x1="0" x2="100" y1={entryY} y2={entryY} stroke="hsl(var(--primary))" strokeWidth="1" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, entryY - 1)} fill="hsl(var(--primary))" fontSize="3" fontWeight="700">ENTRY {visualEntryIndex?.toFixed(1)}</text></>)}
-                  {slY !== null && slY >= 0 && slY <= 100 && (<><line x1="0" x2="100" y1={slY} y2={slY} stroke="hsl(var(--loss))" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke" /><text x="1" y={Math.max(4, slY - 1)} fill="hsl(var(--loss))" fontSize="3.2" fontWeight="700">SL {visualSlIndex?.toFixed(1)}</text></>)}
-                  {pdhY !== null && (<><line x1="0" x2="100" y1={pdhY} y2={pdhY} stroke="hsl(var(--warning))" strokeWidth="0.8" strokeDasharray="1 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdhY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">PDH {pdhVal?.toFixed(1)}</text></>)}
-                  {pdlY !== null && (<><line x1="0" x2="100" y1={pdlY} y2={pdlY} stroke="hsl(var(--warning))" strokeWidth="0.8" strokeDasharray="1 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdlY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">PDL {pdlVal?.toFixed(1)}</text></>)}
-                  {pdcY !== null && (<><line x1="0" x2="100" y1={pdcY} y2={pdcY} stroke="hsl(var(--muted-foreground))" strokeWidth="0.6" strokeDasharray="0.5 2" vectorEffect="non-scaling-stroke" /><text x="80" y={Math.max(4, pdcY - 1)} fill="hsl(var(--muted-foreground))" fontSize="2.6" fontWeight="700">PDC {pdcVal?.toFixed(1)}</text></>)}
+                <svg
+                  className="absolute bottom-8 left-5 right-14 h-64 w-[calc(100%-5.75rem)] overflow-visible"
+                  preserveAspectRatio="none"
+                  viewBox="0 0 100 100"
+                  aria-hidden="true"
+                >
+                  <polyline
+                    points={chartPolyline}
+                    fill="none"
+                    stroke="hsl(var(--chart-line))"
+                    strokeWidth="1.8"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {targetY !== null && targetY >= 0 && targetY <= 100 && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={targetY}
+                        y2={targetY}
+                        stroke="hsl(var(--profit))"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text
+                        x="1"
+                        y={Math.max(4, targetY - 1)}
+                        fill="hsl(var(--profit))"
+                        fontSize="3.2"
+                        fontWeight="700"
+                      >
+                        TGT {visualTargetIndex?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
+                  {entryY !== null && entryY >= 0 && entryY <= 100 && signalAction && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={entryY}
+                        y2={entryY}
+                        stroke="hsl(var(--primary))"
+                        strokeWidth="1"
+                        strokeDasharray="2 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text x="1" y={Math.max(4, entryY - 1)} fill="hsl(var(--primary))" fontSize="3" fontWeight="700">
+                        ENTRY {visualEntryIndex?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
+                  {slY !== null && slY >= 0 && slY <= 100 && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={slY}
+                        y2={slY}
+                        stroke="hsl(var(--loss))"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text x="1" y={Math.max(4, slY - 1)} fill="hsl(var(--loss))" fontSize="3.2" fontWeight="700">
+                        SL {visualSlIndex?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
+                  {pdhY !== null && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={pdhY}
+                        y2={pdhY}
+                        stroke="hsl(var(--warning))"
+                        strokeWidth="0.8"
+                        strokeDasharray="1 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text x="80" y={Math.max(4, pdhY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">
+                        PDH {pdhVal?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
+                  {pdlY !== null && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={pdlY}
+                        y2={pdlY}
+                        stroke="hsl(var(--warning))"
+                        strokeWidth="0.8"
+                        strokeDasharray="1 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text x="80" y={Math.max(4, pdlY - 1)} fill="hsl(var(--warning))" fontSize="2.6" fontWeight="700">
+                        PDL {pdlVal?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
+                  {pdcY !== null && (
+                    <>
+                      <line
+                        x1="0"
+                        x2="100"
+                        y1={pdcY}
+                        y2={pdcY}
+                        stroke="hsl(var(--muted-foreground))"
+                        strokeWidth="0.6"
+                        strokeDasharray="0.5 2"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text
+                        x="80"
+                        y={Math.max(4, pdcY - 1)}
+                        fill="hsl(var(--muted-foreground))"
+                        fontSize="2.6"
+                        fontWeight="700"
+                      >
+                        PDC {pdcVal?.toFixed(1)}
+                      </text>
+                    </>
+                  )}
                 </svg>
               )}
             </div>
@@ -1375,20 +2386,212 @@ const Index = () => {
 
           <aside className="grid gap-5">
             <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
-              <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p><h2 className="text-xl font-semibold">Autonomy Settings</h2></div><Bot className="h-6 w-6 text-primary" /></div>
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">AI Control Panel</p>
+                  <h2 className="text-xl font-semibold">Autonomy Settings</h2>
+                </div>
+                <Bot className="h-6 w-6 text-primary" />
+              </div>
               <div className="space-y-5">
-                {upstoxNeedsSetup && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Upstox OAuth is not connected. Open API Settings, tap Get Code, then Connect before starting live data or orders.</div>}
-                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4"><div><p className="font-semibold">Start AI Trading</p><p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p></div><Switch disabled={!session || isBusy || tradingBlocked || !upstoxReady} checked={aiEnabled} onCheckedChange={toggleAiTrading} aria-label="Start AI Trading" /></div>
-                <div className="space-y-2"><Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">Trading Lot Size</Label><Input id="trading-lot-size" type="number" min="1" step="1" inputMode="numeric" value={tradingLotSize} onChange={(event) => setTradingLotSize(event.target.value)} className="border-border bg-surface" /><p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p></div>
-                {latestSignal?.riskSizeDown && <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.</div>}
-                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">Premium Target Price</Label><Input id="user-target-points" type="number" min="0" step="0.05" inputMode="decimal" value={userTargetPoints} onChange={(event) => handleTargetPointsChange(event.target.value)} className="border-border bg-surface" /></div><div className="space-y-2"><Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">Premium SL / TSL Price</Label><Input id="user-sl-points" type="number" min="0" step="0.05" inputMode="decimal" value={userSlPoints} onChange={(event) => handleSlPointsChange(event.target.value)} className="border-border bg-surface" /></div></div>
-                <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">Daily Profit Target</Label><Input id="daily-profit-target" type="number" min="0" step="500" inputMode="numeric" value={dailyProfitTarget} onChange={(event) => setDailyProfitTarget(event.target.value)} className="border-border bg-surface" /></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div></div>
-                {(targetAchieved || hardKillActive || cooldownActive) && <div className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}>{cooldownActive ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.` : targetAchieved ? "Target Achieved — AI trading stopped for the day." : "Hard Kill-Switch Active — max daily loss hit."}</div>}
-                <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Trading Mode</label><Select value={tradingMode} onValueChange={(v) => { setTradingMode(v as "scalping" | "sniper"); localStorage.setItem("zt_trading_mode", v); setLatestSignal(null); signalLockRef.current = null; toast({ title: `Switched to ${v === "scalping" ? "Scalping" : "Sniper"} Mode`, description: "Resetting AI reasoning and forcing a fresh analysis with the new logic." }); if (aiEnabled && !tradingBlocked) { runTradingCycle().catch(() => {}); } }}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="scalping">Scalping (4–5 trades/day)</SelectItem><SelectItem value="sniper">Sniper (high-conviction only)</SelectItem></SelectContent></Select><p className="text-xs text-muted-foreground">Active: <span className="font-semibold text-foreground">{modeLabel}</span></p></div>
-                <div className="space-y-2"><label className="text-sm font-medium text-muted-foreground">Risk Mode</label><Select value={riskMode} onValueChange={setRiskMode}><SelectTrigger className="border-border bg-surface text-foreground"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="conservative">Conservative</SelectItem><SelectItem value="moderate">Moderate</SelectItem><SelectItem value="aggressive">Aggressive</SelectItem></SelectContent></Select></div>
-                <Button disabled={!session || isBusy || tradingBlocked || !upstoxReady} variant={aiEnabled ? "terminal" : "trading"} className="w-full" onClick={() => toggleAiTrading(!aiEnabled)}>{aiEnabled ? "Armed" : "Arm AI Trading"}</Button>
-                <Button disabled={!session || isBusy || ((tradingBlocked || !upstoxReady) && !activeTrade)} variant={activeTrade ? "destructive" : "terminal"} className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`} onClick={() => activeTrade ? emergencyExit(false) : executeTradingSignal()}>{activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}</Button>
-                {activeTradePlan && <div className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><span className="text-sm font-semibold">{exitAlertActive ? (activeTradePlan.exitAlertReason === "FINAL_TARGET" ? "FINAL TARGET HIT — EXIT NOW" : "TRAILING SL HIT — EXIT NOW") : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}</span><div className="text-left sm:text-right"><p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p><span className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</span></div></div><p className="mt-2 text-xs font-semibold text-muted-foreground">Premium ₹{activeTradePlan.currentPremium?.toFixed(2) ?? activeTradePlan.entryPremium?.toFixed(2) ?? "—"} · Target ₹{(activeTradePlan.targetPremium ?? activeTradePlan.target).toFixed(2)} / Server TSL ₹{(activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss).toFixed(2)} · P/L ₹{currentTradePnlPoints.toFixed(2)}</p><div className={`mt-2 inline-flex items-center gap-2 rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${tslStatusTone}`}><span className={`h-1.5 w-1.5 rounded-full ${tslActivated ? "bg-profit" : "bg-warning"}`} />{tslStatusLabel}</div></div>}
+                {upstoxNeedsSetup && (
+                  <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">
+                    Upstox OAuth is not connected. Open API Settings, tap Get Code, then Connect before starting live
+                    data or orders.
+                  </div>
+                )}
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface p-4">
+                  <div>
+                    <p className="font-semibold">Start AI Trading</p>
+                    <p className="text-sm text-muted-foreground">Trades Remaining: {tradesRemaining}/4</p>
+                  </div>
+                  <Switch
+                    disabled={!session || isBusy || tradingBlocked || !upstoxReady}
+                    checked={aiEnabled}
+                    onCheckedChange={toggleAiTrading}
+                    aria-label="Start AI Trading"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">
+                    Trading Lot Size
+                  </Label>
+                  <Input
+                    id="trading-lot-size"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    value={tradingLotSize}
+                    onChange={(event) => setTradingLotSize(event.target.value)}
+                    className="border-border bg-surface"
+                  />
+                  <p className="text-xs text-muted-foreground">Total quantity sent to Upstox: {totalTradingQuantity}</p>
+                </div>
+                {latestSignal?.riskSizeDown && (
+                  <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm font-semibold text-warning">
+                    Risk size-down active for this trade: quantity reduced to {suggestedQuantity}.
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="user-target-points" className="text-sm font-medium text-muted-foreground">
+                      Premium Target Price
+                    </Label>
+                    <Input
+                      id="user-target-points"
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      inputMode="decimal"
+                      value={userTargetPoints}
+                      onChange={(event) => handleTargetPointsChange(event.target.value)}
+                      className="border-border bg-surface"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="user-sl-points" className="text-sm font-medium text-muted-foreground">
+                      Premium SL / TSL Price
+                    </Label>
+                    <Input
+                      id="user-sl-points"
+                      type="number"
+                      min="0"
+                      step="0.05"
+                      inputMode="decimal"
+                      value={userSlPoints}
+                      onChange={(event) => handleSlPointsChange(event.target.value)}
+                      className="border-border bg-surface"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="daily-profit-target" className="text-sm font-medium text-muted-foreground">
+                      Daily Profit Target
+                    </Label>
+                    <Input
+                      id="daily-profit-target"
+                      type="number"
+                      min="0"
+                      step="500"
+                      inputMode="numeric"
+                      value={dailyProfitTarget}
+                      onChange={(event) => setDailyProfitTarget(event.target.value)}
+                      className="border-border bg-surface"
+                    />
+                  </div>
+                  <div className="rounded-md border border-loss/30 bg-loss/10 p-3">
+                    <p className="text-xs text-muted-foreground">Daily Max Loss</p>
+                    <p className="text-lg font-bold text-loss">₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p>
+                  </div>
+                </div>
+                {(targetAchieved || hardKillActive || cooldownActive) && (
+                  <div
+                    className={`rounded-md border p-3 text-sm font-semibold ${targetAchieved || cooldownActive ? "border-profit/30 bg-profit/10 text-profit" : "border-loss/30 bg-loss/10 text-loss"}`}
+                  >
+                    {cooldownActive
+                      ? `Cooldown Active — next entry in ${cooldownRemainingMinutes} min.`
+                      : targetAchieved
+                        ? "Target Achieved — AI trading stopped for the day."
+                        : "Hard Kill-Switch Active — max daily loss hit."}
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Trading Mode</label>
+                  <Select
+                    value={tradingMode}
+                    onValueChange={(v) => {
+                      setTradingMode(v as "scalping" | "sniper");
+                      localStorage.setItem("zt_trading_mode", v);
+                      setLatestSignal(null);
+                      signalLockRef.current = null;
+                      toast({
+                        title: `Switched to ${v === "scalping" ? "Scalping" : "Sniper"} Mode`,
+                        description: "Resetting AI reasoning and forcing a fresh analysis with the new logic.",
+                      });
+                      if (aiEnabled && !tradingBlocked) {
+                        runTradingCycle().catch(() => {});
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="border-border bg-surface text-foreground">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="scalping">Scalping (4–5 trades/day)</SelectItem>
+                      <SelectItem value="sniper">Sniper (high-conviction only)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Active: <span className="font-semibold text-foreground">{modeLabel}</span>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Risk Mode</label>
+                  <Select value={riskMode} onValueChange={setRiskMode}>
+                    <SelectTrigger className="border-border bg-surface text-foreground">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="conservative">Conservative</SelectItem>
+                      <SelectItem value="moderate">Moderate</SelectItem>
+                      <SelectItem value="aggressive">Aggressive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  disabled={!session || isBusy || tradingBlocked || !upstoxReady}
+                  variant={aiEnabled ? "terminal" : "trading"}
+                  className="w-full"
+                  onClick={() => toggleAiTrading(!aiEnabled)}
+                >
+                  {aiEnabled ? "Armed" : "Arm AI Trading"}
+                </Button>
+                <Button
+                  disabled={!session || isBusy || ((tradingBlocked || !upstoxReady) && !activeTrade)}
+                  variant={activeTrade ? "destructive" : "terminal"}
+                  className={`w-full ${activeTrade ? "min-h-20 animate-pulse text-2xl font-black" : ""}`}
+                  onClick={() => (activeTrade ? emergencyExit(false) : executeTradingSignal())}
+                >
+                  {activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}
+                </Button>
+                {activeTradePlan && (
+                  <div
+                    className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-sm font-semibold">
+                        {exitAlertActive
+                          ? activeTradePlan.exitAlertReason === "FINAL_TARGET"
+                            ? "FINAL TARGET HIT — EXIT NOW"
+                            : "TRAILING SL HIT — EXIT NOW"
+                          : `Live: ${activeTradePlan.strike} · ${activeTradePlan.quantity} qty`}
+                      </span>
+                      <div className="text-left sm:text-right">
+                        <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Current Profit/Loss</p>
+                        <span
+                          className={`text-3xl font-black ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}
+                        >
+                          {formatMoney(currentTradePnlMoney)}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs font-semibold text-muted-foreground">
+                      Premium ₹
+                      {activeTradePlan.currentPremium?.toFixed(2) ?? activeTradePlan.entryPremium?.toFixed(2) ?? "—"} ·
+                      Target ₹{(activeTradePlan.targetPremium ?? activeTradePlan.target).toFixed(2)} / Server TSL ₹
+                      {(activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss).toFixed(2)} · P/L ₹
+                      {currentTradePnlPoints.toFixed(2)}
+                    </p>
+                    <div
+                      className={`mt-2 inline-flex items-center gap-2 rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${tslStatusTone}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${tslActivated ? "bg-profit" : "bg-warning"}`} />
+                      {tslStatusLabel}
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -1408,18 +2611,47 @@ const Index = () => {
                   const blocked = ex.blocked;
                   const slipExit = ex.slippageExit;
                   const badges: Array<{ label: string; tone: string; on: boolean }> = [
-                    { label: "Order Placed ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderPlaced },
-                    { label: "Order Filled ✅", tone: "border-profit/40 bg-profit/10 text-profit", on: !!ex.orderFilled },
+                    {
+                      label: "Order Placed ✅",
+                      tone: "border-profit/40 bg-profit/10 text-profit",
+                      on: !!ex.orderPlaced,
+                    },
+                    {
+                      label: "Order Filled ✅",
+                      tone: "border-profit/40 bg-profit/10 text-profit",
+                      on: !!ex.orderFilled,
+                    },
                     { label: "SL Active 🛡️", tone: "border-primary/40 bg-primary/10 text-primary", on: !!ex.slActive },
-                    { label: "Trailing Active 🔄", tone: "border-warning/40 bg-warning/10 text-warning", on: !!(activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0)) },
+                    {
+                      label: "Trailing Active 🔄",
+                      tone: "border-warning/40 bg-warning/10 text-warning",
+                      on: !!(
+                        activeTradePlan &&
+                        (activeTradePlan.stopLossPremium ?? 0) >
+                          (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0)
+                      ),
+                    },
                   ];
                   return (
                     <>
                       {badges.map((b) => (
-                        <span key={b.label} className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${b.on ? b.tone : "border-border bg-surface text-muted-foreground opacity-60"}`}>{b.label}</span>
+                        <span
+                          key={b.label}
+                          className={`rounded-sm border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${b.on ? b.tone : "border-border bg-surface text-muted-foreground opacity-60"}`}
+                        >
+                          {b.label}
+                        </span>
                       ))}
-                      {blocked && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Blocked: {blocked} ⚠️</span>}
-                      {slipExit && <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">Slippage Exit ⚠️</span>}
+                      {blocked && (
+                        <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">
+                          Blocked: {blocked} ⚠️
+                        </span>
+                      )}
+                      {slipExit && (
+                        <span className="rounded-sm border border-loss/40 bg-loss/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-loss">
+                          Slippage Exit ⚠️
+                        </span>
+                      )}
                     </>
                   );
                 })()}
@@ -1431,24 +2663,54 @@ const Index = () => {
                   <div className="rounded-md border border-border bg-surface p-3">
                     <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Slippage</p>
                     <p className="text-sm">
-                      Quoted <span className="font-semibold text-foreground">₹{lastExecution.slippage?.quotedLtp?.toFixed(2) ?? "—"}</span>
+                      Quoted{" "}
+                      <span className="font-semibold text-foreground">
+                        ₹{lastExecution.slippage?.quotedLtp?.toFixed(2) ?? "—"}
+                      </span>
                       {" → Fill "}
-                      <span className="font-semibold text-foreground">₹{lastExecution.slippage?.fillPrice?.toFixed(2) ?? "—"}</span>
+                      <span className="font-semibold text-foreground">
+                        ₹{lastExecution.slippage?.fillPrice?.toFixed(2) ?? "—"}
+                      </span>
                     </p>
-                    <p className={`mt-1 text-sm font-bold ${(lastExecution.slippage?.slippagePct ?? 0) > execSettings.slippagePct ? "text-loss" : "text-profit"}`}>
+                    <p
+                      className={`mt-1 text-sm font-bold ${(lastExecution.slippage?.slippagePct ?? 0) > execSettings.slippagePct ? "text-loss" : "text-profit"}`}
+                    >
                       {lastExecution.slippage?.slippagePct?.toFixed(2) ?? "—"}% (max {execSettings.slippagePct}%)
                     </p>
                   </div>
                   <div className="rounded-md border border-border bg-surface p-3">
                     <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Liquidity</p>
-                    <p className="text-sm">Bid <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.bid?.toFixed(2) ?? "—"}</span> · Ask <span className="font-semibold text-foreground">₹{lastExecution.liquidity?.ask?.toFixed(2) ?? "—"}</span></p>
+                    <p className="text-sm">
+                      Bid{" "}
+                      <span className="font-semibold text-foreground">
+                        ₹{lastExecution.liquidity?.bid?.toFixed(2) ?? "—"}
+                      </span>{" "}
+                      · Ask{" "}
+                      <span className="font-semibold text-foreground">
+                        ₹{lastExecution.liquidity?.ask?.toFixed(2) ?? "—"}
+                      </span>
+                    </p>
                     <p className="mt-1 text-sm">
-                      Spread <span className={`font-bold ${(lastExecution.liquidity?.spreadPct ?? 0) > execSettings.maxSpreadPct ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.spreadPct?.toFixed(2) ?? "—"}%</span>
+                      Spread{" "}
+                      <span
+                        className={`font-bold ${(lastExecution.liquidity?.spreadPct ?? 0) > execSettings.maxSpreadPct ? "text-loss" : "text-profit"}`}
+                      >
+                        {lastExecution.liquidity?.spreadPct?.toFixed(2) ?? "—"}%
+                      </span>
                       {" · Vol "}
-                      <span className={`font-bold ${(lastExecution.liquidity?.volume ?? 0) < (lastExecution.liquidity?.minVolume ?? 5000) ? "text-loss" : "text-profit"}`}>{lastExecution.liquidity?.volume?.toLocaleString("en-IN") ?? "—"}</span>
+                      <span
+                        className={`font-bold ${(lastExecution.liquidity?.volume ?? 0) < (lastExecution.liquidity?.minVolume ?? 5000) ? "text-loss" : "text-profit"}`}
+                      >
+                        {lastExecution.liquidity?.volume?.toLocaleString("en-IN") ?? "—"}
+                      </span>
                       {" · "}
-                      <span className={`font-semibold ${(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "text-profit" : "text-loss"}`}>
-                        {(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "GOOD" : "LOW"}
+                      <span
+                        className={`font-semibold ${(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct && (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000) ? "text-profit" : "text-loss"}`}
+                      >
+                        {(lastExecution.liquidity?.spreadPct ?? 0) <= execSettings.maxSpreadPct &&
+                        (lastExecution.liquidity?.volume ?? 0) >= (lastExecution.liquidity?.minVolume ?? 5000)
+                          ? "GOOD"
+                          : "LOW"}
                       </span>
                     </p>
                   </div>
@@ -1458,12 +2720,32 @@ const Index = () => {
               {/* Active Trade execution details */}
               {activeTradePlan && lastExecution?.success && (
                 <div className="mb-4 rounded-md border border-border bg-surface p-3 text-sm">
-                  <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Trade Execution Details</p>
+                  <p className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Trade Execution Details
+                  </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <div><p className="text-[11px] text-muted-foreground">Entry</p><p className="font-bold">₹{activeTradePlan.entryPremium?.toFixed(2) ?? "—"}</p></div>
-                    <div><p className="text-[11px] text-muted-foreground">SL Trigger / Limit</p><p className="font-bold text-loss">₹{lastExecution.slTriggerPrice?.toFixed(2) ?? activeTradePlan.stopLossPremium?.toFixed(2) ?? "—"} / ₹{lastExecution.slLimitPrice?.toFixed(2) ?? "—"}</p></div>
-                    <div><p className="text-[11px] text-muted-foreground">Target</p><p className="font-bold text-profit">₹{activeTradePlan.targetPremium?.toFixed(2) ?? "—"}</p></div>
-                    <div><p className="text-[11px] text-muted-foreground">Live P&L</p><p className={`font-bold ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>{formatMoney(currentTradePnlMoney)}</p></div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Entry</p>
+                      <p className="font-bold">₹{activeTradePlan.entryPremium?.toFixed(2) ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">SL Trigger / Limit</p>
+                      <p className="font-bold text-loss">
+                        ₹
+                        {lastExecution.slTriggerPrice?.toFixed(2) ?? activeTradePlan.stopLossPremium?.toFixed(2) ?? "—"}{" "}
+                        / ₹{lastExecution.slLimitPrice?.toFixed(2) ?? "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Target</p>
+                      <p className="font-bold text-profit">₹{activeTradePlan.targetPremium?.toFixed(2) ?? "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Live P&L</p>
+                      <p className={`font-bold ${currentTradePnlMoney >= 0 ? "text-profit" : "text-loss"}`}>
+                        {formatMoney(currentTradePnlMoney)}
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1472,7 +2754,9 @@ const Index = () => {
               {lastExecution && !lastExecution.success && (
                 <div className="mb-4 rounded-md border border-loss/40 bg-loss/10 p-3 text-sm">
                   <p className="font-semibold text-loss">Trade Blocked: {lastExecution.error ?? "Unknown"}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{lastExecution.details ?? "No details provided."}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {lastExecution.details ?? "No details provided."}
+                  </p>
                 </div>
               )}
 
@@ -1481,23 +2765,72 @@ const Index = () => {
                 <p className="mb-3 text-[11px] uppercase tracking-wider text-muted-foreground">Execution Settings</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <Label htmlFor="exec-slippage" className="text-xs text-muted-foreground">Slippage Tolerance (%)</Label>
-                    <Input id="exec-slippage" type="number" step="0.1" min="0.1" max="10" value={execSettings.slippagePct} onChange={(e) => updateExecSettings({ slippagePct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.slippagePct })} className="h-8 border-border bg-panel" />
+                    <Label htmlFor="exec-slippage" className="text-xs text-muted-foreground">
+                      Slippage Tolerance (%)
+                    </Label>
+                    <Input
+                      id="exec-slippage"
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="10"
+                      value={execSettings.slippagePct}
+                      onChange={(e) =>
+                        updateExecSettings({ slippagePct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.slippagePct })
+                      }
+                      className="h-8 border-border bg-panel"
+                    />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="exec-spread" className="text-xs text-muted-foreground">Max Spread (%)</Label>
-                    <Input id="exec-spread" type="number" step="0.1" min="0.1" max="10" value={execSettings.maxSpreadPct} onChange={(e) => updateExecSettings({ maxSpreadPct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.maxSpreadPct })} className="h-8 border-border bg-panel" />
+                    <Label htmlFor="exec-spread" className="text-xs text-muted-foreground">
+                      Max Spread (%)
+                    </Label>
+                    <Input
+                      id="exec-spread"
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="10"
+                      value={execSettings.maxSpreadPct}
+                      onChange={(e) =>
+                        updateExecSettings({
+                          maxSpreadPct: Number(e.target.value) || DEFAULT_EXEC_SETTINGS.maxSpreadPct,
+                        })
+                      }
+                      className="h-8 border-border bg-panel"
+                    />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="exec-retries" className="text-xs text-muted-foreground">Retry Attempts</Label>
-                    <Input id="exec-retries" type="number" step="1" min="0" max="5" value={execSettings.retries} onChange={(e) => updateExecSettings({ retries: Number(e.target.value) || 0 })} className="h-8 border-border bg-panel" />
+                    <Label htmlFor="exec-retries" className="text-xs text-muted-foreground">
+                      Retry Attempts
+                    </Label>
+                    <Input
+                      id="exec-retries"
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="5"
+                      value={execSettings.retries}
+                      onChange={(e) => updateExecSettings({ retries: Number(e.target.value) || 0 })}
+                      className="h-8 border-border bg-panel"
+                    />
                   </div>
                   <div className="flex items-center justify-between rounded-md border border-border bg-panel p-2">
-                    <div><p className="text-xs font-semibold">Liquidity Filter</p><p className="text-[10px] text-muted-foreground">Skip low-volume / wide-spread strikes</p></div>
-                    <Switch checked={execSettings.liquidityFilter} onCheckedChange={(v) => updateExecSettings({ liquidityFilter: v })} aria-label="Liquidity filter" />
+                    <div>
+                      <p className="text-xs font-semibold">Liquidity Filter</p>
+                      <p className="text-[10px] text-muted-foreground">Skip low-volume / wide-spread strikes</p>
+                    </div>
+                    <Switch
+                      checked={execSettings.liquidityFilter}
+                      onCheckedChange={(v) => updateExecSettings({ liquidityFilter: v })}
+                      aria-label="Liquidity filter"
+                    />
                   </div>
                 </div>
-                <p className="mt-2 text-[10px] text-muted-foreground">Slippage tolerance is sent to the order engine on every trade. Spread / retries / liquidity filter are enforced server-side; UI values reflect your preferences.</p>
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  Slippage tolerance is sent to the order engine on every trade. Spread / retries / liquidity filter are
+                  enforced server-side; UI values reflect your preferences.
+                </p>
               </div>
             </section>
 
@@ -1509,7 +2842,12 @@ const Index = () => {
                   <h2 className="text-lg font-semibold">Signal → Order → SL → Trailing</h2>
                 </div>
                 {debugEvents.length > 0 && (
-                  <button onClick={() => setDebugEvents([])} className="rounded-sm border border-border bg-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground">Clear</button>
+                  <button
+                    onClick={() => setDebugEvents([])}
+                    className="rounded-sm border border-border bg-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                  >
+                    Clear
+                  </button>
                 )}
               </div>
 
@@ -1522,10 +2860,26 @@ const Index = () => {
                   const lastSl = debugEvents.find((e) => e.stage === "SL");
                   const lastTrail = debugEvents.find((e) => e.stage === "TRAILING");
                   const cells = [
-                    { k: "Signal", v: lastSig?.title ?? (latestSignal?.action ? `WAITING (${latestSignal.action})` : "Idle"), tone: lastSig ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
-                    { k: "Order", v: lastOrder?.title ?? (ex.orderPlaced ? "ORDER PLACED" : "Idle"), tone: lastOrder ? "border-profit/40 text-profit" : "border-border text-muted-foreground" },
-                    { k: "SL", v: ex.slActive ? "SL ACTIVE" : (lastSl?.title ?? "Idle"), tone: ex.slActive ? "border-primary/40 text-primary" : "border-border text-muted-foreground" },
-                    { k: "Trailing", v: lastTrail?.title ?? "Idle", tone: lastTrail ? "border-warning/40 text-warning" : "border-border text-muted-foreground" },
+                    {
+                      k: "Signal",
+                      v: lastSig?.title ?? (latestSignal?.action ? `WAITING (${latestSignal.action})` : "Idle"),
+                      tone: lastSig ? "border-profit/40 text-profit" : "border-border text-muted-foreground",
+                    },
+                    {
+                      k: "Order",
+                      v: lastOrder?.title ?? (ex.orderPlaced ? "ORDER PLACED" : "Idle"),
+                      tone: lastOrder ? "border-profit/40 text-profit" : "border-border text-muted-foreground",
+                    },
+                    {
+                      k: "SL",
+                      v: ex.slActive ? "SL ACTIVE" : (lastSl?.title ?? "Idle"),
+                      tone: ex.slActive ? "border-primary/40 text-primary" : "border-border text-muted-foreground",
+                    },
+                    {
+                      k: "Trailing",
+                      v: lastTrail?.title ?? "Idle",
+                      tone: lastTrail ? "border-warning/40 text-warning" : "border-border text-muted-foreground",
+                    },
                   ];
                   return cells.map((c) => (
                     <div key={c.k} className={`rounded-md border bg-surface p-2 ${c.tone}`}>
@@ -1539,33 +2893,91 @@ const Index = () => {
               {/* Event log */}
               <div className="max-h-64 overflow-y-auto rounded-md border border-border bg-surface">
                 {debugEvents.length === 0 ? (
-                  <p className="p-3 text-xs text-muted-foreground">No execution events yet. Events appear here in real-time as signals fire and orders are placed.</p>
+                  <p className="p-3 text-xs text-muted-foreground">
+                    No execution events yet. Events appear here in real-time as signals fire and orders are placed.
+                  </p>
                 ) : (
                   <ul className="divide-y divide-border">
                     {debugEvents.map((e) => {
-                      const tone = e.level === "error" ? "text-loss" : e.level === "warn" ? "text-warning" : e.level === "success" ? "text-profit" : "text-foreground";
-                      const stageTone = e.stage === "ERROR" ? "border-loss/40 bg-loss/10 text-loss" : e.stage === "TRAILING" ? "border-warning/40 bg-warning/10 text-warning" : e.stage === "SL" ? "border-primary/40 bg-primary/10 text-primary" : e.stage === "FILL" || e.stage === "ORDER" ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-panel text-muted-foreground";
+                      const tone =
+                        e.level === "error"
+                          ? "text-loss"
+                          : e.level === "warn"
+                            ? "text-warning"
+                            : e.level === "success"
+                              ? "text-profit"
+                              : "text-foreground";
+                      const stageTone =
+                        e.stage === "ERROR"
+                          ? "border-loss/40 bg-loss/10 text-loss"
+                          : e.stage === "TRAILING"
+                            ? "border-warning/40 bg-warning/10 text-warning"
+                            : e.stage === "SL"
+                              ? "border-primary/40 bg-primary/10 text-primary"
+                              : e.stage === "FILL" || e.stage === "ORDER"
+                                ? "border-profit/40 bg-profit/10 text-profit"
+                                : "border-border bg-panel text-muted-foreground";
                       return (
                         <li key={e.id} className="flex items-start gap-2 p-2 text-xs">
-                          <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${stageTone}`}>{e.stage}</span>
+                          <span
+                            className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${stageTone}`}
+                          >
+                            {e.stage}
+                          </span>
                           <div className="min-w-0 flex-1">
                             <p className={`font-semibold ${tone}`}>{e.title}</p>
                             {e.detail && <p className="truncate text-[11px] text-muted-foreground">{e.detail}</p>}
                           </div>
-                          <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(e.ts).toLocaleTimeString("en-IN", { hour12: false })}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {new Date(e.ts).toLocaleTimeString("en-IN", { hour12: false })}
+                          </span>
                         </li>
                       );
                     })}
                   </ul>
                 )}
               </div>
-              <p className="mt-2 text-[10px] text-muted-foreground">Full payloads also logged to browser console (F12) with [SIGNAL], [ORDER], [FILL], [SL], [TRAILING], [ERROR] tags.</p>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Full payloads also logged to browser console (F12) with [SIGNAL], [ORDER], [FILL], [SL], [TRAILING],
+                [ERROR] tags.
+              </p>
             </section>
 
-            <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}><div className="mb-3 flex items-center gap-2 text-primary"><Activity className="h-5 w-5" /><h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2></div><p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">PCR</span><span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span></div><Progress value={clampMeter(pcrValue, 2)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}</p></div><div className="rounded-md border border-border bg-surface p-3"><div className="mb-2 flex items-center justify-between text-sm"><span className="font-semibold text-muted-foreground">India VIX</span><span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span></div><Progress value={clampMeter(vixValue, 30)} className="h-2" /><p className="mt-2 text-xs text-muted-foreground">{latestSignal?.ruleContext?.rules?.vixSizeCut ? "Size -50%" : latestSignal?.ruleContext?.rules?.vixRising ? "Rising" : "Normal"}</p></div></div></section>
+            <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}>
+              <div className="mb-3 flex items-center gap-2 text-primary">
+                <Activity className="h-5 w-5" />
+                <h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2>
+              </div>
+              <p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md border border-border bg-surface p-3">
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="font-semibold text-muted-foreground">PCR</span>
+                    <span className="font-bold text-foreground">{pcrValue === null ? "—" : pcrValue.toFixed(3)}</span>
+                  </div>
+                  <Progress value={clampMeter(pcrValue, 2)} className="h-2" />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {latestSignal?.ruleContext?.rules?.pcrState ?? "Pending"}
+                  </p>
+                </div>
+                <div className="rounded-md border border-border bg-surface p-3">
+                  <div className="mb-2 flex items-center justify-between text-sm">
+                    <span className="font-semibold text-muted-foreground">India VIX</span>
+                    <span className="font-bold text-foreground">{vixValue === null ? "—" : vixValue.toFixed(2)}</span>
+                  </div>
+                  <Progress value={clampMeter(vixValue, 30)} className="h-2" />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {latestSignal?.ruleContext?.rules?.vixSizeCut
+                      ? "Size -50%"
+                      : latestSignal?.ruleContext?.rules?.vixRising
+                        ? "Rising"
+                        : "Normal"}
+                  </p>
+                </div>
+              </div>
+            </section>
           </aside>
         </div>
-
 
         <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1573,7 +2985,10 @@ const Index = () => {
               <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Ghanshyam Sir Foundation</p>
               <h2 className="text-xl font-semibold">Current Levels</h2>
             </div>
-            <span className="text-xs text-muted-foreground">Auto-refresh every 1m · forced re-analysis on &gt;15pt move{yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}</span>
+            <span className="text-xs text-muted-foreground">
+              Auto-refresh every 1m · forced re-analysis on &gt;15pt move
+              {yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}
+            </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             <div className="rounded-md border border-warning/30 bg-warning/5 p-3">
@@ -1590,58 +3005,163 @@ const Index = () => {
             </div>
             <div className="rounded-md border border-profit/30 bg-profit/5 p-3">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Resistance</p>
-              <p className="mt-1 text-lg font-bold text-profit">{immediateResistance === null ? "—" : immediateResistance.toFixed(2)}</p>
+              <p className="mt-1 text-lg font-bold text-profit">
+                {immediateResistance === null ? "—" : immediateResistance.toFixed(2)}
+              </p>
             </div>
             <div className="rounded-md border border-loss/30 bg-loss/5 p-3">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Immediate Support</p>
-              <p className="mt-1 text-lg font-bold text-loss">{immediateSupport === null ? "—" : immediateSupport.toFixed(2)}</p>
+              <p className="mt-1 text-lg font-bold text-loss">
+                {immediateSupport === null ? "—" : immediateSupport.toFixed(2)}
+              </p>
             </div>
           </div>
           {hasLivePrice && (pdhVal !== null || pdlVal !== null) && (
             <p className="mt-3 text-xs text-muted-foreground">
               Spot {latestLtp.toLocaleString("en-IN")} ·{" "}
-              {pdhVal !== null && latestLtp > pdhVal ? <span className="font-semibold text-profit">Above PDH (Bullish bias)</span>
-                : pdlVal !== null && latestLtp < pdlVal ? <span className="font-semibold text-loss">Below PDL (Bearish bias)</span>
-                : pdcVal !== null && latestLtp > pdcVal ? <span className="font-semibold text-profit">Above PDC</span>
-                : pdcVal !== null && latestLtp < pdcVal ? <span className="font-semibold text-loss">Below PDC</span>
-                : <span>Inside yesterday's range</span>}
+              {pdhVal !== null && latestLtp > pdhVal ? (
+                <span className="font-semibold text-profit">Above PDH (Bullish bias)</span>
+              ) : pdlVal !== null && latestLtp < pdlVal ? (
+                <span className="font-semibold text-loss">Below PDL (Bearish bias)</span>
+              ) : pdcVal !== null && latestLtp > pdcVal ? (
+                <span className="font-semibold text-profit">Above PDC</span>
+              ) : pdcVal !== null && latestLtp < pdcVal ? (
+                <span className="font-semibold text-loss">Below PDC</span>
+              ) : (
+                <span>Inside yesterday's range</span>
+              )}
             </p>
           )}
         </section>
 
         <div className="grid gap-5 md:grid-cols-2">
-          {[{ symbol: ceSymbol, ltp: ceLtpLive, mini: ceMini, series: ceSeries, tone: "profit" as const }, { symbol: peSymbol, ltp: peLtpLive, mini: peMini, series: peSeries, tone: "loss" as const }].map((opt) => (
+          {[
+            { symbol: ceSymbol, ltp: ceLtpLive, mini: ceMini, series: ceSeries, tone: "profit" as const },
+            { symbol: peSymbol, ltp: peLtpLive, mini: peMini, series: peSeries, tone: "loss" as const },
+          ].map((opt) => (
             <section key={opt.symbol} className="rounded-lg border border-border bg-panel p-4 shadow-panel">
               <div className="mb-3 flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">ATM {opt.tone === "profit" ? "Call" : "Put"} · {atmExpiry ?? "—"}</p>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                    ATM {opt.tone === "profit" ? "Call" : "Put"} · {atmExpiry ?? "—"}
+                  </p>
                   <h3 className="text-base font-semibold text-foreground">{opt.symbol}</h3>
                 </div>
-                <span className={`text-xl font-bold ${opt.tone === "profit" ? "text-profit" : "text-loss"}`}>{opt.ltp === null ? "—" : `₹${opt.ltp.toFixed(2)}`}</span>
+                <span className={`text-xl font-bold ${opt.tone === "profit" ? "text-profit" : "text-loss"}`}>
+                  {opt.ltp === null ? "—" : `₹${opt.ltp.toFixed(2)}`}
+                </span>
               </div>
               <div className="relative h-32 rounded-md border border-border bg-surface">
                 {opt.mini.points ? (
-                  <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" aria-hidden="true">
-                    <polyline points={opt.mini.points} fill="none" stroke={opt.tone === "profit" ? "hsl(var(--profit))" : "hsl(var(--loss))"} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                  <svg
+                    className="absolute inset-0 h-full w-full"
+                    preserveAspectRatio="none"
+                    viewBox="0 0 100 100"
+                    aria-hidden="true"
+                  >
+                    <polyline
+                      points={opt.mini.points}
+                      fill="none"
+                      stroke={opt.tone === "profit" ? "hsl(var(--profit))" : "hsl(var(--loss))"}
+                      strokeWidth="1.5"
+                      vectorEffect="non-scaling-stroke"
+                    />
                   </svg>
                 ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{opt.series.length === 1 ? "Collecting first ticks…" : "Waiting for live ATM premium…"}</div>
+                  <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                    {opt.series.length === 1 ? "Collecting first ticks…" : "Waiting for live ATM premium…"}
+                  </div>
                 )}
               </div>
-              <p className="mt-2 text-[11px] text-muted-foreground">Range: {opt.mini.points ? `₹${opt.mini.min.toFixed(2)} – ₹${opt.mini.max.toFixed(2)}` : "—"} · Auto-switches when ATM strike changes</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Range: {opt.mini.points ? `₹${opt.mini.min.toFixed(2)} – ₹${opt.mini.max.toFixed(2)}` : "—"} ·
+                Auto-switches when ATM strike changes
+              </p>
             </section>
           ))}
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
           <section className="overflow-hidden rounded-lg border border-border bg-panel shadow-panel">
-            <div className="flex items-center gap-2 border-b border-border p-4"><SlidersHorizontal className="h-5 w-5 text-accent" /><h2 className="text-xl font-semibold">Trade History</h2></div>
-            <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface text-xs uppercase text-muted-foreground"><tr>{["Time", "Instrument", "Entry Price", "Exit Price", "P&L"].map((head) => <th key={head} className="px-4 py-3 font-semibold">{head}</th>)}</tr></thead><tbody>{history.map((trade) => <tr key={`${trade.time}-${trade.instrument}`} className="border-t border-border transition-colors hover:bg-surface/70"><td className="px-4 py-4 text-muted-foreground">{trade.time}</td><td className="px-4 py-4 font-semibold">{trade.instrument}</td><td className="px-4 py-4">{trade.entry}</td><td className="px-4 py-4">{trade.exit}</td><td className={`px-4 py-4 font-bold ${trade.result === "profit" ? "text-profit" : "text-loss"}`}>{trade.pnl}</td></tr>)}</tbody></table></div>
+            <div className="flex items-center gap-2 border-b border-border p-4">
+              <SlidersHorizontal className="h-5 w-5 text-accent" />
+              <h2 className="text-xl font-semibold">Trade History</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] text-left text-sm">
+                <thead className="bg-surface text-xs uppercase text-muted-foreground">
+                  <tr>
+                    {["Time", "Instrument", "Entry Price", "Exit Price", "P&L"].map((head) => (
+                      <th key={head} className="px-4 py-3 font-semibold">
+                        {head}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((trade) => (
+                    <tr
+                      key={`${trade.time}-${trade.instrument}`}
+                      className="border-t border-border transition-colors hover:bg-surface/70"
+                    >
+                      <td className="px-4 py-4 text-muted-foreground">{trade.time}</td>
+                      <td className="px-4 py-4 font-semibold">{trade.instrument}</td>
+                      <td className="px-4 py-4">{trade.entry}</td>
+                      <td className="px-4 py-4">{trade.exit}</td>
+                      <td className={`px-4 py-4 font-bold ${trade.result === "profit" ? "text-profit" : "text-loss"}`}>
+                        {trade.pnl}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
-            <div className="mb-5 flex items-center justify-between"><div><p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Daily Limit</p><h2 className="text-xl font-semibold">Risk Guardrails</h2></div><ShieldCheck className="h-6 w-6 text-primary" /></div>
-            <div className="space-y-5"><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Max Trades</p><p className="mt-1 text-sm font-semibold text-foreground">Trades Remaining: {tradesRemaining}/4</p></div><div className="rounded-md border border-loss/30 bg-loss/10 p-3"><p className="text-xs text-muted-foreground">Daily Max Loss</p><p className="mt-1 text-sm font-semibold text-loss">Hard lock at -₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}</p></div><div className="rounded-md border border-border bg-surface p-3"><p className="text-xs text-muted-foreground">Premium Server TSL</p><p className="mt-1 text-sm font-semibold text-foreground">Server SL-M is placed immediately and modified every ₹5 favorable premium move.</p></div><div className="grid grid-cols-2 gap-3"><div className="rounded-md border border-border bg-surface p-3"><Gauge className="mb-2 h-5 w-5 text-warning" /><p className="text-xs text-muted-foreground">Used Today</p><p className="font-bold">{executedTrades} / {MAX_TRADES_PER_DAY}</p></div><div className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}><IndianRupee className="mb-2 h-5 w-5 text-loss" /><p className="text-xs text-muted-foreground">Today's P&L</p><p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>₹{dailyPnl.toLocaleString("en-IN")}</p></div></div></div>
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Daily Limit</p>
+                <h2 className="text-xl font-semibold">Risk Guardrails</h2>
+              </div>
+              <ShieldCheck className="h-6 w-6 text-primary" />
+            </div>
+            <div className="space-y-5">
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted-foreground">Max Trades</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">Trades Remaining: {tradesRemaining}/4</p>
+              </div>
+              <div className="rounded-md border border-loss/30 bg-loss/10 p-3">
+                <p className="text-xs text-muted-foreground">Daily Max Loss</p>
+                <p className="mt-1 text-sm font-semibold text-loss">
+                  Hard lock at -₹{DAILY_STOP_LOSS.toLocaleString("en-IN")}
+                </p>
+              </div>
+              <div className="rounded-md border border-border bg-surface p-3">
+                <p className="text-xs text-muted-foreground">Premium Server TSL</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  Server SL-M is placed immediately and modified every ₹5 favorable premium move.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-md border border-border bg-surface p-3">
+                  <Gauge className="mb-2 h-5 w-5 text-warning" />
+                  <p className="text-xs text-muted-foreground">Used Today</p>
+                  <p className="font-bold">
+                    {executedTrades} / {MAX_TRADES_PER_DAY}
+                  </p>
+                </div>
+                <div
+                  className={`rounded-md border bg-surface p-3 ${tradingBlocked ? "border-loss/40" : "border-border"}`}
+                >
+                  <IndianRupee className="mb-2 h-5 w-5 text-loss" />
+                  <p className="text-xs text-muted-foreground">Today's P&L</p>
+                  <p className={`font-bold ${dailyPnl >= 0 ? "text-profit" : "text-loss"}`}>
+                    ₹{dailyPnl.toLocaleString("en-IN")}
+                  </p>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       </section>
