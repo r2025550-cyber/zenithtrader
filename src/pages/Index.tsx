@@ -1162,6 +1162,15 @@ const Index = () => {
               <div className={`mt-2 flex items-center gap-2 text-sm font-semibold ${connectionTone}`}>
                 <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
               </div>
+              <div className="mt-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em]">
+                <span className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${backendOnline === false ? "border-loss/40 bg-loss/10 text-loss" : backendOnline ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-surface text-muted-foreground"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${backendOnline === false ? "bg-loss" : backendOnline ? "bg-profit" : "bg-muted-foreground"}`} />
+                  {backendOnline === false ? "Backend Offline" : backendOnline ? "Backend Online" : "Backend ?"}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-1.5 py-0.5 font-semibold text-foreground">
+                  Mode: {backendMode}
+                </span>
+              </div>
             </div>
               <div className="rounded-md border border-border bg-surface px-4 py-3">
                 <p className="text-xs uppercase text-muted-foreground">Available Cash</p>
