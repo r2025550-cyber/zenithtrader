@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Activity, ArrowDownCircle, ArrowUpCircle, Bot, Hand, Loader2, RefreshCw, Server } from "lucide-react";
 
-const BASE_URL = "https://expand-seen-trunk-holdings.trycloudflare.com";
+const BASE_URL = "https://inspector-uri-juvenile-emotional.trycloudflare.com";
 
 type Mode = "AUTO" | "MANUAL" | "UNKNOWN";
 type LogEntry = { id: string; ts: number; kind: "info" | "success" | "error"; text: string };
@@ -104,7 +104,9 @@ export default function FastApiDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <Badge variant={serverOnline ? "default" : "destructive"} className="gap-1.5 px-3 py-1">
-              <span className={`h-2 w-2 rounded-full ${serverOnline ? "bg-primary-foreground animate-pulse" : "bg-destructive-foreground"}`} />
+              <span
+                className={`h-2 w-2 rounded-full ${serverOnline ? "bg-primary-foreground animate-pulse" : "bg-destructive-foreground"}`}
+              />
               {serverOnline ? "ONLINE" : "OFFLINE"}
             </Badge>
             <Button variant="terminal" size="sm" onClick={refreshStatus} disabled={loading.status}>
@@ -216,7 +218,9 @@ export default function FastApiDashboard() {
         <Card className="mt-6 bg-panel">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Trade Log</CardTitle>
-            <Button variant="ghost" size="sm" onClick={() => setLogs([])}>Clear</Button>
+            <Button variant="ghost" size="sm" onClick={() => setLogs([])}>
+              Clear
+            </Button>
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-72 rounded-md border border-border bg-background/40 p-3">
@@ -229,11 +233,7 @@ export default function FastApiDashboard() {
                       <span className="text-muted-foreground shrink-0">{fmtTime(l.ts)}</span>
                       <span
                         className={
-                          l.kind === "success"
-                            ? "text-profit"
-                            : l.kind === "error"
-                              ? "text-loss"
-                              : "text-foreground/80"
+                          l.kind === "success" ? "text-profit" : l.kind === "error" ? "text-loss" : "text-foreground/80"
                         }
                       >
                         {l.text}
