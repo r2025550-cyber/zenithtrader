@@ -37,6 +37,19 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
+const FASTAPI_BASE_URL = "https://beautifully-timeline-freight-ads.trycloudflare.com";
+
+async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
+  const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Backend ${res.status}`);
+  const statusRes = await fetch(`${FASTAPI_BASE_URL}/`);
+  if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
+  const data = await statusRes.json().catch(() => ({}));
+  return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
+}
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
