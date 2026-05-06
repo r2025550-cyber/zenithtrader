@@ -700,6 +700,46 @@ const Index = () => {
   const invokeFunction = async <T,>(name: string, body?: Record<string, unknown>) => {
     const touchesUpstox = ["fetch-nifty-data", "fetch-option-premium", "system-status", "place-live-order", "modify-stop-loss-order", "emergency-exit"].includes(name);
     if (touchesUpstox) await throttleUpstoxRequest();
+
+    // Route Upstox execution + OAuth through the VPS FastAPI backend (static IPv4).
+    // Edge functions remain deployed as fallback but are no longer the primary path.
+    const VPS_ROUTED = new Set([
+      "fetch-nifty-data",
+      "fetch-option-premium",
+      "place-live-order",
+      "modify-stop-loss-order",
+      "emergency-exit",
+      "upstox-oauth",
+    ]);
+    if (VPS_ROUTED.has(name)) {
+      try {
+        const res = await fetch(`${FASTAPI_BASE_URL}/${name}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body ?? {}),
+        });
+        const text = await res.text();
+        const payload = text ? (() => { try { return JSON.parse(text); } catch { return { error: text }; } })() : {};
+        if (!res.ok) {
+          const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
+          const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
+            ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
+            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) || serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+              ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
+              : serverMessage;
+          markUpstoxRateLimited(message);
+          throw new Error(message);
+        }
+        return payload as T;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.toLowerCase().includes("failed to fetch")) {
+          throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
+        }
+        throw err;
+      }
+    }
+
     const { data, error } = await supabase.functions.invoke<T>(name, { body });
     if (error) {
       let serverMessage = error.message;
