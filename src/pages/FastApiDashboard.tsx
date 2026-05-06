@@ -247,8 +247,7 @@ export default function FastApiDashboard() {
         </Card>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Note: Backend is served over HTTP. If your dashboard runs on HTTPS, your browser may block requests due to
-          mixed content. Use HTTPS on the backend or open this page over HTTP for full functionality.
+          Backend: secure HTTPS tunnel · Mixed-content safe.
         </p>
       </div>
     </div>
