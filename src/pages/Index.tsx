@@ -1080,6 +1080,20 @@ const Index = () => {
         await fetchLiveNifty(false, true);
       }
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
+
+      // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
+      try {
+        const target = checked ? "auto" : "manual";
+        const result = await syncFastApiMode(target);
+        setBackendOnline(true);
+        const m = (result.mode || "").toUpperCase();
+        if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
+        toast({ title: checked ? "AUTO MODE ENABLED" : "MANUAL MODE ENABLED", description: `Backend status: ${result.status}` });
+      } catch (err) {
+        setBackendOnline(false);
+        setBackendMode("UNKNOWN");
+        toast({ title: "Backend Offline", description: err instanceof Error ? err.message : "Could not reach FastAPI backend.", variant: "destructive" });
+      }
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
