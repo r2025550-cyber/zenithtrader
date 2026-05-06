@@ -37,6 +37,19 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
+const FASTAPI_BASE_URL = "https://beautifully-timeline-freight-ads.trycloudflare.com";
+
+async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
+  const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) throw new Error(`Backend ${res.status}`);
+  const statusRes = await fetch(`${FASTAPI_BASE_URL}/`);
+  if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
+  const data = await statusRes.json().catch(() => ({}));
+  return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
+}
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
@@ -179,6 +192,8 @@ const Index = () => {
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
   const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
   const [settings, setSettings] = useState({ upstoxApiKey: "", upstoxApiSecret: "", openaiApiKey: "", redirectUri: UPSTOX_OAUTH_REDIRECT_URI });
+  const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
@@ -1065,6 +1080,20 @@ const Index = () => {
         await fetchLiveNifty(false, true);
       }
       toast({ title: checked ? "AI trading loop started" : "AI trading loop stopped", description: checked ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open." : "Automation is paused." });
+
+      // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
+      try {
+        const target = checked ? "auto" : "manual";
+        const result = await syncFastApiMode(target);
+        setBackendOnline(true);
+        const m = (result.mode || "").toUpperCase();
+        if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
+        toast({ title: checked ? "AUTO MODE ENABLED" : "MANUAL MODE ENABLED", description: `Backend status: ${result.status}` });
+      } catch (err) {
+        setBackendOnline(false);
+        setBackendMode("UNKNOWN");
+        toast({ title: "Backend Offline", description: err instanceof Error ? err.message : "Could not reach FastAPI backend.", variant: "destructive" });
+      }
     } catch (error) {
       if (checked) setAiEnabled(true);
       showRetryToast(error instanceof Error ? error.message : "Check credentials and OAuth status.");
@@ -1132,6 +1161,15 @@ const Index = () => {
               <p className="text-xs uppercase text-muted-foreground">Connection Status</p>
               <div className={`mt-2 flex items-center gap-2 text-sm font-semibold ${connectionTone}`}>
                 <span className={`h-2.5 w-2.5 rounded-full ${connectionDot} animate-pulse-glow`} /> {connectionLabel}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em]">
+                <span className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${backendOnline === false ? "border-loss/40 bg-loss/10 text-loss" : backendOnline ? "border-profit/40 bg-profit/10 text-profit" : "border-border bg-surface text-muted-foreground"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${backendOnline === false ? "bg-loss" : backendOnline ? "bg-profit" : "bg-muted-foreground"}`} />
+                  {backendOnline === false ? "Backend Offline" : backendOnline ? "Backend Online" : "Backend ?"}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-1.5 py-0.5 font-semibold text-foreground">
+                  Mode: {backendMode}
+                </span>
               </div>
             </div>
               <div className="rounded-md border border-border bg-surface px-4 py-3">
