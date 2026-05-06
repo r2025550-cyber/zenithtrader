@@ -1170,6 +1170,23 @@ const Index = () => {
                 <span className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface px-1.5 py-0.5 font-semibold text-foreground">
                   Mode: {backendMode}
                 </span>
+                <span
+                  title={systemStatus?.upstox?.message ?? "Upstox OAuth status"}
+                  className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${
+                    upstoxReady
+                      ? "border-profit/40 bg-profit/10 text-profit"
+                      : upstoxNeedsSetup
+                        ? "border-loss/40 bg-loss/10 text-loss"
+                        : "border-border bg-surface text-muted-foreground"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      upstoxReady ? "bg-profit" : upstoxNeedsSetup ? "bg-loss" : "bg-muted-foreground"
+                    }`}
+                  />
+                  Upstox: {upstoxReady ? "Connected" : upstoxNeedsSetup ? "Not Connected" : "—"}
+                </span>
               </div>
             </div>
               <div className="rounded-md border border-border bg-surface px-4 py-3">
