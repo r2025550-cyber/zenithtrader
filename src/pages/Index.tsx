@@ -37,7 +37,7 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://beautifully-timeline-freight-ads.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://internship-cohen-replace-everybody.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
@@ -45,7 +45,7 @@ async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: str
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${FASTAPI_BASE_URL}/`);
+  const statusRes = await fetch(`${FASTAPI_BASE_URL}/status`);
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
   return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };

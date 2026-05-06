@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Activity, ArrowDownCircle, ArrowUpCircle, Bot, Hand, Loader2, RefreshCw, Server } from "lucide-react";
 
-const BASE_URL = "https://beautifully-timeline-freight-ads.trycloudflare.com";
+const BASE_URL = "https://internship-cohen-replace-everybody.trycloudflare.com";
 
 type Mode = "AUTO" | "MANUAL" | "UNKNOWN";
 type LogEntry = { id: string; ts: number; kind: "info" | "success" | "error"; text: string };
@@ -37,7 +37,7 @@ export default function FastApiDashboard() {
   const refreshStatus = useCallback(async () => {
     setLoading((s) => ({ ...s, status: true }));
     try {
-      const data = await apiCall<any>("/");
+      const data = await apiCall<any>("/status");
       setServerOnline(true);
       setServerStatus(data?.status || data?.message || "Online");
       const m = (data?.mode || data?.current_mode || "").toString().toUpperCase();
@@ -54,7 +54,7 @@ export default function FastApiDashboard() {
 
   useEffect(() => {
     refreshStatus();
-    const id = setInterval(refreshStatus, 10_000);
+    const id = setInterval(refreshStatus, 5_000);
     return () => clearInterval(id);
   }, [refreshStatus]);
 
