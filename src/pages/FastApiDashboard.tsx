@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Activity, ArrowDownCircle, ArrowUpCircle, Bot, Hand, Loader2, RefreshCw, Server } from "lucide-react";
 
-const BASE_URL = "https://inspector-uri-juvenile-emotional.trycloudflare.com";
+const BASE_URL = "https://analyst-routing-undertake-openings.trycloudflare.com";
 
 type Mode = "AUTO" | "MANUAL" | "UNKNOWN";
 type LogEntry = { id: string; ts: number; kind: "info" | "success" | "error"; text: string };
