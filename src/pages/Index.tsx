@@ -1175,44 +1175,34 @@ const Index = () => {
 
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
+    const url = `${FASTAPI_BASE_URL}/upstox-credentials`;
+    const body = { apiKey: settings.upstoxApiKey, apiSecret: settings.upstoxApiSecret };
+    console.log("[Upstox Save] FASTAPI_BASE_URL =", FASTAPI_BASE_URL);
+    console.log("[Upstox Save] POST", url);
     try {
-      await invokeFunction("save-trading-settings", {
-        provider: "upstox",
-        upstoxApiKey: settings.upstoxApiKey,
-        upstoxApiSecret: settings.upstoxApiSecret,
-        redirectUri: settings.redirectUri,
-      });
-
-      // Also persist credentials to the VPS FastAPI backend so /upstox-oauth
-      // can read them. Without this, settings.json never gets created and
-      // OAuth fails with "Upstox credentials not configured on VPS".
+      let vpsRes: Response;
       try {
-        const vpsRes = await fetch(`${FASTAPI_BASE_URL}/upstox-credentials`, {
+        vpsRes = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiKey: settings.upstoxApiKey,
-            apiSecret: settings.upstoxApiSecret,
-            redirectUri: settings.redirectUri || undefined,
-          }),
+          body: JSON.stringify(body),
         });
-        if (!vpsRes.ok) {
-          const text = await vpsRes.text().catch(() => "");
-          throw new Error(`VPS ${vpsRes.status}: ${text || "failed to persist credentials"}`);
-        }
-      } catch (vpsErr) {
-        const msg = vpsErr instanceof Error ? vpsErr.message : String(vpsErr);
-        throw new Error(
-          msg.toLowerCase().includes("failed to fetch")
-            ? "VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105."
-            : `Saved to cloud, but VPS sync failed: ${msg}`,
-        );
+      } catch (netErr) {
+        console.error("[Upstox Save] network error", netErr);
+        setVpsSaveStatus({ ok: false, message: "VPS unreachable (network error)", at: Date.now() });
+        throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
       }
-
+      const text = await vpsRes.text().catch(() => "");
+      console.log("[Upstox Save] status", vpsRes.status, "body", text);
+      if (vpsRes.status !== 200) {
+        setVpsSaveStatus({ ok: false, message: `VPS ${vpsRes.status}: ${text || "save failed"}`, at: Date.now() });
+        throw new Error(`VPS ${vpsRes.status}: ${text || "save failed"}`);
+      }
+      setVpsSaveStatus({ ok: true, message: "Saved to VPS", at: Date.now() });
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
       toast({
         title: "Upstox keys saved",
-        description: "Existing OpenAI settings were left unchanged. Complete OAuth if the token needs reconnecting.",
+        description: "Credentials persisted to VPS. You may now click Get Code.",
       });
       await retestUpstox(false).catch(() => null);
     } catch (error) {
