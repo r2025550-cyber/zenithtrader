@@ -51,7 +51,7 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://incorporate-seekers-complement-trio.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://cadillac-achievement-synthetic-rotation.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
