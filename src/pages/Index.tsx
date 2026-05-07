@@ -1182,6 +1182,33 @@ const Index = () => {
         upstoxApiSecret: settings.upstoxApiSecret,
         redirectUri: settings.redirectUri,
       });
+
+      // Also persist credentials to the VPS FastAPI backend so /upstox-oauth
+      // can read them. Without this, settings.json never gets created and
+      // OAuth fails with "Upstox credentials not configured on VPS".
+      try {
+        const vpsRes = await fetch(`${FASTAPI_BASE_URL}/upstox-credentials`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: settings.upstoxApiKey,
+            apiSecret: settings.upstoxApiSecret,
+            redirectUri: settings.redirectUri || undefined,
+          }),
+        });
+        if (!vpsRes.ok) {
+          const text = await vpsRes.text().catch(() => "");
+          throw new Error(`VPS ${vpsRes.status}: ${text || "failed to persist credentials"}`);
+        }
+      } catch (vpsErr) {
+        const msg = vpsErr instanceof Error ? vpsErr.message : String(vpsErr);
+        throw new Error(
+          msg.toLowerCase().includes("failed to fetch")
+            ? "VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105."
+            : `Saved to cloud, but VPS sync failed: ${msg}`,
+        );
+      }
+
       setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
       toast({
         title: "Upstox keys saved",
