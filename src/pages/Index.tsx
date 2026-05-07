@@ -51,7 +51,7 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://cadillac-achievement-synthetic-rotation.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://weekly-fifth-weeks-cardiff.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
@@ -2074,13 +2074,29 @@ const Index = () => {
                 </div>
               </div>
               <div className="rounded-md border border-border bg-surface p-2 text-xs">
-                <div className="text-muted-foreground">VPS: <span className="text-foreground break-all">{FASTAPI_BASE_URL}</span></div>
-                <div className={vpsSaveStatus?.ok ? "text-emerald-500" : vpsSaveStatus ? "text-destructive" : "text-muted-foreground"}>
-                  Last save: {vpsSaveStatus ? `${vpsSaveStatus.ok ? "OK" : "FAIL"} – ${vpsSaveStatus.message}` : "not yet"}
+                <div className="text-muted-foreground">
+                  VPS: <span className="text-foreground break-all">{FASTAPI_BASE_URL}</span>
+                </div>
+                <div
+                  className={
+                    vpsSaveStatus?.ok
+                      ? "text-emerald-500"
+                      : vpsSaveStatus
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                  }
+                >
+                  Last save:{" "}
+                  {vpsSaveStatus ? `${vpsSaveStatus.ok ? "OK" : "FAIL"} – ${vpsSaveStatus.message}` : "not yet"}
                 </div>
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-                <Button disabled={isBusy || !vpsSaveStatus?.ok} type="button" variant="terminal" onClick={startUpstoxOAuth}>
+                <Button
+                  disabled={isBusy || !vpsSaveStatus?.ok}
+                  type="button"
+                  variant="terminal"
+                  onClick={startUpstoxOAuth}
+                >
                   <ExternalLink className="h-4 w-4" /> Get Code
                 </Button>
                 <Button
