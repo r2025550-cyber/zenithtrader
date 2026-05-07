@@ -159,23 +159,71 @@ TOKEN_EXCHANGE_REDIRECT_URI = "http://localhost:3000"
 
 @router.post("/upstox-oauth")
 async def upstox_oauth(req: Request):
-    body = await _read_json(req)
-    mode = body.get("mode")
-    settings = _require_credentials()
+    from urllib.parse import urlencode
 
-    if mode == "url":
-        params = {
-            "response_type": "code",
-            "client_id": settings["upstox_api_key"],
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
-        }
-        save_settings({"redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI})
-        from urllib.parse import urlencode
+    # Parse body defensively so we can return debug info instead of generic 400.
+    try:
+        body = await _read_json(req)
+    except HTTPException as e:
         return JSONResponse(
-            {"url": f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}"}
+            {"error": "invalid_json", "detail": e.detail, "settings_path": str(SETTINGS_PATH)},
+            status_code=400,
         )
 
+    mode = (body.get("mode") or "url").strip()
+    settings = load_settings()
+    loaded_keys = sorted(settings.keys())
+    api_key = (settings.get("upstox_api_key") or "").strip()
+    api_secret = (settings.get("upstox_api_secret") or "").strip()
+
+    print(
+        f"[upstox-oauth] mode={mode} settings_path={SETTINGS_PATH} "
+        f"exists={SETTINGS_PATH.exists()} loaded_keys={loaded_keys} "
+        f"has_api_key={bool(api_key)} has_api_secret={bool(api_secret)}",
+        flush=True,
+    )
+
+    if not api_key or not api_secret:
+        return JSONResponse(
+            {
+                "error": "credentials_missing",
+                "detail": "Upstox credentials not found in settings.json on VPS.",
+                "settings_path": str(SETTINGS_PATH),
+                "settings_exists": SETTINGS_PATH.exists(),
+                "loaded_keys": loaded_keys,
+                "has_api_key": bool(api_key),
+                "has_api_secret": bool(api_secret),
+                "hint": "POST /upstox-credentials with apiKey + apiSecret first.",
+            },
+            status_code=400,
+        )
+
+    if mode == "url":
+        redirect_uri = TOKEN_EXCHANGE_REDIRECT_URI
+        params = {
+            "response_type": "code",
+            "client_id": api_key,
+            "redirect_uri": redirect_uri,
+        }
+        auth_url = f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}"
+        save_settings({"redirect_uri": redirect_uri})
+        print(
+            f"[upstox-oauth] generated auth_url redirect_uri={redirect_uri} url={auth_url}",
+            flush=True,
+        )
+        return JSONResponse({
+            "url": auth_url,
+            "debug": {
+                "redirect_uri": redirect_uri,
+                "settings_path": str(SETTINGS_PATH),
+                "loaded_keys": loaded_keys,
+            },
+        })
+
     if mode == "token":
+        # Re-bind settings dict for downstream code below.
+        settings["upstox_api_key"] = api_key
+        settings["upstox_api_secret"] = api_secret
         code = str(body.get("code") or "").strip()
         if not code:
             raise HTTPException(status_code=400, detail="code is required")
