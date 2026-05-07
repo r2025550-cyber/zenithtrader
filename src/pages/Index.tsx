@@ -2069,8 +2069,14 @@ const Index = () => {
                   </p>
                 </div>
               </div>
+              <div className="rounded-md border border-border bg-surface p-2 text-xs">
+                <div className="text-muted-foreground">VPS: <span className="text-foreground break-all">{FASTAPI_BASE_URL}</span></div>
+                <div className={vpsSaveStatus?.ok ? "text-emerald-500" : vpsSaveStatus ? "text-destructive" : "text-muted-foreground"}>
+                  Last save: {vpsSaveStatus ? `${vpsSaveStatus.ok ? "OK" : "FAIL"} – ${vpsSaveStatus.message}` : "not yet"}
+                </div>
+              </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
-                <Button disabled={isBusy} type="button" variant="terminal" onClick={startUpstoxOAuth}>
+                <Button disabled={isBusy || !vpsSaveStatus?.ok} type="button" variant="terminal" onClick={startUpstoxOAuth}>
                   <ExternalLink className="h-4 w-4" /> Get Code
                 </Button>
                 <Button
