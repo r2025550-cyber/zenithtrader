@@ -1255,9 +1255,13 @@ const Index = () => {
         description: "After login, copy the code value from the redirected URL bar and paste it back here.",
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Save settings first.";
+      setOauthDebugLog(
+        `Get Code failed.\nVPS: ${FASTAPI_BASE_URL}/upstox-oauth\nError: ${message}\nCheck backend logs for [upstox-oauth] line.`,
+      );
       toast({
         title: "OAuth start failed",
-        description: error instanceof Error ? error.message : "Save settings first.",
+        description: message,
         variant: "destructive",
       });
     }
