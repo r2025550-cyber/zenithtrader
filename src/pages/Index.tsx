@@ -350,6 +350,8 @@ const Index = () => {
   const [aiEnabled, setAiEnabled] = useState(
     () => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours(),
   );
+  const [autoTradeMode, setAutoTradeMode] = useState(() => storedValue(AUTO_TRADE_STORAGE_KEY) === "true");
+  const lastAutoFiredSignalRef = useRef<string>("");
   const [riskMode, setRiskMode] = useState("moderate");
   const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(
     () => storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper",
