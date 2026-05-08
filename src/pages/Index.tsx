@@ -53,6 +53,13 @@ const history = [
 const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
 const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
+const VPS_STATUS_ENDPOINT_STORAGE_KEY = "zenith-vps-status-endpoint";
+const DEFAULT_VPS_STATUS_ENDPOINT = "/system-status";
+const normalizeStatusEndpoint = (raw?: string) => {
+  const v = (raw || DEFAULT_VPS_STATUS_ENDPOINT).trim();
+  if (!v) return DEFAULT_VPS_STATUS_ENDPOINT;
+  return v.startsWith("/") ? v : `/${v}`;
+};
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
 const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
@@ -387,6 +394,12 @@ const Index = () => {
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
+  const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
+    normalizeStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
+  );
+  const [lastVpsError, setLastVpsError] = useState<{ at: number; where: string; message: string } | null>(null);
+  const recordVpsError = (where: string, message: string) =>
+    setLastVpsError({ at: Date.now(), where, message: message.slice(0, 400) });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
@@ -653,19 +666,29 @@ const Index = () => {
     localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
   }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
 
+
+  useEffect(() => {
+    localStorage.setItem(VPS_STATUS_ENDPOINT_STORAGE_KEY, vpsStatusEndpoint);
+  }, [vpsStatusEndpoint]);
+
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
     let cancelled = false;
     const ping = async () => {
       try {
-        const r = await fetch(`${normalizedVpsBaseUrl}/system-status`, {
+        const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ target: "upstox" }),
         });
         if (!cancelled) setTunnelOnline(r.ok);
-      } catch {
+        if (!r.ok) {
+          const txt = await r.text().catch(() => "");
+          recordVpsError(`ping ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
+        }
+      } catch (err) {
         if (!cancelled) setTunnelOnline(false);
+        recordVpsError(`ping ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
@@ -674,7 +697,7 @@ const Index = () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [normalizedVpsBaseUrl]);
+  }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
@@ -1139,8 +1162,9 @@ const Index = () => {
       routeToVps = target === "upstox";
     }
     if (routeToVps) {
+      const path = name === "system-status" ? vpsStatusEndpoint : `/${name}`;
       try {
-        const res = await fetch(`${normalizedVpsBaseUrl}/${name}`, {
+        const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
@@ -1164,6 +1188,7 @@ const Index = () => {
               ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
                 "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
               : serverMessage;
+          recordVpsError(`POST ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
           throw new Error(message);
         }
@@ -1171,6 +1196,7 @@ const Index = () => {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
+          recordVpsError(`POST ${path}`, "network failure (failed to fetch)");
           throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
         }
         throw err;
@@ -1356,7 +1382,12 @@ const Index = () => {
       setOauthDebugLog(
         `Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`,
       );
-      window.location.href = authUrl;
+      // Open in a new tab so the dashboard stays mounted while the user logs in.
+      const popup = window.open(authUrl, "_blank", "noopener,noreferrer");
+      if (!popup) {
+        // Popup blocked — fall back to same-tab redirect.
+        window.location.href = authUrl;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
@@ -2261,6 +2292,23 @@ const Index = () => {
                     onChange={(event) => setVpsTunnelUrl(event.target.value)}
                     className="border-border bg-surface"
                   />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="vps-status-endpoint">Status Endpoint (path on VPS)</Label>
+                  <Input
+                    id="vps-status-endpoint"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="/system-status"
+                    value={vpsStatusEndpoint}
+                    onChange={(e) => setVpsStatusEndpoint(normalizeStatusEndpoint(e.target.value))}
+                    className="border-border bg-surface"
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    If your VPS exposes status at <span className="text-foreground">/</span> or{" "}
+                    <span className="text-foreground">/fetch-data</span> instead of{" "}
+                    <span className="text-foreground">/system-status</span>, edit it here.
+                  </p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
@@ -3477,6 +3525,32 @@ const Index = () => {
             </div>
           </section>
         </div>
+        <section className="mx-auto mt-4 w-full max-w-6xl px-3 pb-6">
+          <div className="rounded-lg border border-border bg-surface p-3 text-xs">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold uppercase tracking-wide text-muted-foreground">VPS Console · Last Error</span>
+              {lastVpsError && (
+                <button
+                  type="button"
+                  className="text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => setLastVpsError(null)}
+                >
+                  clear
+                </button>
+              )}
+            </div>
+            {lastVpsError ? (
+              <div>
+                <div className="text-[11px] text-muted-foreground">
+                  {new Date(lastVpsError.at).toLocaleTimeString()} · {lastVpsError.where}
+                </div>
+                <pre className="mt-1 whitespace-pre-wrap break-all text-destructive">{lastVpsError.message}</pre>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No errors recorded from VPS.</div>
+            )}
+          </div>
+        </section>
       </section>
     </main>
   );
