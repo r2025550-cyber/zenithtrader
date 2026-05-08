@@ -1412,7 +1412,8 @@ const Index = () => {
       const parsedVps = new URL(rawVpsUrl);
       if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
       const vpsBase = getVpsBaseUrl(rawVpsUrl);
-      const redirectUri = getUpstoxRedirectUri(vpsBase);
+      const manualRedirect = settings.redirectUri.trim();
+      const redirectUri = manualRedirect || getUpstoxRedirectUri(vpsBase);
       const clientId = settings.upstoxApiKey.trim() || storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY).trim();
       if (!clientId) throw new Error("Enter Upstox API Key / Client ID first, then tap Get Code.");
       localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
