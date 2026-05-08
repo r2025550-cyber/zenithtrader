@@ -376,7 +376,7 @@ const Index = () => {
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
   const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
   const [settings, setSettings] = useState({
-    upstoxApiKey: "",
+    upstoxApiKey: storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY),
     upstoxApiSecret: "",
     openaiApiKey: "",
     redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
