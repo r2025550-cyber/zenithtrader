@@ -54,12 +54,17 @@ const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudfla
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
 const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
 const VPS_STATUS_ENDPOINT_STORAGE_KEY = "zenith-vps-status-endpoint";
-const DEFAULT_VPS_STATUS_ENDPOINT = "/system-status";
+const DEFAULT_VPS_STATUS_ENDPOINT = "/";
 const normalizeStatusEndpoint = (raw?: string) => {
   const v = (raw || DEFAULT_VPS_STATUS_ENDPOINT).trim();
   if (!v) return DEFAULT_VPS_STATUS_ENDPOINT;
   return v.startsWith("/") ? v : `/${v}`;
 };
+const normalizeSavedStatusEndpoint = (raw?: string) => {
+  const endpoint = normalizeStatusEndpoint(raw);
+  return endpoint === "/system-status" ? DEFAULT_VPS_STATUS_ENDPOINT : endpoint;
+};
+const getStatusEndpointMethod = (endpoint: string) => (endpoint === "/" || endpoint === "/fetch-data" ? "GET" : "POST");
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
 const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
@@ -395,7 +400,7 @@ const Index = () => {
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
   const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
-    normalizeStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
+    normalizeSavedStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
   );
   const [lastVpsError, setLastVpsError] = useState<{ at: number; where: string; message: string } | null>(null);
   const recordVpsError = (where: string, message: string) =>
@@ -413,7 +418,7 @@ const Index = () => {
     if (localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) !== "true") return null;
     return {
       ready: false,
-      upstox: { ok: true, message: "Upstox token persisted on VPS — verifying live data…" },
+      upstox: { ok: true, message: "CONNECTED — saved Upstox session found. Verifying token in backend storage…" },
       gemini: { ok: false, message: "Run Re-test OpenAI to verify." },
       checkedAt: new Date().toISOString(),
     } as SystemStatus;
@@ -676,19 +681,20 @@ const Index = () => {
     let cancelled = false;
     const ping = async () => {
       try {
+        const method = getStatusEndpointMethod(vpsStatusEndpoint);
         const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
-          method: "POST",
+          method,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ target: "upstox" }),
+          body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
         if (!cancelled) setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
-          recordVpsError(`ping ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
+          recordVpsError(`${method} ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
         }
       } catch (err) {
         if (!cancelled) setTunnelOnline(false);
-        recordVpsError(`ping ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+        recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
@@ -1057,7 +1063,7 @@ const Index = () => {
     localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
     setSystemStatus((prev) => {
       const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
-      return { ready: gemini.ok, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+      return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
     });
     return data;
   };
@@ -1163,11 +1169,12 @@ const Index = () => {
     }
     if (routeToVps) {
       const path = name === "system-status" ? vpsStatusEndpoint : `/${name}`;
+      const method = name === "system-status" ? getStatusEndpointMethod(path) : "POST";
       try {
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
-          method: "POST",
+          method,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify(body ?? {}),
+          body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
         });
         const text = await res.text();
         const payload = text
@@ -1188,15 +1195,25 @@ const Index = () => {
               ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
                 "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
               : serverMessage;
-          recordVpsError(`POST ${path}`, `${res.status} ${message}`);
+          recordVpsError(`${method} ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
           throw new Error(message);
+        }
+        if (name === "system-status" && method === "GET") {
+          return {
+            upstox: {
+              ok: true,
+              message: `VPS reachable at ${path}. Saved Upstox session remains CONNECTED while token is stored in backend.`,
+              details: payload,
+            },
+            checkedAt: new Date().toISOString(),
+          } as T;
         }
         return payload as T;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
-          recordVpsError(`POST ${path}`, "network failure (failed to fetch)");
+          recordVpsError(`${method} ${path}`, "network failure (failed to fetch)");
           throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
         }
         throw err;
@@ -1384,10 +1401,7 @@ const Index = () => {
       );
       // Open in a new tab so the dashboard stays mounted while the user logs in.
       const popup = window.open(authUrl, "_blank", "noopener,noreferrer");
-      if (!popup) {
-        // Popup blocked — fall back to same-tab redirect.
-        window.location.href = authUrl;
-      }
+      if (!popup) throw new Error("Popup blocked. Allow popups for this app, then tap Get Code again.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
@@ -1518,6 +1532,7 @@ const Index = () => {
   const checkSystemStatus = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
+      const savedSession = await restoreSavedUpstoxSession().catch(() => null);
       // Upstox token lives on VPS settings.json; OpenAI key lives in Supabase.
       // Query each in its own home and merge into one SystemStatus payload.
       const [upstoxRes, openaiRes] = await Promise.allSettled([
@@ -1531,7 +1546,12 @@ const Index = () => {
               ok: false,
               message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed.",
             };
-      // Resilience: if the VPS /system-status route is not deployed (404 / Not Found)
+      if (getStatusEndpointMethod(vpsStatusEndpoint) === "GET") {
+        upstox = savedSession?.upstox?.ok
+          ? savedSession.upstox
+          : { ok: false, message: "VPS tunnel is reachable, but no saved Upstox access token was found. Complete OAuth once." };
+      }
+      // Resilience: if a manually configured VPS status route is unavailable (404 / Not Found)
       // but we previously connected successfully (flag in localStorage) and the tunnel
       // is reachable, keep the dashboard in CONNECTED state instead of forcing re-OAuth.
       if (!upstox.ok && localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) === "true") {
@@ -1587,7 +1607,13 @@ const Index = () => {
   const retestUpstox = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
+      const savedSession = await restoreSavedUpstoxSession().catch(() => null);
+      const status = getStatusEndpointMethod(vpsStatusEndpoint) === "GET"
+        ? savedSession ?? {
+            upstox: { ok: false, message: "No saved Upstox access token found in backend storage. Complete OAuth once." },
+            checkedAt: new Date().toISOString(),
+          }
+        : await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
       setSystemStatus((prev) => {
         const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
         return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
@@ -2299,15 +2325,14 @@ const Index = () => {
                     id="vps-status-endpoint"
                     type="text"
                     autoComplete="off"
-                    placeholder="/system-status"
+                    placeholder="/"
                     value={vpsStatusEndpoint}
                     onChange={(e) => setVpsStatusEndpoint(normalizeStatusEndpoint(e.target.value))}
                     className="border-border bg-surface"
                   />
                   <p className="text-xs leading-5 text-muted-foreground">
-                    If your VPS exposes status at <span className="text-foreground">/</span> or{" "}
-                    <span className="text-foreground">/fetch-data</span> instead of{" "}
-                    <span className="text-foreground">/system-status</span>, edit it here.
+                    Default uses <span className="text-foreground">/</span> with GET. Use{" "}
+                    <span className="text-foreground">/fetch-data</span> if that is your VPS health/data route.
                   </p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
