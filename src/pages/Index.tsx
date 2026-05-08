@@ -1353,7 +1353,7 @@ const Index = () => {
       } catch (netErr) {
         console.error("[Upstox Save] network error", netErr);
         setVpsSaveStatus({ ok: false, message: "VPS unreachable (network error)", at: Date.now() });
-        throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
+        throw new Error("VPS backend unreachable. Check the FastAPI Cloudflare tunnel is running and the URL in API Settings is correct.");
       }
       const text = await vpsRes.text().catch(() => "");
       console.log("[Upstox Save] status", vpsRes.status, "body", text);
