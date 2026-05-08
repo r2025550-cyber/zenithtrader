@@ -1401,10 +1401,7 @@ const Index = () => {
       );
       // Open in a new tab so the dashboard stays mounted while the user logs in.
       const popup = window.open(authUrl, "_blank", "noopener,noreferrer");
-      if (!popup) {
-        // Popup blocked — fall back to same-tab redirect.
-        window.location.href = authUrl;
-      }
+      if (!popup) throw new Error("Popup blocked. Allow popups for this app, then tap Get Code again.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
