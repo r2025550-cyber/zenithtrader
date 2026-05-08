@@ -1607,7 +1607,13 @@ const Index = () => {
   const retestUpstox = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
+      const savedSession = await restoreSavedUpstoxSession().catch(() => null);
+      const status = getStatusEndpointMethod(vpsStatusEndpoint) === "GET"
+        ? savedSession ?? {
+            upstox: { ok: false, message: "No saved Upstox access token found in backend storage. Complete OAuth once." },
+            checkedAt: new Date().toISOString(),
+          }
+        : await invokeFunction<UpstoxStatus>("system-status", { target: "upstox" });
       setSystemStatus((prev) => {
         const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
         return { ready: status.upstox.ok && gemini.ok, upstox: status.upstox, gemini, checkedAt: status.checkedAt };
