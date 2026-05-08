@@ -1512,6 +1512,10 @@ const Index = () => {
           };
         }
       }
+      if (!upstox.ok) {
+        const restored = await restoreSavedUpstoxSession().catch(() => null);
+        if (restored?.upstox?.ok) upstox = restored.upstox;
+      }
       if (upstox.ok) localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       const gemini =
         openaiRes.status === "fulfilled"
