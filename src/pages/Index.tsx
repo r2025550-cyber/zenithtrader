@@ -1931,6 +1931,20 @@ const Index = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
+  // AUTO-TRADE MODE: when a high-probability BUY/SELL signal arrives, fire the order immediately.
+  useEffect(() => {
+    if (!autoTradeMode || !aiEnabled) return;
+    if (!latestSignal || !highProbabilitySignal) return;
+    if (!isTradeSignal(latestSignal.action)) return;
+    if (activeTrade || tradingBlocked || isBusy || !upstoxReady) return;
+    const key = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
+    if (lastAutoFiredSignalRef.current === key) return;
+    lastAutoFiredSignalRef.current = key;
+    toast({ title: "AUTO-TRADE FIRING", description: `${latestSignal.action} ${latestSignal.strike}` });
+    executeTradingSignal().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestSignal, highProbabilitySignal, autoTradeMode, aiEnabled, activeTrade, tradingBlocked, isBusy, upstoxReady]);
+
   return (
     <main
       className={`min-h-screen overflow-hidden bg-terminal text-foreground ${exitAlertActive ? "animate-pulse bg-loss" : ""}`}
