@@ -1390,8 +1390,12 @@ const Index = () => {
     try {
       await invokeFunction("save-trading-settings", { provider: "upstox-token", upstoxAccessToken: token });
 
+      // Push to VPS so /fetch-nifty-data, /place-order etc. can authorise.
+      // Without this the VPS keeps replying "Connect Upstox OAuth before fetching market data."
+      let vpsPushOk = false;
+      let vpsPushMessage = "";
       try {
-        await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
+        const vpsRes = await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1401,20 +1405,36 @@ const Index = () => {
             userId: session?.user?.id,
           }),
         });
+        const vpsText = await vpsRes.text();
+        vpsPushOk = vpsRes.ok;
+        vpsPushMessage = vpsText;
+        if (!vpsRes.ok) console.warn("[Manual Token] VPS push HTTP", vpsRes.status, vpsText);
       } catch (vpsErr) {
-        console.warn("[Manual Token] VPS push failed (non-fatal):", vpsErr);
+        console.warn("[Manual Token] VPS push failed:", vpsErr);
+        vpsPushMessage = vpsErr instanceof Error ? vpsErr.message : String(vpsErr);
       }
 
       try { localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true"); } catch {}
       setSystemStatus((prev) => ({
         ready: prev?.gemini?.ok === true,
-        upstox: { ok: true, message: "CONNECTED — using manual access token." },
+        upstox: {
+          ok: true,
+          message: vpsPushOk
+            ? "CONNECTED — manual access token stored on VPS."
+            : "CONNECTED in Supabase. VPS push failed — ensure the FastAPI tunnel exposes POST /upstox-token, then re-save.",
+        },
         gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to verify." },
         checkedAt: new Date().toISOString(),
       } as SystemStatus));
-      setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
+      if (vpsPushOk) setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
 
-      toast({ title: "Access token saved", description: "Status: CONNECTED. Trading calls will use this token." });
+      toast({
+        title: "Access token saved",
+        description: vpsPushOk
+          ? "Status: CONNECTED. Live data + orders will use this token."
+          : `Saved to Supabase, but VPS push failed: ${vpsPushMessage.slice(0, 200)}`,
+        variant: vpsPushOk ? undefined : "destructive",
+      });
 
       retestUpstox(false).catch(() => null);
     } catch (error) {
