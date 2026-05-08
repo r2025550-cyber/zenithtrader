@@ -399,6 +399,7 @@ const Index = () => {
     upstoxApiSecret: "",
     openaiApiKey: "",
     redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
+    manualAccessToken: "",
   });
   const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
