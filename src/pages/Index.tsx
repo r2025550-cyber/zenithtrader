@@ -2364,7 +2364,7 @@ const Index = () => {
                 </div>
                 <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/30 bg-primary/5 p-3">
                   <Label htmlFor="manual-access-token" className="flex items-center gap-2">
-                    Manual Access Token
+                    Permanent Access Token
                     <span className="text-[10px] font-normal text-muted-foreground">(bypasses OAuth)</span>
                   </Label>
                   <Input
