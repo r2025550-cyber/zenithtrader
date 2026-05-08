@@ -1242,7 +1242,7 @@ const Index = () => {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
           recordVpsError(`${method} ${path}`, "network failure (failed to fetch)");
-          throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
+          throw new Error("VPS backend unreachable. Check the FastAPI Cloudflare tunnel is running and the URL in API Settings is correct.");
         }
         throw err;
       }
