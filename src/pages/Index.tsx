@@ -1142,7 +1142,7 @@ const Index = () => {
       try {
         const res = await fetch(`${normalizedVpsBaseUrl}/${name}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
         });
         const text = await res.text();
@@ -1276,7 +1276,7 @@ const Index = () => {
       try {
         vpsRes = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
       } catch (netErr) {
