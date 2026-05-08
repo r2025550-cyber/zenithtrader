@@ -647,12 +647,17 @@ const Index = () => {
     return () => clearInterval(clock);
   }, []);
 
+  useEffect(() => {
+    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+    localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
+  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
+
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
     let cancelled = false;
     const ping = async () => {
       try {
-        const r = await fetch(`${FASTAPI_BASE_URL}/`, { method: "GET" });
+        const r = await fetch(`${normalizedVpsBaseUrl}/`, { method: "GET" });
         if (!cancelled) setTunnelOnline(r.ok);
       } catch {
         if (!cancelled) setTunnelOnline(false);
@@ -664,7 +669,7 @@ const Index = () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, []);
+  }, [normalizedVpsBaseUrl]);
 
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
