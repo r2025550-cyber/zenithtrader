@@ -705,6 +705,13 @@ const Index = () => {
     };
   }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
+  // Force-reset trades remaining to 4/4 on mount per user spec.
+  useEffect(() => {
+    setExecutedTrades(0);
+    localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
   }, [tradingLotSize]);
