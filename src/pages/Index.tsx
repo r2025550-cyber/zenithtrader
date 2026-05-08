@@ -50,7 +50,7 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
+const DEFAULT_FASTAPI_BASE_URL = "https://size-exams-mono-skill.trycloudflare.com";
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
 const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
 const VPS_STATUS_ENDPOINT_STORAGE_KEY = "zenith-vps-status-endpoint";
@@ -1242,7 +1242,7 @@ const Index = () => {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
           recordVpsError(`${method} ${path}`, "network failure (failed to fetch)");
-          throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
+          throw new Error("VPS backend unreachable. Check the FastAPI Cloudflare tunnel is running and the URL in API Settings is correct.");
         }
         throw err;
       }
@@ -1353,7 +1353,7 @@ const Index = () => {
       } catch (netErr) {
         console.error("[Upstox Save] network error", netErr);
         setVpsSaveStatus({ ok: false, message: "VPS unreachable (network error)", at: Date.now() });
-        throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
+        throw new Error("VPS backend unreachable. Check the FastAPI Cloudflare tunnel is running and the URL in API Settings is correct.");
       }
       const text = await vpsRes.text().catch(() => "");
       console.log("[Upstox Save] status", vpsRes.status, "body", text);
@@ -1394,7 +1394,12 @@ const Index = () => {
         await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken: token, userId: session?.user?.id }),
+          body: JSON.stringify({
+            accessToken: token,
+            apiKey: settings.upstoxApiKey?.trim() || undefined,
+            apiSecret: settings.upstoxApiSecret?.trim() || undefined,
+            userId: session?.user?.id,
+          }),
         });
       } catch (vpsErr) {
         console.warn("[Manual Token] VPS push failed (non-fatal):", vpsErr);
@@ -2364,7 +2369,7 @@ const Index = () => {
                 </div>
                 <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/30 bg-primary/5 p-3">
                   <Label htmlFor="manual-access-token" className="flex items-center gap-2">
-                    Manual Access Token
+                    Permanent Access Token
                     <span className="text-[10px] font-normal text-muted-foreground">(bypasses OAuth)</span>
                   </Label>
                   <Input
@@ -2414,7 +2419,7 @@ const Index = () => {
                     id="vps-tunnel-url"
                     type="url"
                     autoComplete="off"
-                    placeholder="https://virginia-cast-flood-before.trycloudflare.com"
+                    placeholder="https://size-exams-mono-skill.trycloudflare.com"
                     value={vpsTunnelUrl}
                     onChange={(event) => setVpsTunnelUrl(event.target.value)}
                     className="border-border bg-surface"
