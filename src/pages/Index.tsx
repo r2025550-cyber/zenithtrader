@@ -68,6 +68,7 @@ const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
 const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
+const AUTO_TRADE_STORAGE_KEY = "zenith-auto-trade-mode";
 const TRADING_LOT_SIZE_STORAGE_KEY = "zenith-trading-lot-size";
 const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
@@ -349,6 +350,8 @@ const Index = () => {
   const [aiEnabled, setAiEnabled] = useState(
     () => storedValue(AI_ARMED_STORAGE_KEY) === "true" && isWithinMarketHours(),
   );
+  const [autoTradeMode, setAutoTradeMode] = useState(() => storedValue(AUTO_TRADE_STORAGE_KEY) === "true");
+  const lastAutoFiredSignalRef = useRef<string>("");
   const [riskMode, setRiskMode] = useState("moderate");
   const [tradingMode, setTradingMode] = useState<"scalping" | "sniper">(
     () => storedValue("zt_trading_mode", "scalping") as "scalping" | "sniper",
@@ -1326,11 +1329,23 @@ const Index = () => {
         systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.",
       );
     }
-    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
-      tradingLotSize: normalizedTradingLotSize,
-      tradingQuantity: totalTradingQuantity,
-      executionIntent,
-    });
+    let market: MarketFetchResult | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
+          tradingLotSize: normalizedTradingLotSize,
+          tradingQuantity: totalTradingQuantity,
+          executionIntent,
+        });
+        if (market?.data) break;
+        lastErr = new Error(market?.error || "no market data");
+      } catch (e) {
+        lastErr = e;
+      }
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+    }
+    if (!market) throw new Error(lastErr instanceof Error ? lastErr.message : "Upstox market data unavailable");
     if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
     if (!market.data)
       throw new Error(
@@ -1916,6 +1931,20 @@ const Index = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
+  // AUTO-TRADE MODE: when a high-probability BUY/SELL signal arrives, fire the order immediately.
+  useEffect(() => {
+    if (!autoTradeMode || !aiEnabled) return;
+    if (!latestSignal || !highProbabilitySignal) return;
+    if (!isTradeSignal(latestSignal.action)) return;
+    if (activeTrade || tradingBlocked || isBusy || !upstoxReady) return;
+    const key = `${latestSignal.created_at ?? ""}-${latestSignal.action}-${latestSignal.strike}`;
+    if (lastAutoFiredSignalRef.current === key) return;
+    lastAutoFiredSignalRef.current = key;
+    toast({ title: "AUTO-TRADE FIRING", description: `${latestSignal.action} ${latestSignal.strike}` });
+    executeTradingSignal().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestSignal, highProbabilitySignal, autoTradeMode, aiEnabled, activeTrade, tradingBlocked, isBusy, upstoxReady]);
+
   return (
     <main
       className={`min-h-screen overflow-hidden bg-terminal text-foreground ${exitAlertActive ? "animate-pulse bg-loss" : ""}`}
@@ -2498,6 +2527,28 @@ const Index = () => {
                     aria-label="Start AI Trading"
                   />
                 </div>
+                <div className="flex items-center justify-between rounded-md border border-warning/40 bg-warning/10 p-4">
+                  <div>
+                    <p className="font-semibold text-warning">AUTO-TRADE MODE</p>
+                    <p className="text-xs text-muted-foreground">
+                      Auto-fires order on every High-Probability signal — no manual click required.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autoTradeMode}
+                    onCheckedChange={(v) => {
+                      setAutoTradeMode(v);
+                      localStorage.setItem(AUTO_TRADE_STORAGE_KEY, String(v));
+                      toast({
+                        title: v ? "AUTO-TRADE ENABLED" : "AUTO-TRADE DISABLED",
+                        description: v
+                          ? "High-probability signals will be executed instantly."
+                          : "Manual confirmation required for execution.",
+                      });
+                    }}
+                    aria-label="Auto Trade Mode"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">
                     Trading Lot Size
@@ -2641,6 +2692,45 @@ const Index = () => {
                   onClick={() => (activeTrade ? emergencyExit(false) : executeTradingSignal())}
                 >
                   {activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}
+                </Button>
+                <Button
+                  disabled={!session || isBusy || !upstoxReady || activeTrade}
+                  variant="destructive"
+                  className="w-full font-bold"
+                  onClick={async () => {
+                    setIsBusy(true);
+                    try {
+                      const live = await fetchLiveNifty(true, true);
+                      const spot = Number(live?.ltp);
+                      if (!Number.isFinite(spot)) throw new Error("Spot price unavailable");
+                      const forced = await invokeFunction<LiveOrderResult>("place-live-order", {
+                        action: "BUY",
+                        spotPrice: spot,
+                        tradingLotSize: normalizedTradingLotSize,
+                        targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
+                        stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
+                        maxSlippagePct: execSettings.slippagePct,
+                        forceManual: true,
+                      });
+                      if (!forced.success) throw new Error(forced.error || "Force trade rejected");
+                      toast({
+                        title: "FORCE TRADE PLACED",
+                        description: `${forced.instrument.tradingSymbol} · Entry ₹${forced.entryPremium?.toFixed(2)}`,
+                      });
+                      setActiveTrade(true);
+                      setLastExecution(forced);
+                    } catch (e) {
+                      toast({
+                        title: "Force trade failed",
+                        description: e instanceof Error ? e.message : String(e),
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsBusy(false);
+                    }
+                  }}
+                >
+                  ⚡ MANUAL FORCE TRADE (Bypass AI)
                 </Button>
                 {activeTradePlan && (
                   <div
