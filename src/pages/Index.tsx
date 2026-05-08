@@ -378,8 +378,11 @@ const Index = () => {
     upstoxApiKey: "",
     upstoxApiSecret: "",
     openaiApiKey: "",
-    redirectUri: UPSTOX_OAUTH_REDIRECT_URI,
+    redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
   });
+  const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
+  const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
+  const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
