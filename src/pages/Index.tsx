@@ -1329,11 +1329,23 @@ const Index = () => {
         systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.",
       );
     }
-    const market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
-      tradingLotSize: normalizedTradingLotSize,
-      tradingQuantity: totalTradingQuantity,
-      executionIntent,
-    });
+    let market: MarketFetchResult | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
+          tradingLotSize: normalizedTradingLotSize,
+          tradingQuantity: totalTradingQuantity,
+          executionIntent,
+        });
+        if (market?.data) break;
+        lastErr = new Error(market?.error || "no market data");
+      } catch (e) {
+        lastErr = e;
+      }
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+    }
+    if (!market) throw new Error(lastErr instanceof Error ? lastErr.message : "Upstox market data unavailable");
     if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
     if (!market.data)
       throw new Error(
