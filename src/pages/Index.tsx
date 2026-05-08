@@ -3525,6 +3525,32 @@ const Index = () => {
             </div>
           </section>
         </div>
+        <section className="mx-auto mt-4 w-full max-w-6xl px-3 pb-6">
+          <div className="rounded-lg border border-border bg-surface p-3 text-xs">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold uppercase tracking-wide text-muted-foreground">VPS Console · Last Error</span>
+              {lastVpsError && (
+                <button
+                  type="button"
+                  className="text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => setLastVpsError(null)}
+                >
+                  clear
+                </button>
+              )}
+            </div>
+            {lastVpsError ? (
+              <div>
+                <div className="text-[11px] text-muted-foreground">
+                  {new Date(lastVpsError.at).toLocaleTimeString()} · {lastVpsError.where}
+                </div>
+                <pre className="mt-1 whitespace-pre-wrap break-all text-destructive">{lastVpsError.message}</pre>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">No errors recorded from VPS.</div>
+            )}
+          </div>
+        </section>
       </section>
     </main>
   );
