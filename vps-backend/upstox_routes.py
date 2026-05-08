@@ -282,11 +282,24 @@ async def upstox_oauth(req: Request):
 @router.get("/callback")
 async def upstox_callback(req: Request):
     code = str(req.query_params.get("code") or "").strip()
-    user_id = str(req.query_params.get("state") or load_settings().get("user_id") or "").strip()
+    settings = load_settings()
+    user_id = str(req.query_params.get("state") or settings.get("user_id") or "").strip()
+    redirect_uri = str(req.url).split("?")[0]
     if not code:
         return HTMLResponse("<h3>Upstox callback missing code.</h3>", status_code=400)
-    body = {"mode": "token", "code": code, "redirectUri": str(req.url.include_query_params(code=None)).split("?")[0], "userId": user_id}
-    response = await upstox_oauth(Request(req.scope, receive=lambda: None))
+    api_key = (settings.get("upstox_api_key") or "").strip()
+    api_secret = (settings.get("upstox_api_secret") or "").strip()
+    if not api_key or not api_secret:
+        return HTMLResponse("<h3>Upstox credentials missing on VPS. Save Upstox first.</h3>", status_code=400)
+    form = {"code": code, "client_id": api_key, "client_secret": api_secret, "redirect_uri": redirect_uri, "grant_type": "authorization_code"}
+    async with _client() as c:
+        resp = await c.post("https://api.upstox.com/v2/login/authorization/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
+    tok = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+    if resp.status_code >= 400:
+        return HTMLResponse(f"<h3>Upstox token exchange failed.</h3><pre>{json.dumps(tok)}</pre>", status_code=resp.status_code)
+    expires_in = tok.get("expires_in")
+    save_settings({"upstox_access_token": tok.get("access_token"), "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    await _sync_token_to_supabase(user_id, tok, redirect_uri)
     return HTMLResponse(
         "<h3>Upstox connected. You can close this tab and return to Zenith Trader.</h3>"
         "<script>setTimeout(function(){ window.close(); }, 1200);</script>"
