@@ -50,16 +50,19 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://size-exams-mono-skill.trycloudflare.com";
+const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
+const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
+const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
+const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
-async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
-  const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
+async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FASTAPI_BASE_URL): Promise<{ status: string; mode: string }> {
+  const apiBase = getVpsBaseUrl(baseUrl);
+  const res = await fetch(`${apiBase}/mode/${target}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${FASTAPI_BASE_URL}/status`);
+  const statusRes = await fetch(`${apiBase}/status`);
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
   return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
@@ -375,8 +378,11 @@ const Index = () => {
     upstoxApiKey: "",
     upstoxApiSecret: "",
     openaiApiKey: "",
-    redirectUri: UPSTOX_OAUTH_REDIRECT_URI,
+    redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
   });
+  const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
+  const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
+  const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
@@ -641,12 +647,17 @@ const Index = () => {
     return () => clearInterval(clock);
   }, []);
 
+  useEffect(() => {
+    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+    localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
+  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
+
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
     let cancelled = false;
     const ping = async () => {
       try {
-        const r = await fetch(`${FASTAPI_BASE_URL}/`, { method: "GET" });
+        const r = await fetch(`${normalizedVpsBaseUrl}/`, { method: "GET" });
         if (!cancelled) setTunnelOnline(r.ok);
       } catch {
         if (!cancelled) setTunnelOnline(false);
@@ -658,7 +669,7 @@ const Index = () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, []);
+  }, [normalizedVpsBaseUrl]);
 
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
@@ -1105,7 +1116,7 @@ const Index = () => {
     }
     if (routeToVps) {
       try {
-        const res = await fetch(`${FASTAPI_BASE_URL}/${name}`, {
+        const res = await fetch(`${normalizedVpsBaseUrl}/${name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
@@ -1227,9 +1238,14 @@ const Index = () => {
 
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
-    const url = `${FASTAPI_BASE_URL}/upstox-credentials`;
-    const body = { apiKey: settings.upstoxApiKey, apiSecret: settings.upstoxApiSecret };
-    console.log("[Upstox Save] FASTAPI_BASE_URL =", FASTAPI_BASE_URL);
+    const url = `${normalizedVpsBaseUrl}/upstox-credentials`;
+    const body = {
+      apiKey: settings.upstoxApiKey,
+      apiSecret: settings.upstoxApiSecret,
+      redirectUri: upstoxOAuthRedirectUri,
+      userId: session?.user?.id,
+    };
+    console.log("[Upstox Save] FASTAPI_BASE_URL =", normalizedVpsBaseUrl);
     console.log("[Upstox Save] POST", url);
     try {
       let vpsRes: Response;
@@ -1291,24 +1307,55 @@ const Index = () => {
   };
 
   const startUpstoxOAuth = async () => {
+    const rawVpsUrl = vpsTunnelUrl.trim();
+    if (!rawVpsUrl) {
+      setOauthDebugLog("Please enter VPS URL");
+      toast({ title: "Please enter VPS URL", variant: "destructive" });
+      return;
+    }
     try {
-      const redirectUri = UPSTOX_OAUTH_REDIRECT_URI;
-      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
-      setAuthorizationUrl(data.url);
+      const parsedVps = new URL(rawVpsUrl);
+      if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
+      const vpsBase = getVpsBaseUrl(rawVpsUrl);
+      const redirectUri = getUpstoxRedirectUri(vpsBase);
+      localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
+      setVpsTunnelUrl(vpsBase);
+      let authUrl = "";
+      try {
+        const res = await fetch(`${vpsBase}/upstox-oauth`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "url", redirectUri, userId: session?.user?.id }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload?.detail || payload?.error || `VPS ${res.status}`);
+        authUrl = String(payload?.url || "");
+      } catch (error) {
+        if (!settings.upstoxApiKey.trim()) throw error;
+      }
+      if (!authUrl) {
+        const params = new URLSearchParams({
+          response_type: "code",
+          client_id: settings.upstoxApiKey.trim(),
+          redirect_uri: redirectUri,
+        });
+        if (session?.user?.id) params.set("state", session.user.id);
+        authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
+      }
+      const oauthUrl = new URL(authUrl);
+      oauthUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl = oauthUrl.toString();
+      setAuthorizationUrl(authUrl);
       setSettings((prev) => ({ ...prev, redirectUri }));
       setOauthCode("");
       setOauthDebugLog(
         `Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`,
       );
-      window.open(data.url, "_blank", "noopener,noreferrer");
-      toast({
-        title: "Upstox login opened",
-        description: "After login, copy the code value from the redirected URL bar and paste it back here.",
-      });
+      window.location.href = authUrl;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
-        `Get Code failed.\nVPS: ${FASTAPI_BASE_URL}/upstox-oauth\nError: ${message}\nCheck backend logs for [upstox-oauth] line.`,
+        `Get Code failed.\nVPS: ${normalizedVpsBaseUrl}/upstox-oauth\nError: ${message}\nCheck backend logs for [upstox-oauth] line.`,
       );
       toast({
         title: "OAuth start failed",
@@ -1319,13 +1366,13 @@ const Index = () => {
   };
 
   const completeUpstoxOAuth = async () => {
-    const debugRedirectUri = UPSTOX_OAUTH_REDIRECT_URI;
+    const debugRedirectUri = upstoxOAuthRedirectUri;
     const trimmedCode = oauthCode.trim();
     setOauthDebugLog(
       `Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`,
     );
     try {
-      await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
+      await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri, userId: session?.user?.id });
       setOauthCode("");
       localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       setOauthDebugLog(
@@ -1883,7 +1930,7 @@ const Index = () => {
       // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
       try {
         const target = checked ? "auto" : "manual";
-        const result = await syncFastApiMode(target);
+        const result = await syncFastApiMode(target, normalizedVpsBaseUrl);
         setBackendOnline(true);
         const m = (result.mode || "").toUpperCase();
         if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
@@ -2052,7 +2099,7 @@ const Index = () => {
                   Upstox: {upstoxReady ? "Connected" : upstoxNeedsSetup ? "Not Connected" : "—"}
                 </span>
                 <span
-                  title={`VPS tunnel: ${FASTAPI_BASE_URL}`}
+                  title={`VPS tunnel: ${normalizedVpsBaseUrl}`}
                   className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${
                     tunnelOnline
                       ? "border-profit/40 bg-profit/10 text-profit"
@@ -2192,6 +2239,18 @@ const Index = () => {
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="vps-tunnel-url">VPS Tunnel URL</Label>
+                  <Input
+                    id="vps-tunnel-url"
+                    type="url"
+                    autoComplete="off"
+                    placeholder="https://virginia-cast-flood-before.trycloudflare.com"
+                    value={vpsTunnelUrl}
+                    onChange={(event) => setVpsTunnelUrl(event.target.value)}
+                    className="border-border bg-surface"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
                   <Input
                     id="redirect-uri"
@@ -2204,7 +2263,7 @@ const Index = () => {
                   <p className="text-xs leading-5 text-muted-foreground">
                     Get Code and Connect both use this exact value. In the Authorization URL it is encoded as{" "}
                     <span className="text-foreground">
-                      redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}
+                      redirect_uri={encodeURIComponent(upstoxOAuthRedirectUri)}
                     </span>
                     .
                   </p>
@@ -2212,7 +2271,7 @@ const Index = () => {
               </div>
               <div className="rounded-md border border-border bg-surface p-2 text-xs">
                 <div className="text-muted-foreground">
-                  VPS: <span className="text-foreground break-all">{FASTAPI_BASE_URL}</span>
+                  VPS: <span className="text-foreground break-all">{normalizedVpsBaseUrl}</span>
                 </div>
                 <div
                   className={
@@ -2229,7 +2288,7 @@ const Index = () => {
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button
-                  disabled={isBusy || !vpsSaveStatus?.ok}
+                  disabled={isBusy}
                   type="button"
                   variant="terminal"
                   onClick={startUpstoxOAuth}

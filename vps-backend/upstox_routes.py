@@ -21,7 +21,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 router = APIRouter()
 
@@ -165,11 +165,41 @@ async def upstox_credentials(req: Request):
     }
     if redirect_uri:
         payload["redirect_uri"] = redirect_uri
+    user_id = str(body.get("userId") or body.get("user_id") or "").strip()
+    if user_id:
+        payload["user_id"] = user_id
     save_settings(payload)
     return JSONResponse({"success": True})
 
 
-TOKEN_EXCHANGE_REDIRECT_URI = "http://localhost:3000"
+TOKEN_EXCHANGE_REDIRECT_URI = os.environ.get("UPSTOX_REDIRECT_URI", "https://virginia-cast-flood-before.trycloudflare.com/callback")
+
+
+async def _sync_token_to_supabase(user_id: str, token_payload: Dict[str, Any], redirect_uri: str) -> Dict[str, Any]:
+    supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    if not user_id or not supabase_url or not service_key:
+        return {"ok": False, "message": "Supabase sync skipped: user_id or service key missing on VPS."}
+    expires_in = token_payload.get("expires_in")
+    row = {
+        "user_id": user_id,
+        "upstox_access_token": token_payload.get("access_token"),
+        "upstox_refresh_token": token_payload.get("refresh_token"),
+        "token_expires_at": (datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))).isoformat() if expires_in else None,
+        "redirect_uri": redirect_uri,
+    }
+    async with _client() as c:
+        resp = await c.post(
+            f"{supabase_url}/rest/v1/trading_api_settings?on_conflict=user_id",
+            json=row,
+            headers={
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+        )
+    return {"ok": resp.status_code < 400, "status": resp.status_code, "body": resp.text[:500]}
 
 
 @router.post("/upstox-oauth")
@@ -196,25 +226,31 @@ async def upstox_oauth(req: Request):
         )
 
     if mode == "url":
+        redirect_uri = str(body.get("redirectUri") or settings.get("redirect_uri") or TOKEN_EXCHANGE_REDIRECT_URI).strip()
+        user_id = str(body.get("userId") or settings.get("user_id") or "").strip()
         params = {
             "response_type": "code",
             "client_id": api_key,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
         }
-        save_settings({"redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI})
+        if user_id:
+            params["state"] = user_id
+        save_settings({"redirect_uri": redirect_uri, "user_id": user_id or settings.get("user_id")})
         return JSONResponse({
             "url": f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}",
         })
 
     if mode == "token":
         code = str(body.get("code") or "").strip()
+        redirect_uri = str(body.get("redirectUri") or settings.get("redirect_uri") or TOKEN_EXCHANGE_REDIRECT_URI).strip()
+        user_id = str(body.get("userId") or settings.get("user_id") or "").strip()
         if not code:
             raise HTTPException(status_code=400, detail="code is required")
         form = {
             "code": code,
             "client_id": api_key,
             "client_secret": api_secret,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
         async with _client() as c:
@@ -234,11 +270,40 @@ async def upstox_oauth(req: Request):
             "upstox_access_token": tok.get("access_token"),
             "upstox_refresh_token": tok.get("refresh_token"),
             "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
+            "user_id": user_id or settings.get("user_id"),
         })
-        return JSONResponse({"success": True})
+        sync_result = await _sync_token_to_supabase(user_id, tok, redirect_uri)
+        return JSONResponse({"success": True, "supabaseSync": sync_result})
 
     raise HTTPException(status_code=400, detail="mode must be 'url' or 'token'")
+
+
+@router.get("/callback")
+async def upstox_callback(req: Request):
+    code = str(req.query_params.get("code") or "").strip()
+    settings = load_settings()
+    user_id = str(req.query_params.get("state") or settings.get("user_id") or "").strip()
+    redirect_uri = str(req.url).split("?")[0]
+    if not code:
+        return HTMLResponse("<h3>Upstox callback missing code.</h3>", status_code=400)
+    api_key = (settings.get("upstox_api_key") or "").strip()
+    api_secret = (settings.get("upstox_api_secret") or "").strip()
+    if not api_key or not api_secret:
+        return HTMLResponse("<h3>Upstox credentials missing on VPS. Save Upstox first.</h3>", status_code=400)
+    form = {"code": code, "client_id": api_key, "client_secret": api_secret, "redirect_uri": redirect_uri, "grant_type": "authorization_code"}
+    async with _client() as c:
+        resp = await c.post("https://api.upstox.com/v2/login/authorization/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
+    tok = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+    if resp.status_code >= 400:
+        return HTMLResponse(f"<h3>Upstox token exchange failed.</h3><pre>{json.dumps(tok)}</pre>", status_code=resp.status_code)
+    expires_in = tok.get("expires_in")
+    save_settings({"upstox_access_token": tok.get("access_token"), "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    await _sync_token_to_supabase(user_id, tok, redirect_uri)
+    return HTMLResponse(
+        "<h3>Upstox connected. You can close this tab and return to Zenith Trader.</h3>"
+        "<script>setTimeout(function(){ window.close(); }, 1200);</script>"
+    )
 
 
 # ---------------------------------------------------------------------------
