@@ -1394,7 +1394,12 @@ const Index = () => {
         await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken: token, userId: session?.user?.id }),
+          body: JSON.stringify({
+            accessToken: token,
+            apiKey: settings.upstoxApiKey?.trim() || undefined,
+            apiSecret: settings.upstoxApiSecret?.trim() || undefined,
+            userId: session?.user?.id,
+          }),
         });
       } catch (vpsErr) {
         console.warn("[Manual Token] VPS push failed (non-fatal):", vpsErr);
