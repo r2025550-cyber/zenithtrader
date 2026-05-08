@@ -1532,6 +1532,7 @@ const Index = () => {
   const checkSystemStatus = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
+      const savedSession = await restoreSavedUpstoxSession().catch(() => null);
       // Upstox token lives on VPS settings.json; OpenAI key lives in Supabase.
       // Query each in its own home and merge into one SystemStatus payload.
       const [upstoxRes, openaiRes] = await Promise.allSettled([
@@ -1545,6 +1546,11 @@ const Index = () => {
               ok: false,
               message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed.",
             };
+      if (getStatusEndpointMethod(vpsStatusEndpoint) === "GET") {
+        upstox = savedSession?.upstox?.ok
+          ? savedSession.upstox
+          : { ok: false, message: "VPS tunnel is reachable, but no saved Upstox access token was found. Complete OAuth once." };
+      }
       // Resilience: if the VPS /system-status route is not deployed (404 / Not Found)
       // but we previously connected successfully (flag in localStorage) and the tunnel
       // is reachable, keep the dashboard in CONNECTED state instead of forcing re-OAuth.
