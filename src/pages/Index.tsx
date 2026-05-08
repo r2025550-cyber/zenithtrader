@@ -2693,6 +2693,45 @@ const Index = () => {
                 >
                   {activeTrade ? "BIG RED EXIT ALL" : "Execute Live Order"}
                 </Button>
+                <Button
+                  disabled={!session || isBusy || !upstoxReady || activeTrade}
+                  variant="destructive"
+                  className="w-full font-bold"
+                  onClick={async () => {
+                    setIsBusy(true);
+                    try {
+                      const live = await fetchLiveNifty(true, true);
+                      const spot = Number(live?.ltp);
+                      if (!Number.isFinite(spot)) throw new Error("Spot price unavailable");
+                      const forced = await invokeFunction<LiveOrderResult>("place-live-order", {
+                        action: "BUY",
+                        spotPrice: spot,
+                        tradingLotSize: normalizedTradingLotSize,
+                        targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
+                        stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
+                        maxSlippagePct: execSettings.slippagePct,
+                        forceManual: true,
+                      });
+                      if (!forced.success) throw new Error(forced.error || "Force trade rejected");
+                      toast({
+                        title: "FORCE TRADE PLACED",
+                        description: `${forced.instrument.tradingSymbol} · Entry ₹${forced.entryPremium?.toFixed(2)}`,
+                      });
+                      setActiveTrade(true);
+                      setLastExecution(forced);
+                    } catch (e) {
+                      toast({
+                        title: "Force trade failed",
+                        description: e instanceof Error ? e.message : String(e),
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setIsBusy(false);
+                    }
+                  }}
+                >
+                  ⚡ MANUAL FORCE TRADE (Bypass AI)
+                </Button>
                 {activeTradePlan && (
                   <div
                     className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}
