@@ -2362,8 +2362,36 @@ const Index = () => {
                     className="border-border bg-surface"
                   />
                 </div>
+                <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <Label htmlFor="manual-access-token" className="flex items-center gap-2">
+                    Manual Access Token
+                    <span className="text-[10px] font-normal text-muted-foreground">(bypasses OAuth)</span>
+                  </Label>
+                  <Input
+                    id="manual-access-token"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Paste your permanent Upstox access token"
+                    value={settings.manualAccessToken}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, manualAccessToken: event.target.value }))}
+                    className="border-border bg-surface font-mono text-xs"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Saved to backend &amp; VPS. Status flips to CONNECTED immediately.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="trading"
+                      disabled={isBusy || !settings.manualAccessToken.trim()}
+                      onClick={saveManualAccessToken}
+                    >
+                      Save Token
+                    </Button>
+                  </div>
+                </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">
                     OpenAI API Key{" "}
                     {systemStatus?.gemini?.ok && (
                       <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />
