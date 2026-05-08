@@ -2392,6 +2392,7 @@ const Index = () => {
                   </div>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="openai-api-key" className="flex items-center gap-2">
                     OpenAI API Key{" "}
                     {systemStatus?.gemini?.ok && (
                       <CheckCircle2 className="h-4 w-4 text-profit" aria-label="OpenAI verified" />
