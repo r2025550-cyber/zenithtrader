@@ -21,9 +21,30 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse as FastAPIJSONResponse
 
 router = APIRouter()
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+}
+
+
+class JSONResponse(FastAPIJSONResponse):
+    def __init__(self, content: Any = None, status_code: int = 200, headers: Optional[Dict[str, str]] = None, **kwargs):
+        merged_headers = {**CORS_HEADERS, **(headers or {})}
+        super().__init__(content=content, status_code=status_code, headers=merged_headers, **kwargs)
+
+
+@router.options("/{full_path:path}")
+async def cors_preflight(full_path: str):
+    return JSONResponse({"ok": True})
+
+
+@router.get("/")
+async def health_root():
+    return JSONResponse({"ok": True, "service": "zenith-upstox-vps"})
 
 # ---------------------------------------------------------------------------
 # Persistent settings storage
