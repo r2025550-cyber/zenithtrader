@@ -666,19 +666,33 @@ const Index = () => {
     localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
   }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
 
+  useEffect(() => {
+    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+    localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
+  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
+
+  useEffect(() => {
+    localStorage.setItem(VPS_STATUS_ENDPOINT_STORAGE_KEY, vpsStatusEndpoint);
+  }, [vpsStatusEndpoint]);
+
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
     let cancelled = false;
     const ping = async () => {
       try {
-        const r = await fetch(`${normalizedVpsBaseUrl}/system-status`, {
+        const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ target: "upstox" }),
         });
         if (!cancelled) setTunnelOnline(r.ok);
-      } catch {
+        if (!r.ok) {
+          const txt = await r.text().catch(() => "");
+          recordVpsError(`ping ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
+        }
+      } catch (err) {
         if (!cancelled) setTunnelOnline(false);
+        recordVpsError(`ping ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
@@ -687,7 +701,7 @@ const Index = () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [normalizedVpsBaseUrl]);
+  }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
