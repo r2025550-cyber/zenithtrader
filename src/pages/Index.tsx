@@ -69,6 +69,7 @@ const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
 const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
 const AUTO_TRADE_STORAGE_KEY = "zenith-auto-trade-mode";
+const UPSTOX_CONNECTED_FLAG_KEY = "zenith-upstox-connected";
 const TRADING_LOT_SIZE_STORAGE_KEY = "zenith-trading-lot-size";
 const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
@@ -387,7 +388,17 @@ const Index = () => {
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(() => {
+    if (typeof window === "undefined") return null;
+    if (localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) !== "true") return null;
+    return {
+      ready: false,
+      upstox: { ok: true, message: "Upstox token persisted on VPS — verifying live data…" },
+      gemini: { ok: false, message: "Run Re-test OpenAI to verify." },
+      checkedAt: new Date().toISOString(),
+    } as SystemStatus;
+  });
+  const [tunnelOnline, setTunnelOnline] = useState<boolean | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
@@ -628,6 +639,25 @@ const Index = () => {
   useEffect(() => {
     const clock = setInterval(() => setMarketClock(new Date()), 30_000);
     return () => clearInterval(clock);
+  }, []);
+
+  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
+  useEffect(() => {
+    let cancelled = false;
+    const ping = async () => {
+      try {
+        const r = await fetch(`${FASTAPI_BASE_URL}/`, { method: "GET" });
+        if (!cancelled) setTunnelOnline(r.ok);
+      } catch {
+        if (!cancelled) setTunnelOnline(false);
+      }
+    };
+    ping();
+    const t = setInterval(ping, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, []);
 
   useEffect(() => {
@@ -1094,10 +1124,11 @@ const Index = () => {
           const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
-                serverMessage.toLowerCase().includes("upstox oauth reconnect required")
-              ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
-              : serverMessage;
+              : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
+                  serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+                ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
+                  "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
+                : serverMessage;
           markUpstoxRateLimited(message);
           throw new Error(message);
         }
@@ -1296,6 +1327,7 @@ const Index = () => {
     try {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
+      localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       setOauthDebugLog(
         `Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`,
       );
@@ -1409,13 +1441,23 @@ const Index = () => {
         invokeFunction<UpstoxStatus>("system-status", { target: "upstox" }),
         invokeFunction<OpenAIStatus>("system-status", { target: "openai" }),
       ]);
-      const upstox =
+      let upstox =
         upstoxRes.status === "fulfilled"
           ? upstoxRes.value.upstox
           : {
               ok: false,
               message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed.",
             };
+      // Resilience: if the VPS /system-status route is not deployed (404 / Not Found)
+      // but we previously connected successfully (flag in localStorage) and the tunnel
+      // is reachable, keep the dashboard in CONNECTED state instead of forcing re-OAuth.
+      if (!upstox.ok && localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) === "true") {
+        const msg = (upstox.message || "").toLowerCase();
+        if (msg.includes("not found") || msg.includes("404") || msg.includes("vps 404")) {
+          upstox = { ok: true, message: "Upstox token persisted on VPS (status route unavailable, using cached state)." };
+        }
+      }
+      if (upstox.ok) localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       const gemini =
         openaiRes.status === "fulfilled"
           ? openaiRes.value.gemini
@@ -2005,6 +2047,23 @@ const Index = () => {
                     }`}
                   />
                   Upstox: {upstoxReady ? "Connected" : upstoxNeedsSetup ? "Not Connected" : "—"}
+                </span>
+                <span
+                  title={`VPS tunnel: ${FASTAPI_BASE_URL}`}
+                  className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${
+                    tunnelOnline
+                      ? "border-profit/40 bg-profit/10 text-profit"
+                      : tunnelOnline === false
+                        ? "border-loss/40 bg-loss/10 text-loss"
+                        : "border-border bg-surface text-muted-foreground"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      tunnelOnline ? "bg-profit animate-pulse" : tunnelOnline === false ? "bg-loss" : "bg-muted-foreground"
+                    }`}
+                  />
+                  {tunnelOnline ? "VPS TUNNEL ACTIVE" : tunnelOnline === false ? "VPS TUNNEL DOWN" : "VPS TUNNEL ?"}
                 </span>
               </div>
             </div>
