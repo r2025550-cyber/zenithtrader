@@ -50,16 +50,19 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://size-exams-mono-skill.trycloudflare.com";
+const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
+const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
+const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
+const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
-async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
-  const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
+async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FASTAPI_BASE_URL): Promise<{ status: string; mode: string }> {
+  const apiBase = getVpsBaseUrl(baseUrl);
+  const res = await fetch(`${apiBase}/mode/${target}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${FASTAPI_BASE_URL}/status`);
+  const statusRes = await fetch(`${apiBase}/status`);
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
   return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
