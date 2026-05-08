@@ -681,19 +681,20 @@ const Index = () => {
     let cancelled = false;
     const ping = async () => {
       try {
+        const method = getStatusEndpointMethod(vpsStatusEndpoint);
         const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
-          method: "POST",
+          method,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ target: "upstox" }),
+          body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
         if (!cancelled) setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
-          recordVpsError(`ping ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
+          recordVpsError(`${method} ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
         }
       } catch (err) {
         if (!cancelled) setTunnelOnline(false);
-        recordVpsError(`ping ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+        recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
