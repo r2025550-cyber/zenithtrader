@@ -1271,8 +1271,9 @@ const Index = () => {
         setVpsSaveStatus({ ok: false, message: `VPS ${vpsRes.status}: ${text || "save failed"}`, at: Date.now() });
         throw new Error(`VPS ${vpsRes.status}: ${text || "save failed"}`);
       }
+      localStorage.setItem(UPSTOX_CLIENT_ID_STORAGE_KEY, settings.upstoxApiKey.trim());
       setVpsSaveStatus({ ok: true, message: "Saved to VPS", at: Date.now() });
-      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
+      setSettings((prev) => ({ ...prev, upstoxApiKey: settings.upstoxApiKey.trim(), upstoxApiSecret: "" }));
       toast({
         title: "Upstox keys saved",
         description: "Credentials persisted to VPS. You may now click Get Code.",
@@ -1323,33 +1324,13 @@ const Index = () => {
       if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
       const vpsBase = getVpsBaseUrl(rawVpsUrl);
       const redirectUri = getUpstoxRedirectUri(vpsBase);
+      const clientId = settings.upstoxApiKey.trim() || storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY).trim();
+      if (!clientId) throw new Error("Enter Upstox API Key / Client ID first, then tap Get Code.");
       localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
+      localStorage.setItem(UPSTOX_CLIENT_ID_STORAGE_KEY, clientId);
       setVpsTunnelUrl(vpsBase);
-      let authUrl = "";
-      try {
-        const res = await fetch(`${vpsBase}/upstox-oauth`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "url", redirectUri, userId: session?.user?.id }),
-        });
-        const payload = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(payload?.detail || payload?.error || `VPS ${res.status}`);
-        authUrl = String(payload?.url || "");
-      } catch (error) {
-        if (!settings.upstoxApiKey.trim()) throw error;
-      }
-      if (!authUrl) {
-        const params = new URLSearchParams({
-          response_type: "code",
-          client_id: settings.upstoxApiKey.trim(),
-          redirect_uri: redirectUri,
-        });
-        if (session?.user?.id) params.set("state", session.user.id);
-        authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
-      }
-      const oauthUrl = new URL(authUrl);
-      oauthUrl.searchParams.set("redirect_uri", redirectUri);
-      authUrl = oauthUrl.toString();
+      const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: "code" });
+      const authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
       setAuthorizationUrl(authUrl);
       setSettings((prev) => ({ ...prev, redirectUri }));
       setOauthCode("");
