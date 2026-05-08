@@ -1380,6 +1380,49 @@ const Index = () => {
     }
   };
 
+  const saveManualAccessToken = async () => {
+    const token = settings.manualAccessToken.trim();
+    if (!token) {
+      toast({ title: "Paste your access token first", variant: "destructive" });
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await invokeFunction("save-trading-settings", { provider: "upstox-token", upstoxAccessToken: token });
+
+      try {
+        await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken: token, userId: session?.user?.id }),
+        });
+      } catch (vpsErr) {
+        console.warn("[Manual Token] VPS push failed (non-fatal):", vpsErr);
+      }
+
+      try { localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true"); } catch {}
+      setSystemStatus((prev) => ({
+        ready: prev?.gemini?.ok === true,
+        upstox: { ok: true, message: "CONNECTED — using manual access token." },
+        gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to verify." },
+        checkedAt: new Date().toISOString(),
+      } as SystemStatus));
+      setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
+
+      toast({ title: "Access token saved", description: "Status: CONNECTED. Trading calls will use this token." });
+
+      retestUpstox(false).catch(() => null);
+    } catch (error) {
+      toast({
+        title: "Unable to save access token",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const saveOpenAISettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
