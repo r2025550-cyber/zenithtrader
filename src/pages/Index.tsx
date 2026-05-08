@@ -675,9 +675,13 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+    if (!redirectUriManuallyEdited) {
+      setSettings((prev) =>
+        prev.redirectUri === upstoxOAuthRedirectUri ? prev : { ...prev, redirectUri: upstoxOAuthRedirectUri },
+      );
+    }
     localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
-  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
+  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri, redirectUriManuallyEdited]);
 
 
   useEffect(() => {
