@@ -2063,7 +2063,7 @@ const Index = () => {
                   Upstox: {upstoxReady ? "Connected" : upstoxNeedsSetup ? "Not Connected" : "—"}
                 </span>
                 <span
-                  title={`VPS tunnel: ${FASTAPI_BASE_URL}`}
+                  title={`VPS tunnel: ${normalizedVpsBaseUrl}`}
                   className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${
                     tunnelOnline
                       ? "border-profit/40 bg-profit/10 text-profit"
@@ -2215,7 +2215,7 @@ const Index = () => {
                   <p className="text-xs leading-5 text-muted-foreground">
                     Get Code and Connect both use this exact value. In the Authorization URL it is encoded as{" "}
                     <span className="text-foreground">
-                      redirect_uri={encodeURIComponent(UPSTOX_OAUTH_REDIRECT_URI)}
+                      redirect_uri={encodeURIComponent(upstoxOAuthRedirectUri)}
                     </span>
                     .
                   </p>
@@ -2223,7 +2223,7 @@ const Index = () => {
               </div>
               <div className="rounded-md border border-border bg-surface p-2 text-xs">
                 <div className="text-muted-foreground">
-                  VPS: <span className="text-foreground break-all">{FASTAPI_BASE_URL}</span>
+                  VPS: <span className="text-foreground break-all">{normalizedVpsBaseUrl}</span>
                 </div>
                 <div
                   className={
