@@ -2369,17 +2369,34 @@ const Index = () => {
                     id="redirect-uri"
                     type="url"
                     autoComplete="off"
+                    placeholder={upstoxOAuthRedirectUri}
                     value={settings.redirectUri}
-                    readOnly
+                    onChange={(event) => {
+                      setRedirectUriManuallyEdited(true);
+                      setSettings((prev) => ({ ...prev, redirectUri: event.target.value }));
+                    }}
                     className="border-border bg-surface"
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    Get Code and Connect both use this exact value. In the Authorization URL it is encoded as{" "}
-                    <span className="text-foreground">
-                      redirect_uri={encodeURIComponent(upstoxOAuthRedirectUri)}
-                    </span>
-                    .
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Get Code uses this exact value. Encoded:{" "}
+                      <span className="text-foreground break-all">
+                        {encodeURIComponent(settings.redirectUri || upstoxOAuthRedirectUri)}
+                      </span>
+                    </p>
+                    {redirectUriManuallyEdited && (
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-primary underline"
+                        onClick={() => {
+                          setRedirectUriManuallyEdited(false);
+                          setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+                        }}
+                      >
+                        Reset to auto
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="rounded-md border border-border bg-surface p-2 text-xs">
