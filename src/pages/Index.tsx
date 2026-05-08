@@ -1169,11 +1169,12 @@ const Index = () => {
     }
     if (routeToVps) {
       const path = name === "system-status" ? vpsStatusEndpoint : `/${name}`;
+      const method = name === "system-status" ? getStatusEndpointMethod(path) : "POST";
       try {
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
-          method: "POST",
+          method,
           headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify(body ?? {}),
+          body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
         });
         const text = await res.text();
         const payload = text
@@ -1194,15 +1195,25 @@ const Index = () => {
               ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
                 "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
               : serverMessage;
-          recordVpsError(`POST ${path}`, `${res.status} ${message}`);
+          recordVpsError(`${method} ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
           throw new Error(message);
+        }
+        if (name === "system-status" && method === "GET") {
+          return {
+            upstox: {
+              ok: true,
+              message: `VPS reachable at ${path}. Saved Upstox session remains CONNECTED while token is stored in backend.`,
+              details: payload,
+            },
+            checkedAt: new Date().toISOString(),
+          } as T;
         }
         return payload as T;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
-          recordVpsError(`POST ${path}`, "network failure (failed to fetch)");
+          recordVpsError(`${method} ${path}`, "network failure (failed to fetch)");
           throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
         }
         throw err;
