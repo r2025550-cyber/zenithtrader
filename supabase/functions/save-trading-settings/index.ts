@@ -39,26 +39,38 @@ serve(async (req) => {
       .maybeSingle();
     if (existingError) throw existingError;
 
+    const baseRow = {
+      user_id: auth.user.id,
+      upstox_api_key: existing?.upstox_api_key,
+      upstox_api_secret: existing?.upstox_api_secret,
+      openai_api_key: existing?.openai_api_key,
+      redirect_uri: existing?.redirect_uri,
+      upstox_access_token: existing?.upstox_access_token,
+      upstox_refresh_token: existing?.upstox_refresh_token,
+      token_expires_at: existing?.token_expires_at,
+    };
+
     const row = parsed.data.provider === "upstox"
       ? {
-        user_id: auth.user.id,
+        ...baseRow,
         upstox_api_key: parsed.data.upstoxApiKey,
         upstox_api_secret: parsed.data.upstoxApiSecret,
-        openai_api_key: existing?.openai_api_key,
         redirect_uri: parsed.data.redirectUri ?? existing?.redirect_uri,
         upstox_access_token: null,
         upstox_refresh_token: null,
         token_expires_at: null,
       }
+      : parsed.data.provider === "upstox-token"
+      ? {
+        ...baseRow,
+        upstox_access_token: parsed.data.upstoxAccessToken,
+        upstox_refresh_token: null,
+        // Upstox daily tokens expire next day 3:30 AM IST; store ~24h ahead as a hint
+        token_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      }
       : {
-        user_id: auth.user.id,
-        upstox_api_key: existing?.upstox_api_key,
-        upstox_api_secret: existing?.upstox_api_secret,
+        ...baseRow,
         openai_api_key: parsed.data.openaiApiKey,
-        redirect_uri: existing?.redirect_uri,
-        upstox_access_token: existing?.upstox_access_token,
-        upstox_refresh_token: existing?.upstox_refresh_token,
-        token_expires_at: existing?.token_expires_at,
       };
 
     const { error } = await auth.adminClient.from("trading_api_settings").upsert(row, { onConflict: "user_id" });
