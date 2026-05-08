@@ -1105,10 +1105,11 @@ const Index = () => {
           const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
-                serverMessage.toLowerCase().includes("upstox oauth reconnect required")
-              ? "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect."
-              : serverMessage;
+              : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
+                  serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+                ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
+                  "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
+                : serverMessage;
           markUpstoxRateLimited(message);
           throw new Error(message);
         }
