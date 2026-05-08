@@ -388,7 +388,17 @@ const Index = () => {
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
   const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(() => {
+    if (typeof window === "undefined") return null;
+    if (localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) !== "true") return null;
+    return {
+      ready: false,
+      upstox: { ok: true, message: "Upstox token persisted on VPS — verifying live data…" },
+      gemini: { ok: false, message: "Run Re-test OpenAI to verify." },
+      checkedAt: new Date().toISOString(),
+    } as SystemStatus;
+  });
+  const [tunnelOnline, setTunnelOnline] = useState<boolean | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
