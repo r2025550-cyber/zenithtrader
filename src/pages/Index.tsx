@@ -54,12 +54,17 @@ const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudfla
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
 const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
 const VPS_STATUS_ENDPOINT_STORAGE_KEY = "zenith-vps-status-endpoint";
-const DEFAULT_VPS_STATUS_ENDPOINT = "/system-status";
+const DEFAULT_VPS_STATUS_ENDPOINT = "/";
 const normalizeStatusEndpoint = (raw?: string) => {
   const v = (raw || DEFAULT_VPS_STATUS_ENDPOINT).trim();
   if (!v) return DEFAULT_VPS_STATUS_ENDPOINT;
   return v.startsWith("/") ? v : `/${v}`;
 };
+const normalizeSavedStatusEndpoint = (raw?: string) => {
+  const endpoint = normalizeStatusEndpoint(raw);
+  return endpoint === "/system-status" ? DEFAULT_VPS_STATUS_ENDPOINT : endpoint;
+};
+const getStatusEndpointMethod = (endpoint: string) => (endpoint === "/" || endpoint === "/fetch-data" ? "GET" : "POST");
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
 const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
