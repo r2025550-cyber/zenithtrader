@@ -65,8 +65,15 @@ const normalizeSavedStatusEndpoint = (raw?: string) => {
   return endpoint === "/system-status" ? DEFAULT_VPS_STATUS_ENDPOINT : endpoint;
 };
 const getStatusEndpointMethod = (endpoint: string) => (endpoint === "/" || endpoint === "/fetch-data" ? "GET" : "POST");
+// Use the VPS Tunnel URL exactly as the user typed it — only trim whitespace and
+// trailing slashes. Do NOT auto-append /callback or any other suffix here.
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
-const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
+// Build the Upstox redirect URI by appending exactly ONE /callback to the base
+// VPS URL. If the user already included /callback in the base, do not duplicate it.
+const getUpstoxRedirectUri = (baseUrl: string) => {
+  const base = getVpsBaseUrl(baseUrl);
+  return /\/callback$/i.test(base) ? base : `${base}/callback`;
+};
 
 async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FASTAPI_BASE_URL): Promise<{ status: string; mode: string }> {
   const apiBase = getVpsBaseUrl(baseUrl);
