@@ -1162,8 +1162,9 @@ const Index = () => {
       routeToVps = target === "upstox";
     }
     if (routeToVps) {
+      const path = name === "system-status" ? vpsStatusEndpoint : `/${name}`;
       try {
-        const res = await fetch(`${normalizedVpsBaseUrl}/${name}`, {
+        const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
@@ -1187,6 +1188,7 @@ const Index = () => {
               ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
                 "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
               : serverMessage;
+          recordVpsError(`POST ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
           throw new Error(message);
         }
@@ -1194,6 +1196,7 @@ const Index = () => {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message.toLowerCase().includes("failed to fetch")) {
+          recordVpsError(`POST ${path}`, "network failure (failed to fetch)");
           throw new Error("VPS backend unreachable. Check the FastAPI tunnel is running on 165.22.212.105.");
         }
         throw err;
