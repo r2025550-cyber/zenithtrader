@@ -223,25 +223,31 @@ async def upstox_oauth(req: Request):
         )
 
     if mode == "url":
+        redirect_uri = str(body.get("redirectUri") or settings.get("redirect_uri") or TOKEN_EXCHANGE_REDIRECT_URI).strip()
+        user_id = str(body.get("userId") or settings.get("user_id") or "").strip()
         params = {
             "response_type": "code",
             "client_id": api_key,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
         }
-        save_settings({"redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI})
+        if user_id:
+            params["state"] = user_id
+        save_settings({"redirect_uri": redirect_uri, "user_id": user_id or settings.get("user_id")})
         return JSONResponse({
             "url": f"https://api.upstox.com/v2/login/authorization/dialog?{urlencode(params)}",
         })
 
     if mode == "token":
         code = str(body.get("code") or "").strip()
+        redirect_uri = str(body.get("redirectUri") or settings.get("redirect_uri") or TOKEN_EXCHANGE_REDIRECT_URI).strip()
+        user_id = str(body.get("userId") or settings.get("user_id") or "").strip()
         if not code:
             raise HTTPException(status_code=400, detail="code is required")
         form = {
             "code": code,
             "client_id": api_key,
             "client_secret": api_secret,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
         async with _client() as c:
@@ -261,9 +267,11 @@ async def upstox_oauth(req: Request):
             "upstox_access_token": tok.get("access_token"),
             "upstox_refresh_token": tok.get("refresh_token"),
             "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None,
-            "redirect_uri": TOKEN_EXCHANGE_REDIRECT_URI,
+            "redirect_uri": redirect_uri,
+            "user_id": user_id or settings.get("user_id"),
         })
-        return JSONResponse({"success": True})
+        sync_result = await _sync_token_to_supabase(user_id, tok, redirect_uri)
+        return JSONResponse({"success": True, "supabaseSync": sync_result})
 
     raise HTTPException(status_code=400, detail="mode must be 'url' or 'token'")
 
