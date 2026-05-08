@@ -2238,6 +2238,18 @@ const Index = () => {
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="vps-tunnel-url">VPS Tunnel URL</Label>
+                  <Input
+                    id="vps-tunnel-url"
+                    type="url"
+                    autoComplete="off"
+                    placeholder="https://virginia-cast-flood-before.trycloudflare.com"
+                    value={vpsTunnelUrl}
+                    onChange={(event) => setVpsTunnelUrl(event.target.value)}
+                    className="border-border bg-surface"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
                   <Input
                     id="redirect-uri"
@@ -2275,7 +2287,7 @@ const Index = () => {
               </div>
               <DialogFooter className="gap-2 sm:justify-between sm:space-x-0">
                 <Button
-                  disabled={isBusy || !vpsSaveStatus?.ok}
+                  disabled={isBusy}
                   type="button"
                   variant="terminal"
                   onClick={startUpstoxOAuth}
