@@ -2294,6 +2294,23 @@ const Index = () => {
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="vps-status-endpoint">Status Endpoint (path on VPS)</Label>
+                  <Input
+                    id="vps-status-endpoint"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="/system-status"
+                    value={vpsStatusEndpoint}
+                    onChange={(e) => setVpsStatusEndpoint(normalizeStatusEndpoint(e.target.value))}
+                    className="border-border bg-surface"
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    If your VPS exposes status at <span className="text-foreground">/</span> or{" "}
+                    <span className="text-foreground">/fetch-data</span> instead of{" "}
+                    <span className="text-foreground">/system-status</span>, edit it here.
+                  </p>
+                </div>
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="redirect-uri">Manual Redirect URI from Upstox Developer Portal</Label>
                   <Input
                     id="redirect-uri"
