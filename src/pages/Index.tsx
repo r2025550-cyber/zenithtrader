@@ -51,7 +51,7 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://size-exams-mono-skill.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
@@ -1124,11 +1124,11 @@ const Index = () => {
           const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
-              : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
-                  serverMessage.toLowerCase().includes("upstox oauth reconnect required")
-                ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
-                  "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
-                : serverMessage;
+            : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
+                serverMessage.toLowerCase().includes("upstox oauth reconnect required")
+              ? (localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY),
+                "Upstox OAuth reconnect required. Open API Settings, tap Get Code, finish Upstox login, paste the fresh code, then Connect.")
+              : serverMessage;
           markUpstoxRateLimited(message);
           throw new Error(message);
         }
@@ -1454,7 +1454,10 @@ const Index = () => {
       if (!upstox.ok && localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) === "true") {
         const msg = (upstox.message || "").toLowerCase();
         if (msg.includes("not found") || msg.includes("404") || msg.includes("vps 404")) {
-          upstox = { ok: true, message: "Upstox token persisted on VPS (status route unavailable, using cached state)." };
+          upstox = {
+            ok: true,
+            message: "Upstox token persisted on VPS (status route unavailable, using cached state).",
+          };
         }
       }
       if (upstox.ok) localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
@@ -2060,7 +2063,11 @@ const Index = () => {
                 >
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      tunnelOnline ? "bg-profit animate-pulse" : tunnelOnline === false ? "bg-loss" : "bg-muted-foreground"
+                      tunnelOnline
+                        ? "bg-profit animate-pulse"
+                        : tunnelOnline === false
+                          ? "bg-loss"
+                          : "bg-muted-foreground"
                     }`}
                   />
                   {tunnelOnline ? "VPS TUNNEL ACTIVE" : tunnelOnline === false ? "VPS TUNNEL DOWN" : "VPS TUNNEL ?"}
