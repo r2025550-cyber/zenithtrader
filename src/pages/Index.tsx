@@ -1063,7 +1063,7 @@ const Index = () => {
     localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
     setSystemStatus((prev) => {
       const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
-      return { ready: gemini.ok, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+      return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
     });
     return data;
   };
