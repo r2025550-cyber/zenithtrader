@@ -1371,7 +1371,7 @@ const Index = () => {
       `Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`,
     );
     try {
-      await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
+      await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri, userId: session?.user?.id });
       setOauthCode("");
       localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       setOauthDebugLog(
@@ -1929,7 +1929,7 @@ const Index = () => {
       // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
       try {
         const target = checked ? "auto" : "manual";
-        const result = await syncFastApiMode(target);
+        const result = await syncFastApiMode(target, normalizedVpsBaseUrl);
         setBackendOnline(true);
         const m = (result.mode || "").toUpperCase();
         if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
