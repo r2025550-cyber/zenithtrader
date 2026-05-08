@@ -68,6 +68,7 @@ const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
 const UPSTOX_RATE_LIMIT_ERROR = "UDAPI10005";
 const AI_ARMED_STORAGE_KEY = "zenith-ai-trading-armed";
+const AUTO_TRADE_STORAGE_KEY = "zenith-auto-trade-mode";
 const TRADING_LOT_SIZE_STORAGE_KEY = "zenith-trading-lot-size";
 const DAILY_TARGET_STORAGE_KEY = "zenith-daily-profit-target";
 const MAX_DAILY_LOSS_STORAGE_KEY = "zenith-max-daily-loss";
