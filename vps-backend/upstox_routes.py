@@ -21,7 +21,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 router = APIRouter()
 
@@ -169,7 +169,34 @@ async def upstox_credentials(req: Request):
     return JSONResponse({"success": True})
 
 
-TOKEN_EXCHANGE_REDIRECT_URI = "http://localhost:3000"
+TOKEN_EXCHANGE_REDIRECT_URI = os.environ.get("UPSTOX_REDIRECT_URI", "https://virginia-cast-flood-before.trycloudflare.com/callback")
+
+
+async def _sync_token_to_supabase(user_id: str, token_payload: Dict[str, Any], redirect_uri: str) -> Dict[str, Any]:
+    supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    if not user_id or not supabase_url or not service_key:
+        return {"ok": False, "message": "Supabase sync skipped: user_id or service key missing on VPS."}
+    expires_in = token_payload.get("expires_in")
+    row = {
+        "user_id": user_id,
+        "upstox_access_token": token_payload.get("access_token"),
+        "upstox_refresh_token": token_payload.get("refresh_token"),
+        "token_expires_at": (datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))).isoformat() if expires_in else None,
+        "redirect_uri": redirect_uri,
+    }
+    async with _client() as c:
+        resp = await c.post(
+            f"{supabase_url}/rest/v1/trading_api_settings?on_conflict=user_id",
+            json=row,
+            headers={
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+        )
+    return {"ok": resp.status_code < 400, "status": resp.status_code, "body": resp.text[:500]}
 
 
 @router.post("/upstox-oauth")
