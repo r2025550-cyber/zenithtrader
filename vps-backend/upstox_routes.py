@@ -223,6 +223,41 @@ async def _sync_token_to_supabase(user_id: str, token_payload: Dict[str, Any], r
     return {"ok": resp.status_code < 400, "status": resp.status_code, "body": resp.text[:500]}
 
 
+@router.post("/upstox-token")
+async def upstox_token(req: Request):
+    """Accept a permanent / manual access token and persist it on the VPS.
+
+    This bypasses the OAuth flow entirely so /fetch-nifty-data and order
+    placement endpoints can authorise immediately.
+    """
+    body = await _read_json(req)
+    token = str(
+        body.get("accessToken")
+        or body.get("access_token")
+        or body.get("upstoxAccessToken")
+        or ""
+    ).strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="accessToken is required")
+    payload: Dict[str, Any] = {
+        "upstox_access_token": token,
+        "upstox_refresh_token": None,
+        # Treat manual tokens as long-lived; expire ~24h ahead as a hint only.
+        "token_expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+    }
+    api_key = str(body.get("apiKey") or body.get("upstoxApiKey") or "").strip()
+    api_secret = str(body.get("apiSecret") or body.get("upstoxApiSecret") or "").strip()
+    if api_key:
+        payload["upstox_api_key"] = api_key
+    if api_secret:
+        payload["upstox_api_secret"] = api_secret
+    user_id = str(body.get("userId") or body.get("user_id") or "").strip()
+    if user_id:
+        payload["user_id"] = user_id
+    save_settings(payload)
+    return JSONResponse({"success": True, "message": "Manual access token stored on VPS."})
+
+
 @router.post("/upstox-oauth")
 async def upstox_oauth(req: Request):
     try:
