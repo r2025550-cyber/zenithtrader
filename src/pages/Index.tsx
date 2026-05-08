@@ -1339,6 +1339,7 @@ const Index = () => {
           client_id: settings.upstoxApiKey.trim(),
           redirect_uri: redirectUri,
         });
+        if (session?.user?.id) params.set("state", session.user.id);
         authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
       }
       const oauthUrl = new URL(authUrl);
