@@ -1116,7 +1116,7 @@ const Index = () => {
     }
     if (routeToVps) {
       try {
-        const res = await fetch(`${FASTAPI_BASE_URL}/${name}`, {
+        const res = await fetch(`${normalizedVpsBaseUrl}/${name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body ?? {}),
@@ -1238,9 +1238,9 @@ const Index = () => {
 
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
-    const url = `${FASTAPI_BASE_URL}/upstox-credentials`;
+    const url = `${normalizedVpsBaseUrl}/upstox-credentials`;
     const body = { apiKey: settings.upstoxApiKey, apiSecret: settings.upstoxApiSecret };
-    console.log("[Upstox Save] FASTAPI_BASE_URL =", FASTAPI_BASE_URL);
+    console.log("[Upstox Save] FASTAPI_BASE_URL =", normalizedVpsBaseUrl);
     console.log("[Upstox Save] POST", url);
     try {
       let vpsRes: Response;
@@ -1303,7 +1303,7 @@ const Index = () => {
 
   const startUpstoxOAuth = async () => {
     try {
-      const redirectUri = UPSTOX_OAUTH_REDIRECT_URI;
+      const redirectUri = upstoxOAuthRedirectUri;
       const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
       setAuthorizationUrl(data.url);
       setSettings((prev) => ({ ...prev, redirectUri }));
@@ -1319,7 +1319,7 @@ const Index = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
-        `Get Code failed.\nVPS: ${FASTAPI_BASE_URL}/upstox-oauth\nError: ${message}\nCheck backend logs for [upstox-oauth] line.`,
+        `Get Code failed.\nVPS: ${normalizedVpsBaseUrl}/upstox-oauth\nError: ${message}\nCheck backend logs for [upstox-oauth] line.`,
       );
       toast({
         title: "OAuth start failed",
@@ -1330,7 +1330,7 @@ const Index = () => {
   };
 
   const completeUpstoxOAuth = async () => {
-    const debugRedirectUri = UPSTOX_OAUTH_REDIRECT_URI;
+    const debugRedirectUri = upstoxOAuthRedirectUri;
     const trimmedCode = oauthCode.trim();
     setOauthDebugLog(
       `Token exchange payload sent to Upstox:\nmode=token\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nUse a fresh OAuth code for each retry.`,
