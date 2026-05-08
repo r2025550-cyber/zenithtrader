@@ -1551,7 +1551,7 @@ const Index = () => {
           ? savedSession.upstox
           : { ok: false, message: "VPS tunnel is reachable, but no saved Upstox access token was found. Complete OAuth once." };
       }
-      // Resilience: if the VPS /system-status route is not deployed (404 / Not Found)
+      // Resilience: if a manually configured VPS status route is unavailable (404 / Not Found)
       // but we previously connected successfully (flag in localStorage) and the tunnel
       // is reachable, keep the dashboard in CONNECTED state instead of forcing re-OAuth.
       if (!upstox.ok && localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) === "true") {
@@ -2319,15 +2319,14 @@ const Index = () => {
                     id="vps-status-endpoint"
                     type="text"
                     autoComplete="off"
-                    placeholder="/system-status"
+                    placeholder="/"
                     value={vpsStatusEndpoint}
                     onChange={(e) => setVpsStatusEndpoint(normalizeStatusEndpoint(e.target.value))}
                     className="border-border bg-surface"
                   />
                   <p className="text-xs leading-5 text-muted-foreground">
-                    If your VPS exposes status at <span className="text-foreground">/</span> or{" "}
-                    <span className="text-foreground">/fetch-data</span> instead of{" "}
-                    <span className="text-foreground">/system-status</span>, edit it here.
+                    Default uses <span className="text-foreground">/</span> with GET. Use{" "}
+                    <span className="text-foreground">/fetch-data</span> if that is your VPS health/data route.
                   </p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
