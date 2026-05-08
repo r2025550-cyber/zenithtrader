@@ -1045,12 +1045,14 @@ const Index = () => {
 
     // Route Upstox execution + OAuth through the VPS FastAPI backend (static IPv4).
     // Edge functions remain deployed as fallback but are no longer the primary path.
+    // Route Upstox read-only market data + OAuth through the VPS FastAPI backend
+    // (static IPv4). Trading order placement / modification / exits still go
+    // through Supabase edge functions because they contain the full execution
+    // layer (slippage guard, SL placement, fill polling, liquidity checks, DB
+    // tracking) that the VPS pass-through does not replicate.
     const VPS_ROUTED = new Set([
       "fetch-nifty-data",
       "fetch-option-premium",
-      "place-live-order",
-      "modify-stop-loss-order",
-      "emergency-exit",
       "upstox-oauth",
     ]);
     // system-status is split: Upstox token lives on VPS (settings.json),
