@@ -2527,6 +2527,28 @@ const Index = () => {
                     aria-label="Start AI Trading"
                   />
                 </div>
+                <div className="flex items-center justify-between rounded-md border border-warning/40 bg-warning/10 p-4">
+                  <div>
+                    <p className="font-semibold text-warning">AUTO-TRADE MODE</p>
+                    <p className="text-xs text-muted-foreground">
+                      Auto-fires order on every High-Probability signal — no manual click required.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autoTradeMode}
+                    onCheckedChange={(v) => {
+                      setAutoTradeMode(v);
+                      localStorage.setItem(AUTO_TRADE_STORAGE_KEY, String(v));
+                      toast({
+                        title: v ? "AUTO-TRADE ENABLED" : "AUTO-TRADE DISABLED",
+                        description: v
+                          ? "High-probability signals will be executed instantly."
+                          : "Manual confirmation required for execution.",
+                      });
+                    }}
+                    aria-label="Auto Trade Mode"
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="trading-lot-size" className="text-sm font-medium text-muted-foreground">
                     Trading Lot Size
