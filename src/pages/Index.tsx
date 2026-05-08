@@ -1052,9 +1052,16 @@ const Index = () => {
       "modify-stop-loss-order",
       "emergency-exit",
       "upstox-oauth",
-      "system-status",
     ]);
-    if (VPS_ROUTED.has(name)) {
+    // system-status is split: Upstox token lives on VPS (settings.json),
+    // OpenAI key lives in Supabase. Route by target so each check hits the
+    // place that actually has the credential.
+    let routeToVps = VPS_ROUTED.has(name);
+    if (name === "system-status") {
+      const target = (body as { target?: string } | undefined)?.target;
+      routeToVps = target === "upstox";
+    }
+    if (routeToVps) {
       try {
         const res = await fetch(`${FASTAPI_BASE_URL}/${name}`, {
           method: "POST",
@@ -1372,7 +1379,26 @@ const Index = () => {
   const checkSystemStatus = async (showToast = true) => {
     setIsCheckingStatus(true);
     try {
-      const status = await invokeFunction<SystemStatus>("system-status");
+      // Upstox token lives on VPS settings.json; OpenAI key lives in Supabase.
+      // Query each in its own home and merge into one SystemStatus payload.
+      const [upstoxRes, openaiRes] = await Promise.allSettled([
+        invokeFunction<UpstoxStatus>("system-status", { target: "upstox" }),
+        invokeFunction<OpenAIStatus>("system-status", { target: "openai" }),
+      ]);
+      const upstox =
+        upstoxRes.status === "fulfilled"
+          ? upstoxRes.value.upstox
+          : { ok: false, message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed." };
+      const gemini =
+        openaiRes.status === "fulfilled"
+          ? openaiRes.value.gemini
+          : { ok: false, message: openaiRes.reason instanceof Error ? openaiRes.reason.message : "OpenAI check failed." };
+      const status: SystemStatus = {
+        ready: upstox.ok && gemini.ok,
+        upstox,
+        gemini,
+        checkedAt: new Date().toISOString(),
+      };
       setSystemStatus(status);
       if (showToast) {
         const failures = [status.upstox, status.gemini]
