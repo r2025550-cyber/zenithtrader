@@ -705,6 +705,13 @@ const Index = () => {
     };
   }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
+  // Force-reset trades remaining to 4/4 on mount per user spec.
+  useEffect(() => {
+    setExecutedTrades(0);
+    localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
   }, [tradingLotSize]);
@@ -1168,7 +1175,15 @@ const Index = () => {
       routeToVps = target === "upstox";
     }
     if (routeToVps) {
-      const path = name === "system-status" ? vpsStatusEndpoint : `/${name}`;
+      // VPS endpoint mapping: order placement uses `/place-order` on the VPS
+      // (FastAPI backend handles the actual Upstox API call with stored token).
+      const VPS_PATH_OVERRIDES: Record<string, string> = {
+        "place-live-order": "/place-order",
+      };
+      const path =
+        name === "system-status"
+          ? vpsStatusEndpoint
+          : VPS_PATH_OVERRIDES[name] ?? `/${name}`;
       const method = name === "system-status" ? getStatusEndpointMethod(path) : "POST";
       try {
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
