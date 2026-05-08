@@ -52,6 +52,7 @@ const history = [
 
 const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
+const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
 const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
 
@@ -62,7 +63,7 @@ async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FAST
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${apiBase}/status`);
+  const statusRes = await fetch(`${apiBase}/status`, { headers: { "Content-Type": "application/json" } });
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
   return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
@@ -375,7 +376,7 @@ const Index = () => {
   const [killSwitchDate, setKillSwitchDate] = useState(() => storedValue(KILL_SWITCH_STORAGE_KEY));
   const [cooldownUntil, setCooldownUntil] = useState(() => Number(storedValue(COOLDOWN_UNTIL_STORAGE_KEY, "0")) || 0);
   const [settings, setSettings] = useState({
-    upstoxApiKey: "",
+    upstoxApiKey: storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY),
     upstoxApiSecret: "",
     openaiApiKey: "",
     redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
@@ -657,7 +658,11 @@ const Index = () => {
     let cancelled = false;
     const ping = async () => {
       try {
-        const r = await fetch(`${normalizedVpsBaseUrl}/`, { method: "GET" });
+        const r = await fetch(`${normalizedVpsBaseUrl}/system-status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "upstox" }),
+        });
         if (!cancelled) setTunnelOnline(r.ok);
       } catch {
         if (!cancelled) setTunnelOnline(false);
@@ -1015,6 +1020,25 @@ const Index = () => {
     return true;
   };
 
+  const resetDailyTradeQuota = () => {
+    setExecutedTrades(0);
+    localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
+  };
+
+  const restoreSavedUpstoxSession = async () => {
+    const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
+      body: { target: "upstox", tokenOnly: true },
+    });
+    if (error) throw error;
+    if (!data?.upstox?.ok) return data;
+    localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
+    setSystemStatus((prev) => {
+      const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
+      return { ready: gemini.ok, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+    });
+    return data;
+  };
+
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
     if (latestSignal) {
@@ -1266,8 +1290,9 @@ const Index = () => {
         setVpsSaveStatus({ ok: false, message: `VPS ${vpsRes.status}: ${text || "save failed"}`, at: Date.now() });
         throw new Error(`VPS ${vpsRes.status}: ${text || "save failed"}`);
       }
+      localStorage.setItem(UPSTOX_CLIENT_ID_STORAGE_KEY, settings.upstoxApiKey.trim());
       setVpsSaveStatus({ ok: true, message: "Saved to VPS", at: Date.now() });
-      setSettings((prev) => ({ ...prev, upstoxApiKey: "", upstoxApiSecret: "" }));
+      setSettings((prev) => ({ ...prev, upstoxApiKey: settings.upstoxApiKey.trim(), upstoxApiSecret: "" }));
       toast({
         title: "Upstox keys saved",
         description: "Credentials persisted to VPS. You may now click Get Code.",
@@ -1318,33 +1343,13 @@ const Index = () => {
       if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
       const vpsBase = getVpsBaseUrl(rawVpsUrl);
       const redirectUri = getUpstoxRedirectUri(vpsBase);
+      const clientId = settings.upstoxApiKey.trim() || storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY).trim();
+      if (!clientId) throw new Error("Enter Upstox API Key / Client ID first, then tap Get Code.");
       localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
+      localStorage.setItem(UPSTOX_CLIENT_ID_STORAGE_KEY, clientId);
       setVpsTunnelUrl(vpsBase);
-      let authUrl = "";
-      try {
-        const res = await fetch(`${vpsBase}/upstox-oauth`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "url", redirectUri, userId: session?.user?.id }),
-        });
-        const payload = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(payload?.detail || payload?.error || `VPS ${res.status}`);
-        authUrl = String(payload?.url || "");
-      } catch (error) {
-        if (!settings.upstoxApiKey.trim()) throw error;
-      }
-      if (!authUrl) {
-        const params = new URLSearchParams({
-          response_type: "code",
-          client_id: settings.upstoxApiKey.trim(),
-          redirect_uri: redirectUri,
-        });
-        if (session?.user?.id) params.set("state", session.user.id);
-        authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
-      }
-      const oauthUrl = new URL(authUrl);
-      oauthUrl.searchParams.set("redirect_uri", redirectUri);
-      authUrl = oauthUrl.toString();
+      const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: "code" });
+      const authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
       setAuthorizationUrl(authUrl);
       setSettings((prev) => ({ ...prev, redirectUri }));
       setOauthCode("");
@@ -1506,6 +1511,10 @@ const Index = () => {
             message: "Upstox token persisted on VPS (status route unavailable, using cached state).",
           };
         }
+      }
+      if (!upstox.ok) {
+        const restored = await restoreSavedUpstoxSession().catch(() => null);
+        if (restored?.upstox?.ok) upstox = restored.upstox;
       }
       if (upstox.ok) localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       const gemini =
@@ -2011,9 +2020,12 @@ const Index = () => {
 
   useEffect(() => {
     if (!session) return;
-    checkSystemStatus(false)
+    resetDailyTradeQuota();
+    restoreSavedUpstoxSession()
+      .catch(() => null)
+      .then(() => checkSystemStatus(false))
       .then((status) => {
-        if (status.upstox.ok) return fetchLiveNifty(false, true);
+        if (status?.upstox.ok) return fetchLiveNifty(false, true);
         return null;
       })
       .catch(() => {

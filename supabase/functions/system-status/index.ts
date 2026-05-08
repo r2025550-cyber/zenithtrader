@@ -43,6 +43,7 @@ serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const target = body?.target === "openai" || body?.target === "gemini" || body?.target === "upstox" ? body.target : "all";
+    const tokenOnly = body?.tokenOnly === true;
     const auth = await getAuthenticatedClients(req);
     if ("error" in auth) return auth.error ?? json({ error: "Please sign in before checking system status." }, 401);
 
@@ -60,6 +61,15 @@ serve(async (req) => {
     }
 
     if (target === "upstox") {
+      if (tokenOnly) {
+        const hasToken = Boolean(settings?.upstox_access_token);
+        return json({
+          upstox: hasToken
+            ? ok("Saved Upstox access token found. Session restored from backend storage.")
+            : fail("Upstox access token is missing. Complete OAuth again from API Settings."),
+          checkedAt: new Date().toISOString(),
+        });
+      }
       const upstox = await checkUpstox(settings?.upstox_access_token);
       if (!upstox.ok && JSON.stringify(upstox.details ?? {}).includes("UDAPI100050")) await clearUpstoxToken(auth.adminClient, auth.user.id);
       return json({ upstox, checkedAt: new Date().toISOString() });
