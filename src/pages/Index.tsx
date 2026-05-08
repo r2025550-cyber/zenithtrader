@@ -2048,6 +2048,23 @@ const Index = () => {
                   />
                   Upstox: {upstoxReady ? "Connected" : upstoxNeedsSetup ? "Not Connected" : "—"}
                 </span>
+                <span
+                  title={`VPS tunnel: ${FASTAPI_BASE_URL}`}
+                  className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-semibold ${
+                    tunnelOnline
+                      ? "border-profit/40 bg-profit/10 text-profit"
+                      : tunnelOnline === false
+                        ? "border-loss/40 bg-loss/10 text-loss"
+                        : "border-border bg-surface text-muted-foreground"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      tunnelOnline ? "bg-profit animate-pulse" : tunnelOnline === false ? "bg-loss" : "bg-muted-foreground"
+                    }`}
+                  />
+                  {tunnelOnline ? "VPS TUNNEL ACTIVE" : tunnelOnline === false ? "VPS TUNNEL DOWN" : "VPS TUNNEL ?"}
+                </span>
               </div>
             </div>
             <div className="rounded-md border border-border bg-surface px-4 py-3">
