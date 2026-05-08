@@ -1307,6 +1307,7 @@ const Index = () => {
     try {
       await invokeFunction("upstox-oauth", { mode: "token", code: trimmedCode, redirectUri: debugRedirectUri });
       setOauthCode("");
+      localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       setOauthDebugLog(
         `Token exchange succeeded.\ncode=${trimmedCode}\nredirect_uri=${debugRedirectUri}\nThis code has now been used and cannot be submitted again.`,
       );
