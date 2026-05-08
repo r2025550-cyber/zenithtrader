@@ -1052,9 +1052,16 @@ const Index = () => {
       "modify-stop-loss-order",
       "emergency-exit",
       "upstox-oauth",
-      "system-status",
     ]);
-    if (VPS_ROUTED.has(name)) {
+    // system-status is split: Upstox token lives on VPS (settings.json),
+    // OpenAI key lives in Supabase. Route by target so each check hits the
+    // place that actually has the credential.
+    let routeToVps = VPS_ROUTED.has(name);
+    if (name === "system-status") {
+      const target = (body as { target?: string } | undefined)?.target;
+      routeToVps = target === "upstox";
+    }
+    if (routeToVps) {
       try {
         const res = await fetch(`${FASTAPI_BASE_URL}/${name}`, {
           method: "POST",
