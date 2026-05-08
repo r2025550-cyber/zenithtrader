@@ -279,6 +279,20 @@ async def upstox_oauth(req: Request):
     raise HTTPException(status_code=400, detail="mode must be 'url' or 'token'")
 
 
+@router.get("/callback")
+async def upstox_callback(req: Request):
+    code = str(req.query_params.get("code") or "").strip()
+    user_id = str(req.query_params.get("state") or load_settings().get("user_id") or "").strip()
+    if not code:
+        return HTMLResponse("<h3>Upstox callback missing code.</h3>", status_code=400)
+    body = {"mode": "token", "code": code, "redirectUri": str(req.url.include_query_params(code=None)).split("?")[0], "userId": user_id}
+    response = await upstox_oauth(Request(req.scope, receive=lambda: None))
+    return HTMLResponse(
+        "<h3>Upstox connected. You can close this tab and return to Zenith Trader.</h3>"
+        "<script>setTimeout(function(){ window.close(); }, 1200);</script>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # System status
 # ---------------------------------------------------------------------------
