@@ -400,7 +400,7 @@ const Index = () => {
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
   const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
-    normalizeStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
+    normalizeSavedStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
   );
   const [lastVpsError, setLastVpsError] = useState<{ at: number; where: string; message: string } | null>(null);
   const recordVpsError = (where: string, message: string) =>
@@ -418,7 +418,7 @@ const Index = () => {
     if (localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) !== "true") return null;
     return {
       ready: false,
-      upstox: { ok: true, message: "Upstox token persisted on VPS — verifying live data…" },
+      upstox: { ok: true, message: "CONNECTED — saved Upstox session found. Verifying token in backend storage…" },
       gemini: { ok: false, message: "Run Re-test OpenAI to verify." },
       checkedAt: new Date().toISOString(),
     } as SystemStatus;
