@@ -165,6 +165,9 @@ async def upstox_credentials(req: Request):
     }
     if redirect_uri:
         payload["redirect_uri"] = redirect_uri
+    user_id = str(body.get("userId") or body.get("user_id") or "").strip()
+    if user_id:
+        payload["user_id"] = user_id
     save_settings(payload)
     return JSONResponse({"success": True})
 
