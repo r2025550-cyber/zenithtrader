@@ -1020,6 +1020,25 @@ const Index = () => {
     return true;
   };
 
+  const resetDailyTradeQuota = () => {
+    setExecutedTrades(0);
+    localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
+  };
+
+  const restoreSavedUpstoxSession = async () => {
+    const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
+      body: { target: "upstox", tokenOnly: true },
+    });
+    if (error) throw error;
+    if (!data?.upstox?.ok) return data;
+    localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
+    setSystemStatus((prev) => {
+      const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
+      return { ready: gemini.ok, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+    });
+    return data;
+  };
+
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
     if (latestSignal) {
