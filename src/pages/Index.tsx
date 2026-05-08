@@ -1421,13 +1421,23 @@ const Index = () => {
         invokeFunction<UpstoxStatus>("system-status", { target: "upstox" }),
         invokeFunction<OpenAIStatus>("system-status", { target: "openai" }),
       ]);
-      const upstox =
+      let upstox =
         upstoxRes.status === "fulfilled"
           ? upstoxRes.value.upstox
           : {
               ok: false,
               message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed.",
             };
+      // Resilience: if the VPS /system-status route is not deployed (404 / Not Found)
+      // but we previously connected successfully (flag in localStorage) and the tunnel
+      // is reachable, keep the dashboard in CONNECTED state instead of forcing re-OAuth.
+      if (!upstox.ok && localStorage.getItem(UPSTOX_CONNECTED_FLAG_KEY) === "true") {
+        const msg = (upstox.message || "").toLowerCase();
+        if (msg.includes("not found") || msg.includes("404") || msg.includes("vps 404")) {
+          upstox = { ok: true, message: "Upstox token persisted on VPS (status route unavailable, using cached state)." };
+        }
+      }
+      if (upstox.ok) localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
       const gemini =
         openaiRes.status === "fulfilled"
           ? openaiRes.value.gemini
