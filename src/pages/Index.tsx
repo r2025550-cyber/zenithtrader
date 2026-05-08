@@ -394,6 +394,12 @@ const Index = () => {
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
+  const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
+    normalizeStatusEndpoint(storedValue(VPS_STATUS_ENDPOINT_STORAGE_KEY, DEFAULT_VPS_STATUS_ENDPOINT)),
+  );
+  const [lastVpsError, setLastVpsError] = useState<{ at: number; where: string; message: string } | null>(null);
+  const recordVpsError = (where: string, message: string) =>
+    setLastVpsError({ at: Date.now(), where, message: message.slice(0, 400) });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [oauthCode, setOauthCode] = useState("");
   const [authorizationUrl, setAuthorizationUrl] = useState("");
