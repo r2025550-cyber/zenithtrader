@@ -50,7 +50,7 @@ const history = [
   { time: "13:15:38", instrument: "Nifty 22550 PE", entry: "₹112.90", exit: "Open", pnl: "+₹1,125", result: "profit" },
 ];
 
-const DEFAULT_FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
+const DEFAULT_FASTAPI_BASE_URL = "https://size-exams-mono-skill.trycloudflare.com";
 const VPS_TUNNEL_URL_STORAGE_KEY = "zenith-vps-tunnel-url";
 const UPSTOX_CLIENT_ID_STORAGE_KEY = "zenith-upstox-client-id";
 const VPS_STATUS_ENDPOINT_STORAGE_KEY = "zenith-vps-status-endpoint";
