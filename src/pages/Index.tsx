@@ -666,10 +666,6 @@ const Index = () => {
     localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
   }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
 
-  useEffect(() => {
-    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
-    localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
-  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
 
   useEffect(() => {
     localStorage.setItem(VPS_STATUS_ENDPOINT_STORAGE_KEY, vpsStatusEndpoint);
