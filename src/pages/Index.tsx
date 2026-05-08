@@ -399,6 +399,7 @@ const Index = () => {
     upstoxApiSecret: "",
     openaiApiKey: "",
     redirectUri: getUpstoxRedirectUri(storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL)),
+    manualAccessToken: "",
   });
   const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
@@ -1379,6 +1380,49 @@ const Index = () => {
     }
   };
 
+  const saveManualAccessToken = async () => {
+    const token = settings.manualAccessToken.trim();
+    if (!token) {
+      toast({ title: "Paste your access token first", variant: "destructive" });
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await invokeFunction("save-trading-settings", { provider: "upstox-token", upstoxAccessToken: token });
+
+      try {
+        await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken: token, userId: session?.user?.id }),
+        });
+      } catch (vpsErr) {
+        console.warn("[Manual Token] VPS push failed (non-fatal):", vpsErr);
+      }
+
+      try { localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true"); } catch {}
+      setSystemStatus((prev) => ({
+        ready: prev?.gemini?.ok === true,
+        upstox: { ok: true, message: "CONNECTED — using manual access token." },
+        gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to verify." },
+        checkedAt: new Date().toISOString(),
+      } as SystemStatus));
+      setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
+
+      toast({ title: "Access token saved", description: "Status: CONNECTED. Trading calls will use this token." });
+
+      retestUpstox(false).catch(() => null);
+    } catch (error) {
+      toast({
+        title: "Unable to save access token",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const saveOpenAISettings = async (event: FormEvent) => {
     event.preventDefault();
     setIsBusy(true);
@@ -2317,6 +2361,35 @@ const Index = () => {
                     onChange={(event) => setSettings((prev) => ({ ...prev, upstoxApiSecret: event.target.value }))}
                     className="border-border bg-surface"
                   />
+                </div>
+                <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <Label htmlFor="manual-access-token" className="flex items-center gap-2">
+                    Manual Access Token
+                    <span className="text-[10px] font-normal text-muted-foreground">(bypasses OAuth)</span>
+                  </Label>
+                  <Input
+                    id="manual-access-token"
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Paste your permanent Upstox access token"
+                    value={settings.manualAccessToken}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, manualAccessToken: event.target.value }))}
+                    className="border-border bg-surface font-mono text-xs"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Saved to backend &amp; VPS. Status flips to CONNECTED immediately.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="trading"
+                      disabled={isBusy || !settings.manualAccessToken.trim()}
+                      onClick={saveManualAccessToken}
+                    >
+                      Save Token
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="openai-api-key" className="flex items-center gap-2">
