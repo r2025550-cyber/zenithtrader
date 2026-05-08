@@ -60,10 +60,10 @@ async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FAST
   const apiBase = getVpsBaseUrl(baseUrl);
   const res = await fetch(`${apiBase}/mode/${target}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${apiBase}/status`, { headers: { "Content-Type": "application/json" } });
+  const statusRes = await fetch(`${apiBase}/status`, { headers: { Accept: "application/json", "Content-Type": "application/json" } });
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
   return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
@@ -660,7 +660,7 @@ const Index = () => {
       try {
         const r = await fetch(`${normalizedVpsBaseUrl}/system-status`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({ target: "upstox" }),
         });
         if (!cancelled) setTunnelOnline(r.ok);
