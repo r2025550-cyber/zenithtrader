@@ -65,8 +65,15 @@ const normalizeSavedStatusEndpoint = (raw?: string) => {
   return endpoint === "/system-status" ? DEFAULT_VPS_STATUS_ENDPOINT : endpoint;
 };
 const getStatusEndpointMethod = (endpoint: string) => (endpoint === "/" || endpoint === "/fetch-data" ? "GET" : "POST");
+// Use the VPS Tunnel URL exactly as the user typed it — only trim whitespace and
+// trailing slashes. Do NOT auto-append /callback or any other suffix here.
 const getVpsBaseUrl = (value?: string) => (value || DEFAULT_FASTAPI_BASE_URL).trim().replace(/\/+$/, "");
-const getUpstoxRedirectUri = (baseUrl: string) => `${getVpsBaseUrl(baseUrl)}/callback`;
+// Build the Upstox redirect URI by appending exactly ONE /callback to the base
+// VPS URL. If the user already included /callback in the base, do not duplicate it.
+const getUpstoxRedirectUri = (baseUrl: string) => {
+  const base = getVpsBaseUrl(baseUrl);
+  return /\/callback$/i.test(base) ? base : `${base}/callback`;
+};
 
 async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FASTAPI_BASE_URL): Promise<{ status: string; mode: string }> {
   const apiBase = getVpsBaseUrl(baseUrl);
@@ -396,6 +403,7 @@ const Index = () => {
   const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
   const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
+  const [redirectUriManuallyEdited, setRedirectUriManuallyEdited] = useState(false);
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
@@ -667,9 +675,13 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+    if (!redirectUriManuallyEdited) {
+      setSettings((prev) =>
+        prev.redirectUri === upstoxOAuthRedirectUri ? prev : { ...prev, redirectUri: upstoxOAuthRedirectUri },
+      );
+    }
     localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, normalizedVpsBaseUrl);
-  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri]);
+  }, [normalizedVpsBaseUrl, upstoxOAuthRedirectUri, redirectUriManuallyEdited]);
 
 
   useEffect(() => {
@@ -1400,7 +1412,8 @@ const Index = () => {
       const parsedVps = new URL(rawVpsUrl);
       if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
       const vpsBase = getVpsBaseUrl(rawVpsUrl);
-      const redirectUri = getUpstoxRedirectUri(vpsBase);
+      const manualRedirect = settings.redirectUri.trim();
+      const redirectUri = manualRedirect || getUpstoxRedirectUri(vpsBase);
       const clientId = settings.upstoxApiKey.trim() || storedValue(UPSTOX_CLIENT_ID_STORAGE_KEY).trim();
       if (!clientId) throw new Error("Enter Upstox API Key / Client ID first, then tap Get Code.");
       localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
@@ -2356,17 +2369,34 @@ const Index = () => {
                     id="redirect-uri"
                     type="url"
                     autoComplete="off"
+                    placeholder={upstoxOAuthRedirectUri}
                     value={settings.redirectUri}
-                    readOnly
+                    onChange={(event) => {
+                      setRedirectUriManuallyEdited(true);
+                      setSettings((prev) => ({ ...prev, redirectUri: event.target.value }));
+                    }}
                     className="border-border bg-surface"
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    Get Code and Connect both use this exact value. In the Authorization URL it is encoded as{" "}
-                    <span className="text-foreground">
-                      redirect_uri={encodeURIComponent(upstoxOAuthRedirectUri)}
-                    </span>
-                    .
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Get Code uses this exact value. Encoded:{" "}
+                      <span className="text-foreground break-all">
+                        {encodeURIComponent(settings.redirectUri || upstoxOAuthRedirectUri)}
+                      </span>
+                    </p>
+                    {redirectUriManuallyEdited && (
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-primary underline"
+                        onClick={() => {
+                          setRedirectUriManuallyEdited(false);
+                          setSettings((prev) => ({ ...prev, redirectUri: upstoxOAuthRedirectUri }));
+                        }}
+                      >
+                        Reset to auto
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
               <div className="rounded-md border border-border bg-surface p-2 text-xs">
