@@ -2414,7 +2414,7 @@ const Index = () => {
                     id="vps-tunnel-url"
                     type="url"
                     autoComplete="off"
-                    placeholder="https://virginia-cast-flood-before.trycloudflare.com"
+                    placeholder="https://size-exams-mono-skill.trycloudflare.com"
                     value={vpsTunnelUrl}
                     onChange={(event) => setVpsTunnelUrl(event.target.value)}
                     className="border-border bg-surface"
