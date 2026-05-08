@@ -1239,7 +1239,12 @@ const Index = () => {
   const saveUpstoxSettings = async () => {
     setIsBusy(true);
     const url = `${normalizedVpsBaseUrl}/upstox-credentials`;
-    const body = { apiKey: settings.upstoxApiKey, apiSecret: settings.upstoxApiSecret };
+    const body = {
+      apiKey: settings.upstoxApiKey,
+      apiSecret: settings.upstoxApiSecret,
+      redirectUri: upstoxOAuthRedirectUri,
+      userId: session?.user?.id,
+    };
     console.log("[Upstox Save] FASTAPI_BASE_URL =", normalizedVpsBaseUrl);
     console.log("[Upstox Save] POST", url);
     try {
@@ -1302,20 +1307,50 @@ const Index = () => {
   };
 
   const startUpstoxOAuth = async () => {
+    const rawVpsUrl = vpsTunnelUrl.trim();
+    if (!rawVpsUrl) {
+      setOauthDebugLog("Please enter VPS URL");
+      toast({ title: "Please enter VPS URL", variant: "destructive" });
+      return;
+    }
     try {
-      const redirectUri = upstoxOAuthRedirectUri;
-      const data = await invokeFunction<{ url: string }>("upstox-oauth", { mode: "url", redirectUri });
-      setAuthorizationUrl(data.url);
+      const parsedVps = new URL(rawVpsUrl);
+      if (!/^https?:$/.test(parsedVps.protocol)) throw new Error("Invalid VPS URL");
+      const vpsBase = getVpsBaseUrl(rawVpsUrl);
+      const redirectUri = getUpstoxRedirectUri(vpsBase);
+      localStorage.setItem(VPS_TUNNEL_URL_STORAGE_KEY, vpsBase);
+      setVpsTunnelUrl(vpsBase);
+      let authUrl = "";
+      try {
+        const res = await fetch(`${vpsBase}/upstox-oauth`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "url", redirectUri, userId: session?.user?.id }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(payload?.detail || payload?.error || `VPS ${res.status}`);
+        authUrl = String(payload?.url || "");
+      } catch (error) {
+        if (!settings.upstoxApiKey.trim()) throw error;
+      }
+      if (!authUrl) {
+        const params = new URLSearchParams({
+          response_type: "code",
+          client_id: settings.upstoxApiKey.trim(),
+          redirect_uri: redirectUri,
+        });
+        authUrl = `https://api.upstox.com/v2/login/authorization/dialog?${params.toString()}`;
+      }
+      const oauthUrl = new URL(authUrl);
+      oauthUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl = oauthUrl.toString();
+      setAuthorizationUrl(authUrl);
       setSettings((prev) => ({ ...prev, redirectUri }));
       setOauthCode("");
       setOauthDebugLog(
         `Fresh Authorization URL generated.\nredirect_uri=${redirectUri}\nEncoded redirect_uri=${encodeURIComponent(redirectUri)}\nPaste only the new code from this login attempt.`,
       );
-      window.open(data.url, "_blank", "noopener,noreferrer");
-      toast({
-        title: "Upstox login opened",
-        description: "After login, copy the code value from the redirected URL bar and paste it back here.",
-      });
+      window.location.href = authUrl;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Save settings first.";
       setOauthDebugLog(
