@@ -403,6 +403,7 @@ const Index = () => {
   const [vpsTunnelUrl, setVpsTunnelUrl] = useState(() => storedValue(VPS_TUNNEL_URL_STORAGE_KEY, DEFAULT_FASTAPI_BASE_URL));
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
   const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
+  const [redirectUriManuallyEdited, setRedirectUriManuallyEdited] = useState(false);
   const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
