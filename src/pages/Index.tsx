@@ -641,6 +641,25 @@ const Index = () => {
     return () => clearInterval(clock);
   }, []);
 
+  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
+  useEffect(() => {
+    let cancelled = false;
+    const ping = async () => {
+      try {
+        const r = await fetch(`${FASTAPI_BASE_URL}/`, { method: "GET" });
+        if (!cancelled) setTunnelOnline(r.ok);
+      } catch {
+        if (!cancelled) setTunnelOnline(false);
+      }
+    };
+    ping();
+    const t = setInterval(ping, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(TRADING_LOT_SIZE_STORAGE_KEY, tradingLotSize);
   }, [tradingLotSize]);
