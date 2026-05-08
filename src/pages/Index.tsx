@@ -1052,6 +1052,7 @@ const Index = () => {
       "modify-stop-loss-order",
       "emergency-exit",
       "upstox-oauth",
+      "system-status",
     ]);
     if (VPS_ROUTED.has(name)) {
       try {
