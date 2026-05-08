@@ -2020,9 +2020,12 @@ const Index = () => {
 
   useEffect(() => {
     if (!session) return;
-    checkSystemStatus(false)
+    resetDailyTradeQuota();
+    restoreSavedUpstoxSession()
+      .catch(() => null)
+      .then(() => checkSystemStatus(false))
       .then((status) => {
-        if (status.upstox.ok) return fetchLiveNifty(false, true);
+        if (status?.upstox.ok) return fetchLiveNifty(false, true);
         return null;
       })
       .catch(() => {
