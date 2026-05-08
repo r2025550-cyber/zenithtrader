@@ -17,6 +17,10 @@ const BodySchema = z.union([
     provider: z.literal("gemini"),
     openaiApiKey: z.string().trim().min(8).max(1000),
   }),
+  z.object({
+    provider: z.literal("upstox-token"),
+    upstoxAccessToken: z.string().trim().min(10).max(4000),
+  }),
 ]);
 
 serve(async (req) => {
