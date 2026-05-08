@@ -285,6 +285,55 @@ def _auth_headers() -> Dict[str, str]:
 # Market data + trading routes (unchanged behaviour, just use load_settings)
 # ---------------------------------------------------------------------------
 
+@router.post("/system-status")
+async def system_status(req: Request):
+    """Mirror of supabase system-status: verify upstox token is live by hitting /user/profile."""
+    body = await _read_json(req)
+    target = body.get("target") or "all"
+    s = load_settings()
+    token = (s.get("upstox_access_token") or "").strip()
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    async def check_upstox():
+        if not token:
+            return {"ok": False, "message": "Upstox access token is missing. Complete OAuth again from API Settings."}
+        try:
+            async with _client() as client:
+                r = await client.get(
+                    "https://api.upstox.com/v2/user/profile",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                )
+            if r.status_code >= 400:
+                payload = {}
+                try:
+                    payload = r.json()
+                except ValueError:
+                    pass
+                # clear stale token on UDAPI100050
+                if "UDAPI100050" in json.dumps(payload):
+                    save_settings({"upstox_access_token": None, "upstox_refresh_token": None, "token_expires_at": None})
+                return {"ok": False, "message": "Upstox token check failed. Reconnect OAuth before market open.", "details": {"status": r.status_code, "payload": payload}}
+            return {"ok": True, "message": "Access token is valid and ready.", "details": {"status": r.status_code}}
+        except Exception as e:
+            return {"ok": False, "message": f"Upstox check error: {e}"}
+
+    gemini_stub = {"ok": True, "message": "OpenAI check skipped on VPS (handled by edge function)."}
+
+    if target == "upstox":
+        upstox = await check_upstox()
+        return JSONResponse({"upstox": upstox, "checkedAt": checked_at})
+    if target in ("openai", "gemini"):
+        return JSONResponse({"gemini": gemini_stub, "checkedAt": checked_at})
+
+    upstox = await check_upstox()
+    return JSONResponse({
+        "ready": upstox["ok"],
+        "upstox": upstox,
+        "gemini": gemini_stub,
+        "checkedAt": checked_at,
+    })
+
+
 @router.post("/fetch-nifty-data")
 async def fetch_nifty_data(req: Request):
     headers = _auth_headers()
