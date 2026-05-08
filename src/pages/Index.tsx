@@ -51,7 +51,7 @@ const history = [
 ];
 
 const UPSTOX_OAUTH_REDIRECT_URI = "http://localhost:3000";
-const FASTAPI_BASE_URL = "https://cookbook-performer-messaging-thereby.trycloudflare.com";
+const FASTAPI_BASE_URL = "https://virginia-cast-flood-before.trycloudflare.com";
 
 async function syncFastApiMode(target: "auto" | "manual"): Promise<{ status: string; mode: string }> {
   const res = await fetch(`${FASTAPI_BASE_URL}/mode/${target}`, {
@@ -1397,11 +1397,17 @@ const Index = () => {
       const upstox =
         upstoxRes.status === "fulfilled"
           ? upstoxRes.value.upstox
-          : { ok: false, message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed." };
+          : {
+              ok: false,
+              message: upstoxRes.reason instanceof Error ? upstoxRes.reason.message : "Upstox check failed.",
+            };
       const gemini =
         openaiRes.status === "fulfilled"
           ? openaiRes.value.gemini
-          : { ok: false, message: openaiRes.reason instanceof Error ? openaiRes.reason.message : "OpenAI check failed." };
+          : {
+              ok: false,
+              message: openaiRes.reason instanceof Error ? openaiRes.reason.message : "OpenAI check failed.",
+            };
       const status: SystemStatus = {
         ready: upstox.ok && gemini.ok,
         upstox,
