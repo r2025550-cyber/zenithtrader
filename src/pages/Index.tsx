@@ -2190,7 +2190,7 @@ const Index = () => {
   useEffect(() => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
-    if (session && upstoxReady) {
+    if (session) {
       marketIntervalRef.current = setInterval(() => {
         if (Date.now() < upstoxBackoffUntilRef.current) return;
         fetchLiveNifty().catch((error) =>
