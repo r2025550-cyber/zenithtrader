@@ -785,6 +785,12 @@ async def fetch_nifty_data(req: Request):
         "pe_symbol": pe.get("tradingSymbol"),
         "ce_instrument_token": ce.get("instrumentToken"),
         "pe_instrument_token": pe.get("instrumentToken"),
+        "bankNifty": bank_q,
+        "indiaVix": vix_q,
+        "heavyweights": [h for h in heavy if h.get("ltp") is not None],
+        "pcr": option_chain.get("pcr"),
+        "PCR": option_chain.get("pcr"),
+        "total_volume": option_chain.get("totalVolume"),
     }
     print(f"[fetch-nifty-data] summary={summary}")
     return JSONResponse({"success": True, "data": data_row, **summary})
