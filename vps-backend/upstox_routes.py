@@ -482,13 +482,39 @@ async def _get_quotes(client: httpx.AsyncClient, instrument_keys: List[str], hea
 
 def _quote_for(payload: Dict[str, Any], instrument_key: str) -> Dict[str, Any]:
     data = payload.get("data") or {}
+    # Upstox /market-quote/quotes returns keys like "NSE_INDEX:Nifty 50"
+    # while our instrument_key uses the pipe separator "NSE_INDEX|Nifty 50".
+    # Normalise both so the lookup actually hits.
+    candidates = {
+        instrument_key,
+        instrument_key.replace("|", ":"),
+        instrument_key.replace(":", "|"),
+    }
     node = None
-    for v in data.values():
-        if isinstance(v, dict) and v.get("instrument_token") == instrument_key:
+    # 1) match by response dict key
+    for k, v in data.items():
+        if not isinstance(v, dict):
+            continue
+        if k in candidates:
             node = v
             break
+    # 2) match by inner instrument_token / instrument_key field
+    if node is None:
+        for v in data.values():
+            if not isinstance(v, dict):
+                continue
+            tok = str(v.get("instrument_token") or v.get("instrument_key") or "")
+            if tok in candidates:
+                node = v
+                break
+    # 3) last resort: first value with a usable last_price
     if node is None and data:
-        node = next(iter(data.values()))
+        for v in data.values():
+            if isinstance(v, dict) and (v.get("last_price") is not None or v.get("ltp") is not None):
+                node = v
+                break
+        if node is None:
+            node = next(iter(data.values()))
     node = node or {}
     ohlc = node.get("ohlc") or {}
     depth = node.get("depth") or {}
