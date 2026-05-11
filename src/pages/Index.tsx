@@ -2716,7 +2716,7 @@ const Index = () => {
                 </div>
               ) : (
                 <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">
-                  Connect Upstox OAuth to stream live Nifty 50 prices.
+                  Waiting for live Nifty 50 ticks…
                 </div>
               )}
               {chartPolyline && (
