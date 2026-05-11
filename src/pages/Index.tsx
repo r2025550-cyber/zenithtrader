@@ -1459,9 +1459,17 @@ const Index = () => {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: JSON.stringify({
             accessToken: token,
+            access_token: token,
+            upstoxAccessToken: token,
+            upstox_access_token: token,
+            manualAccessToken: token,
+            token,
             apiKey: settings.upstoxApiKey?.trim() || undefined,
+            upstoxApiKey: settings.upstoxApiKey?.trim() || undefined,
             apiSecret: settings.upstoxApiSecret?.trim() || undefined,
+            upstoxApiSecret: settings.upstoxApiSecret?.trim() || undefined,
             userId: session?.user?.id,
+            user_id: session?.user?.id,
           }),
         });
         const vpsText = await vpsRes.text();
