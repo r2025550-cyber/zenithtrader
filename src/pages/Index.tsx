@@ -1653,9 +1653,15 @@ const Index = () => {
     }));
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
+    console.log("[REST] fetch-nifty-data payload:", market.data);
+    console.log("[REST] parsed LTP:", value, "availableCash:", (market.data as any)?.raw_payload?.account?.margin?.availableCash);
     if (Number.isFinite(value)) {
       const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
-      setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+      setMarketHistory((prev) => {
+        const next = [...prev, { value, time: timestamp }].slice(-30);
+        console.log("[REST] marketHistory updated, points:", next.length, "latest:", value);
+        return next;
+      });
       // Update ATM CE/PE rolling series; reset when strike changes
       const atm = (market.data?.raw_payload as any)?.context?.atm;
       const ceLtp = Number(atm?.ce?.ltp);
