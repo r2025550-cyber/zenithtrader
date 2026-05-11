@@ -279,14 +279,21 @@ async def upstox_token(req: Request):
     placement endpoints can authorise immediately.
     """
     body = await _read_json(req)
+    if body.get("clear") is True:
+        _clear_token()
+        return JSONResponse({"success": True, "message": "Saved Upstox token cleared on VPS."})
+
     token = str(
         body.get("accessToken")
         or body.get("access_token")
         or body.get("upstoxAccessToken")
+        or body.get("upstox_access_token")
+        or body.get("manualAccessToken")
+        or body.get("token")
         or ""
     ).strip()
     if not token:
-        raise HTTPException(status_code=400, detail="accessToken is required")
+        raise HTTPException(status_code=400, detail="access token is required")
     payload: Dict[str, Any] = {
         "upstox_access_token": token,
         "upstox_refresh_token": None,
