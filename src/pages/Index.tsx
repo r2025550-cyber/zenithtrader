@@ -1616,12 +1616,8 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async (executionIntent = false, skipReadyCheck = false) => {
-    if (!skipReadyCheck && !upstoxReady) {
-      throw new Error(
-        systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.",
-      );
-    }
+  const fetchLiveNifty = async (executionIntent = false, _skipReadyCheck = true) => {
+    // OAuth gating removed: REST polling uses the manual access token stored on the VPS.
     let market: MarketFetchResult | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -1657,9 +1653,15 @@ const Index = () => {
     }));
     setLatestData(market.data);
     const value = Number(market.data?.ltp);
+    console.log("[REST] fetch-nifty-data payload:", market.data);
+    console.log("[REST] parsed LTP:", value, "availableCash:", (market.data as any)?.raw_payload?.account?.margin?.availableCash);
     if (Number.isFinite(value)) {
       const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
-      setMarketHistory((prev) => [...prev, { value, time: timestamp }].slice(-30));
+      setMarketHistory((prev) => {
+        const next = [...prev, { value, time: timestamp }].slice(-30);
+        console.log("[REST] marketHistory updated, points:", next.length, "latest:", value);
+        return next;
+      });
       // Update ATM CE/PE rolling series; reset when strike changes
       const atm = (market.data?.raw_payload as any)?.context?.atm;
       const ceLtp = Number(atm?.ce?.ltp);
@@ -2188,7 +2190,7 @@ const Index = () => {
   useEffect(() => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
-    if (session && upstoxReady) {
+    if (session) {
       marketIntervalRef.current = setInterval(() => {
         if (Date.now() < upstoxBackoffUntilRef.current) return;
         fetchLiveNifty().catch((error) =>
@@ -2792,9 +2794,17 @@ const Index = () => {
                     </div>
                   ))}
                 </div>
+              ) : Number.isFinite(latestLtp) ? (
+                <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 flex-col items-center justify-center gap-2 rounded-md border border-profit/30 bg-surface/70 text-sm">
+                  <span className="text-xs uppercase tracking-[0.22em] text-profit">REST polling active</span>
+                  <span className="text-3xl font-semibold text-foreground">
+                    {latestLtp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-xs text-muted-foreground">Live LTP via Upstox REST · websocket idle</span>
+                </div>
               ) : (
                 <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">
-                  Waiting for live Nifty 50 ticks…
+                  Fetching live Nifty 50 data via REST…
                 </div>
               )}
               {chartPolyline && (
