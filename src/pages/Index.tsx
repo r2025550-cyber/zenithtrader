@@ -2460,19 +2460,30 @@ const Index = () => {
                     onChange={(event) => setSettings((prev) => ({ ...prev, manualAccessToken: event.target.value }))}
                     className="border-border bg-surface font-mono text-xs"
                   />
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs leading-5 text-muted-foreground">
                       Saved to backend &amp; VPS. Status flips to CONNECTED immediately.
                     </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="trading"
-                      disabled={isBusy || !settings.manualAccessToken.trim()}
-                      onClick={saveManualAccessToken}
-                    >
-                      Save Token
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={isBusy}
+                        onClick={clearSavedSession}
+                      >
+                        Clear Saved Session
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="trading"
+                        disabled={isBusy || !settings.manualAccessToken.trim()}
+                        onClick={saveManualAccessToken}
+                      >
+                        Save Token
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
