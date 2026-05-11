@@ -649,6 +649,7 @@ async def _resolve_atm(client: httpx.AsyncClient, headers, ltp: Optional[float])
                 headers=headers,
             )
             pp = rr.json() if rr.content else {}
+            print(f"[atm] CE/PE quote token={token} status={rr.status_code} payload={pp}")
             if rr.status_code >= 400:
                 return None
             data = pp.get("data") or {}
@@ -703,9 +704,10 @@ async def fetch_nifty_data(req: Request):
                     })
             return JSONResponse({"error": "Upstox Nifty request failed", "details": details}, status_code=502)
 
-        quote_payload = quotes_resp["payload"]
+    quote_payload = quotes_resp["payload"]
         nifty_q = _quote_for(quote_payload, INSTRUMENT_KEY)
         ltp = nifty_q["ltp"]
+        print(f"[fetch-nifty-data] spot LTP={ltp}")
 
         option_chain, margin, yesterday, atm = await asyncio.gather(
             _get_option_chain_pcr(client, headers),
@@ -713,6 +715,8 @@ async def fetch_nifty_data(req: Request):
             _get_yesterday(client, headers),
             _resolve_atm(client, headers, ltp),
         )
+        print(f"[fetch-nifty-data] funds={margin}")
+        print(f"[fetch-nifty-data] atm strike={atm.get('atmStrike')} expiry={atm.get('expiry')} CE={(atm.get('ce') or {}).get('tradingSymbol')} PE={(atm.get('pe') or {}).get('tradingSymbol')} CE_LTP={(atm.get('ce') or {}).get('ltp')} PE_LTP={(atm.get('pe') or {}).get('ltp')} err={atm.get('error')}")
 
     bank_q = _quote_for(quote_payload, CONTEXT_BANKNIFTY)
     vix_q = _quote_for(quote_payload, CONTEXT_VIX)
@@ -766,7 +770,43 @@ async def fetch_nifty_data(req: Request):
     }
     _market_cache["data"] = data_row
     _market_cache["ts"] = time.time()
-    return JSONResponse({"success": True, "data": data_row})
+
+    ce = (atm or {}).get("ce") or {}
+    pe = (atm or {}).get("pe") or {}
+    summary = {
+        "spot_ltp": ltp,
+        "available_cash": margin.get("availableCash"),
+        "today_pnl": margin.get("todayPnl"),
+        "atm_strike": (atm or {}).get("atmStrike"),
+        "atm_expiry": (atm or {}).get("expiry"),
+        "atm_ce_ltp": ce.get("ltp"),
+        "atm_pe_ltp": pe.get("ltp"),
+        "ce_symbol": ce.get("tradingSymbol"),
+        "pe_symbol": pe.get("tradingSymbol"),
+        "ce_instrument_token": ce.get("instrumentToken"),
+        "pe_instrument_token": pe.get("instrumentToken"),
+    }
+    print(f"[fetch-nifty-data] summary={summary}")
+    return JSONResponse({"success": True, "data": data_row, **summary})
+
+
+# ---------------------------------------------------------------------------
+# /funds — standalone funds + margin endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/funds")
+async def get_funds():
+    headers = _auth_headers()
+    async with _client() as client:
+        funds = await _get_funds(client, headers)
+    print(f"[funds] {funds}")
+    return JSONResponse({
+        "success": funds.get("error") is None,
+        "available_cash": funds.get("availableCash"),
+        "used_margin": funds.get("usedMargin"),
+        "today_pnl": funds.get("todayPnl"),
+        "error": funds.get("error"),
+    })
 
 
 # ---------------------------------------------------------------------------
