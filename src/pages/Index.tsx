@@ -1616,12 +1616,8 @@ const Index = () => {
     }
   };
 
-  const fetchLiveNifty = async (executionIntent = false, skipReadyCheck = false) => {
-    if (!skipReadyCheck && !upstoxReady) {
-      throw new Error(
-        systemStatus?.upstox?.message ?? "Complete Upstox OAuth from API Settings before fetching live market data.",
-      );
-    }
+  const fetchLiveNifty = async (executionIntent = false, _skipReadyCheck = true) => {
+    // OAuth gating removed: REST polling uses the manual access token stored on the VPS.
     let market: MarketFetchResult | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 3; attempt++) {
