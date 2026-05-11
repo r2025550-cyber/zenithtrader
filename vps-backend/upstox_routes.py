@@ -703,9 +703,10 @@ async def fetch_nifty_data(req: Request):
                     })
             return JSONResponse({"error": "Upstox Nifty request failed", "details": details}, status_code=502)
 
-        quote_payload = quotes_resp["payload"]
+    quote_payload = quotes_resp["payload"]
         nifty_q = _quote_for(quote_payload, INSTRUMENT_KEY)
         ltp = nifty_q["ltp"]
+        print(f"[fetch-nifty-data] spot LTP={ltp}")
 
         option_chain, margin, yesterday, atm = await asyncio.gather(
             _get_option_chain_pcr(client, headers),
@@ -713,6 +714,8 @@ async def fetch_nifty_data(req: Request):
             _get_yesterday(client, headers),
             _resolve_atm(client, headers, ltp),
         )
+        print(f"[fetch-nifty-data] funds={margin}")
+        print(f"[fetch-nifty-data] atm strike={atm.get('atmStrike')} expiry={atm.get('expiry')} CE={(atm.get('ce') or {}).get('tradingSymbol')} PE={(atm.get('pe') or {}).get('tradingSymbol')} CE_LTP={(atm.get('ce') or {}).get('ltp')} PE_LTP={(atm.get('pe') or {}).get('ltp')} err={atm.get('error')}")
 
     bank_q = _quote_for(quote_payload, CONTEXT_BANKNIFTY)
     vix_q = _quote_for(quote_payload, CONTEXT_VIX)
