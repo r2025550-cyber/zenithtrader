@@ -670,6 +670,23 @@ const Index = () => {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // Startup cleanup: drop any cached Upstox auth state so API Settings always
+  // boots from a clean slate. The latest manual token (re-)entered by the user
+  // is the only auth source we trust — no stale OAuth code, no stale flag.
+  useEffect(() => {
+    try {
+      localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      localStorage.removeItem("zenith-upstox-oauth-code");
+      localStorage.removeItem("zenith-upstox-oauth-state");
+      sessionStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      sessionStorage.removeItem("zenith-upstox-oauth-code");
+      sessionStorage.removeItem("zenith-upstox-oauth-state");
+    } catch {}
+    setOauthCode("");
+    setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
+    setSystemStatus(null);
+  }, []);
+
   useEffect(() => {
     const clock = setInterval(() => setMarketClock(new Date()), 30_000);
     return () => clearInterval(clock);
@@ -1380,12 +1397,54 @@ const Index = () => {
     }
   };
 
+  const clearSavedSession = async () => {
+    try {
+      // Wipe every Upstox-related browser storage key we know about.
+      const keysToWipe = [
+        UPSTOX_CONNECTED_FLAG_KEY,
+        UPSTOX_CLIENT_ID_STORAGE_KEY,
+        "zenith-upstox-oauth-code",
+        "zenith-upstox-oauth-state",
+      ];
+      keysToWipe.forEach((k) => {
+        try { localStorage.removeItem(k); } catch {}
+        try { sessionStorage.removeItem(k); } catch {}
+      });
+    } catch {}
+    setOauthCode("");
+    setAuthorizationUrl("");
+    setSettings((prev) => ({ ...prev, manualAccessToken: "", upstoxApiSecret: "" }));
+    setSystemStatus(null);
+    // Best-effort: tell the VPS to drop its cached token so the next request is unauthenticated
+    // until a fresh manual token is saved.
+    try {
+      await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "", apiKey: "", apiSecret: "", userId: session?.user?.id, clear: true }),
+      }).catch(() => null);
+    } catch {}
+    toast({
+      title: "Saved session cleared",
+      description: "Local storage, OAuth state, and cached tokens wiped. Paste a fresh Permanent Access Token to reconnect.",
+    });
+  };
+
   const saveManualAccessToken = async () => {
     const token = settings.manualAccessToken.trim();
     if (!token) {
       toast({ title: "Paste your access token first", variant: "destructive" });
       return;
     }
+    // Overwrite any previously cached connection flags so the new token is the
+    // only source of truth. Old OAuth tokens must NOT linger.
+    try {
+      localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      sessionStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      localStorage.removeItem("zenith-upstox-oauth-code");
+      sessionStorage.removeItem("zenith-upstox-oauth-code");
+    } catch {}
+    setOauthCode("");
     setIsBusy(true);
     try {
       await invokeFunction("save-trading-settings", { provider: "upstox-token", upstoxAccessToken: token });
@@ -2401,19 +2460,30 @@ const Index = () => {
                     onChange={(event) => setSettings((prev) => ({ ...prev, manualAccessToken: event.target.value }))}
                     className="border-border bg-surface font-mono text-xs"
                   />
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs leading-5 text-muted-foreground">
                       Saved to backend &amp; VPS. Status flips to CONNECTED immediately.
                     </p>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="trading"
-                      disabled={isBusy || !settings.manualAccessToken.trim()}
-                      onClick={saveManualAccessToken}
-                    >
-                      Save Token
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={isBusy}
+                        onClick={clearSavedSession}
+                      >
+                        Clear Saved Session
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="trading"
+                        disabled={isBusy || !settings.manualAccessToken.trim()}
+                        onClick={saveManualAccessToken}
+                      >
+                        Save Token
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
