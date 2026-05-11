@@ -670,6 +670,23 @@ const Index = () => {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // Startup cleanup: drop any cached Upstox auth state so API Settings always
+  // boots from a clean slate. The latest manual token (re-)entered by the user
+  // is the only auth source we trust — no stale OAuth code, no stale flag.
+  useEffect(() => {
+    try {
+      localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      localStorage.removeItem("zenith-upstox-oauth-code");
+      localStorage.removeItem("zenith-upstox-oauth-state");
+      sessionStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      sessionStorage.removeItem("zenith-upstox-oauth-code");
+      sessionStorage.removeItem("zenith-upstox-oauth-state");
+    } catch {}
+    setOauthCode("");
+    setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
+    setSystemStatus(null);
+  }, []);
+
   useEffect(() => {
     const clock = setInterval(() => setMarketClock(new Date()), 30_000);
     return () => clearInterval(clock);
