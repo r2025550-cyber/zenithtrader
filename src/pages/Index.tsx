@@ -1651,10 +1651,32 @@ const Index = () => {
       gemini: prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." },
       checkedAt: new Date().toISOString(),
     }));
-    setLatestData(market.data);
-    const value = Number(market.data?.ltp);
-    console.log("[REST] fetch-nifty-data payload:", market.data);
-    console.log("[REST] parsed LTP:", value, "availableCash:", (market.data as any)?.raw_payload?.account?.margin?.availableCash);
+    // Normalize: VPS may return raw quote map keyed by "NSE_INDEX:Nifty 50" (or "|" variant)
+    const rawData: any = market.data;
+    const niftyNode =
+      rawData?.["NSE_INDEX:Nifty 50"] ||
+      rawData?.["NSE_INDEX|Nifty 50"] ||
+      (rawData && typeof rawData === "object"
+        ? (Object.values(rawData).find(
+            (v: any) => v && typeof v === "object" && (v.last_price ?? v.ltp) != null,
+          ) as any)
+        : null);
+    let value = Number(rawData?.ltp);
+    if (!Number.isFinite(value)) value = Number(niftyNode?.last_price ?? niftyNode?.ltp);
+    const availableCash =
+      rawData?.raw_payload?.account?.margin?.availableCash ??
+      rawData?.account?.margin?.availableCash ??
+      rawData?.funds?.equity?.available_margin ??
+      rawData?.available_cash;
+    // Inject normalized fields so downstream UI bindings work uniformly
+    if (Number.isFinite(value)) {
+      rawData.ltp = value;
+      rawData.source_timestamp = rawData.source_timestamp ?? new Date().toISOString();
+    }
+    console.log("LIVE RESPONSE", market);
+    console.log("[REST] fetch-nifty-data payload:", rawData);
+    console.log("[REST] parsed LTP:", value, "availableCash:", availableCash);
+    setLatestData(rawData);
     if (Number.isFinite(value)) {
       const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
       setMarketHistory((prev) => {
