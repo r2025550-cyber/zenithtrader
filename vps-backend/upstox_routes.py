@@ -649,6 +649,7 @@ async def _resolve_atm(client: httpx.AsyncClient, headers, ltp: Optional[float])
                 headers=headers,
             )
             pp = rr.json() if rr.content else {}
+            print(f"[atm] CE/PE quote token={token} status={rr.status_code} payload={pp}")
             if rr.status_code >= 400:
                 return None
             data = pp.get("data") or {}
