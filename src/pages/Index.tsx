@@ -2794,9 +2794,17 @@ const Index = () => {
                     </div>
                   ))}
                 </div>
+              ) : Number.isFinite(latestLtp) ? (
+                <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 flex-col items-center justify-center gap-2 rounded-md border border-profit/30 bg-surface/70 text-sm">
+                  <span className="text-xs uppercase tracking-[0.22em] text-profit">REST polling active</span>
+                  <span className="text-3xl font-semibold text-foreground">
+                    {latestLtp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-xs text-muted-foreground">Live LTP via Upstox REST · websocket idle</span>
+                </div>
               ) : (
                 <div className="absolute inset-x-5 bottom-8 right-14 flex h-64 items-center justify-center rounded-md border border-border bg-surface/70 text-sm text-muted-foreground">
-                  Waiting for live Nifty 50 ticks…
+                  Fetching live Nifty 50 data via REST…
                 </div>
               )}
               {chartPolyline && (
