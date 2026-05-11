@@ -1397,12 +1397,54 @@ const Index = () => {
     }
   };
 
+  const clearSavedSession = async () => {
+    try {
+      // Wipe every Upstox-related browser storage key we know about.
+      const keysToWipe = [
+        UPSTOX_CONNECTED_FLAG_KEY,
+        UPSTOX_CLIENT_ID_STORAGE_KEY,
+        "zenith-upstox-oauth-code",
+        "zenith-upstox-oauth-state",
+      ];
+      keysToWipe.forEach((k) => {
+        try { localStorage.removeItem(k); } catch {}
+        try { sessionStorage.removeItem(k); } catch {}
+      });
+    } catch {}
+    setOauthCode("");
+    setAuthorizationUrl("");
+    setSettings((prev) => ({ ...prev, manualAccessToken: "", upstoxApiSecret: "" }));
+    setSystemStatus(null);
+    // Best-effort: tell the VPS to drop its cached token so the next request is unauthenticated
+    // until a fresh manual token is saved.
+    try {
+      await fetch(`${normalizedVpsBaseUrl}/upstox-token`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: "", apiKey: "", apiSecret: "", userId: session?.user?.id, clear: true }),
+      }).catch(() => null);
+    } catch {}
+    toast({
+      title: "Saved session cleared",
+      description: "Local storage, OAuth state, and cached tokens wiped. Paste a fresh Permanent Access Token to reconnect.",
+    });
+  };
+
   const saveManualAccessToken = async () => {
     const token = settings.manualAccessToken.trim();
     if (!token) {
       toast({ title: "Paste your access token first", variant: "destructive" });
       return;
     }
+    // Overwrite any previously cached connection flags so the new token is the
+    // only source of truth. Old OAuth tokens must NOT linger.
+    try {
+      localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      sessionStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
+      localStorage.removeItem("zenith-upstox-oauth-code");
+      sessionStorage.removeItem("zenith-upstox-oauth-code");
+    } catch {}
+    setOauthCode("");
     setIsBusy(true);
     try {
       await invokeFunction("save-trading-settings", { provider: "upstox-token", upstoxAccessToken: token });
