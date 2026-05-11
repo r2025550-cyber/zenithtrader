@@ -124,13 +124,61 @@ def _num(*values) -> Optional[float]:
     return None
 
 
+def _fetch_token_from_supabase() -> Optional[Dict[str, Any]]:
+    """Best-effort sync: pull the manual/OAuth access token from Supabase.
+
+    Used as a fallback when the VPS settings.json doesn't have a token but
+    Supabase already does (e.g. user pasted a Permanent Access Token via the
+    web UI which only persisted to Supabase). Synchronous httpx call so this
+    can be used from inside `_require_token` without restructuring callers.
+    """
+    supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    if not supabase_url or not service_key:
+        return None
+    try:
+        with httpx.Client(timeout=10.0) as c:
+            r = c.get(
+                f"{supabase_url}/rest/v1/trading_api_settings",
+                params={"select": "user_id,upstox_access_token,upstox_api_key,upstox_api_secret,token_expires_at", "upstox_access_token": "not.is.null", "limit": "1"},
+                headers={"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+            )
+        if r.status_code >= 400:
+            return None
+        rows = r.json() if r.content else []
+        if not rows:
+            return None
+        row = rows[0]
+        token = (row.get("upstox_access_token") or "").strip()
+        if not token:
+            return None
+        payload: Dict[str, Any] = {"upstox_access_token": token}
+        if row.get("upstox_api_key"):
+            payload["upstox_api_key"] = row["upstox_api_key"]
+        if row.get("upstox_api_secret"):
+            payload["upstox_api_secret"] = row["upstox_api_secret"]
+        if row.get("user_id"):
+            payload["user_id"] = row["user_id"]
+        if row.get("token_expires_at"):
+            payload["token_expires_at"] = row["token_expires_at"]
+        save_settings(payload)
+        return load_settings()
+    except Exception:
+        return None
+
+
 def _require_token() -> Dict[str, Any]:
     s = load_settings()
     token = (s.get("upstox_access_token") or "").strip()
     if not token:
+        # Fallback: try pulling the manual / OAuth token from Supabase so the
+        # user doesn't have to re-paste it on the VPS after every restart.
+        synced = _fetch_token_from_supabase()
+        if synced and (synced.get("upstox_access_token") or "").strip():
+            return synced
         raise HTTPException(
             status_code=400,
-            detail="Connect Upstox OAuth before fetching market data.",
+            detail="Upstox access token missing on VPS. Re-save the Permanent Access Token in API Settings.",
         )
     return s
 
