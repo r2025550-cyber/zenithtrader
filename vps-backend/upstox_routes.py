@@ -466,9 +466,22 @@ async def upstox_callback(req: Request):
         resp = await c.post("https://api.upstox.com/v2/login/authorization/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
     tok = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     if resp.status_code >= 400:
+        print(f"[callback] token exchange FAILED status={resp.status_code} body={tok}")
         return HTMLResponse(f"<h3>Upstox token exchange failed.</h3><pre>{json.dumps(tok)}</pre>", status_code=resp.status_code)
+    access_token = (tok.get("access_token") or "").strip()
+    print(f"[callback] token exchange OK — validating access_token prefix={access_token[:6]}…")
+    validation = await _validate_trading_token(access_token)
+    if not validation["ok"]:
+        print(f"[callback] REJECTED non-trading token: {validation['reason']}")
+        return HTMLResponse(
+            f"<h3>Upstox token rejected.</h3><p>{validation['reason']}</p>"
+            f"<p>This looks like a Sandbox / Analytics / Extended token, not an OAuth trading access token. "
+            f"Re-run Get Code from a real trading Upstox app.</p>",
+            status_code=400,
+        )
     expires_in = tok.get("expires_in")
-    save_settings({"upstox_access_token": tok.get("access_token"), "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    save_settings({"upstox_access_token": access_token, "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    print(f"[callback] SAVED validated trading token for user_id={user_id or '∅'}")
     await _sync_token_to_supabase(user_id, tok, redirect_uri)
     return HTMLResponse(
         "<h3>Upstox connected. You can close this tab and return to Zenith Trader.</h3>"
