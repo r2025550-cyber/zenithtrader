@@ -329,6 +329,18 @@ async def upstox_token(req: Request):
     ).strip()
     if not token:
         raise HTTPException(status_code=400, detail="access token is required")
+
+    # Reject Sandbox / Analytics / Extended tokens BEFORE saving anything.
+    print(f"[upstox-token] validating manual token prefix={token[:6]}…")
+    validation = await _validate_trading_token(token)
+    if not validation["ok"]:
+        print(f"[upstox-token] REJECTED: {validation['reason']}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid token: {validation['reason']} Paste a fresh OAuth trading access token from Upstox.",
+        )
+    print(f"[upstox-token] validation passed — saving token to settings.json")
+
     payload: Dict[str, Any] = {
         "upstox_access_token": token,
         "upstox_refresh_token": None,
@@ -345,7 +357,8 @@ async def upstox_token(req: Request):
     if user_id:
         payload["user_id"] = user_id
     save_settings(payload)
-    return JSONResponse({"success": True, "message": "Manual access token stored on VPS."})
+    print(f"[upstox-token] SAVED manual token (validated) for user_id={user_id or '∅'}")
+    return JSONResponse({"success": True, "message": "Manual access token stored on VPS.", "validation": validation})
 
 
 @router.post("/upstox-oauth")
