@@ -423,17 +423,28 @@ async def upstox_oauth(req: Request):
         except ValueError:
             tok = {}
         if resp.status_code >= 400:
+            print(f"[upstox-oauth] token exchange FAILED status={resp.status_code} body={tok}")
             return JSONResponse({"error": "Upstox OAuth failed", "details": tok}, status_code=resp.status_code)
+        access_token = (tok.get("access_token") or "").strip()
+        print(f"[upstox-oauth] token exchange OK — validating access_token prefix={access_token[:6]}…")
+        validation = await _validate_trading_token(access_token)
+        if not validation["ok"]:
+            print(f"[upstox-oauth] REJECTED token after exchange: {validation['reason']}")
+            return JSONResponse(
+                {"error": "invalid_trading_token", "detail": validation["reason"], "validation": validation},
+                status_code=400,
+            )
         expires_in = tok.get("expires_in")
         save_settings({
-            "upstox_access_token": tok.get("access_token"),
+            "upstox_access_token": access_token,
             "upstox_refresh_token": tok.get("refresh_token"),
             "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None,
             "redirect_uri": redirect_uri,
             "user_id": user_id or settings.get("user_id"),
         })
+        print(f"[upstox-oauth] SAVED validated trading token for user_id={user_id or '∅'}")
         sync_result = await _sync_token_to_supabase(user_id, tok, redirect_uri)
-        return JSONResponse({"success": True, "supabaseSync": sync_result})
+        return JSONResponse({"success": True, "supabaseSync": sync_result, "validation": validation})
 
     raise HTTPException(status_code=400, detail="mode must be 'url' or 'token'")
 
