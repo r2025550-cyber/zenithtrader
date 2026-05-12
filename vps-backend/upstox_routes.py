@@ -244,6 +244,41 @@ async def upstox_credentials(req: Request):
 TOKEN_EXCHANGE_REDIRECT_URI = os.environ.get("UPSTOX_REDIRECT_URI", "https://virginia-cast-flood-before.trycloudflare.com/callback")
 
 
+async def _validate_trading_token(token: str) -> Dict[str, Any]:
+    """Hit a real trading endpoint to confirm the token is an OAuth trading
+    access token (not Sandbox/Analytics/Extended).
+
+    Returns {"ok": bool, "reason": str, "details": ...}. We try /user/profile
+    first (cheap, requires trading scope), then /user/get-funds-and-margin to
+    confirm funds API works (the exact scope the dashboard depends on).
+    """
+    token = (token or "").strip()
+    if not token or len(token) < 20:
+        return {"ok": False, "reason": "Token is empty or too short to be a real Upstox token."}
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with _client() as c:
+            prof = await c.get("https://api.upstox.com/v2/user/profile", headers=headers)
+            prof_body = prof.json() if prof.headers.get("content-type", "").startswith("application/json") else {}
+            if prof.status_code >= 400:
+                code = (prof_body.get("errors") or [{}])[0].get("errorCode") if isinstance(prof_body.get("errors"), list) else None
+                msg = (prof_body.get("errors") or [{}])[0].get("message") if isinstance(prof_body.get("errors"), list) else prof_body
+                print(f"[upstox-validate] FAILED /user/profile status={prof.status_code} code={code} msg={msg}")
+                if code == "UDAPI100050":
+                    return {"ok": False, "reason": "UDAPI100050 — token is not a valid OAuth trading token (likely Sandbox/Analytics/Extended). Reject.", "details": prof_body}
+                return {"ok": False, "reason": f"Upstox /user/profile rejected token (HTTP {prof.status_code}).", "details": prof_body}
+            funds = await c.get("https://api.upstox.com/v2/user/get-funds-and-margin", headers=headers)
+            funds_body = funds.json() if funds.headers.get("content-type", "").startswith("application/json") else {}
+            if funds.status_code >= 400:
+                print(f"[upstox-validate] FAILED /user/get-funds-and-margin status={funds.status_code} body={funds_body}")
+                return {"ok": False, "reason": f"Upstox funds endpoint rejected token (HTTP {funds.status_code}). Likely a non-trading token.", "details": funds_body}
+        print(f"[upstox-validate] OK token prefix={token[:6]}… profile + funds both passed.")
+        return {"ok": True, "reason": "Trading token validated against /user/profile and /user/get-funds-and-margin.", "profile": prof_body.get("data", {})}
+    except Exception as exc:
+        print(f"[upstox-validate] EXCEPTION {exc!r}")
+        return {"ok": False, "reason": f"Validation request failed: {exc!r}"}
+
+
 async def _sync_token_to_supabase(user_id: str, token_payload: Dict[str, Any], redirect_uri: str) -> Dict[str, Any]:
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
@@ -294,6 +329,18 @@ async def upstox_token(req: Request):
     ).strip()
     if not token:
         raise HTTPException(status_code=400, detail="access token is required")
+
+    # Reject Sandbox / Analytics / Extended tokens BEFORE saving anything.
+    print(f"[upstox-token] validating manual token prefix={token[:6]}…")
+    validation = await _validate_trading_token(token)
+    if not validation["ok"]:
+        print(f"[upstox-token] REJECTED: {validation['reason']}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid token: {validation['reason']} Paste a fresh OAuth trading access token from Upstox.",
+        )
+    print(f"[upstox-token] validation passed — saving token to settings.json")
+
     payload: Dict[str, Any] = {
         "upstox_access_token": token,
         "upstox_refresh_token": None,
@@ -310,7 +357,8 @@ async def upstox_token(req: Request):
     if user_id:
         payload["user_id"] = user_id
     save_settings(payload)
-    return JSONResponse({"success": True, "message": "Manual access token stored on VPS."})
+    print(f"[upstox-token] SAVED manual token (validated) for user_id={user_id or '∅'}")
+    return JSONResponse({"success": True, "message": "Manual access token stored on VPS.", "validation": validation})
 
 
 @router.post("/upstox-oauth")
@@ -375,17 +423,28 @@ async def upstox_oauth(req: Request):
         except ValueError:
             tok = {}
         if resp.status_code >= 400:
+            print(f"[upstox-oauth] token exchange FAILED status={resp.status_code} body={tok}")
             return JSONResponse({"error": "Upstox OAuth failed", "details": tok}, status_code=resp.status_code)
+        access_token = (tok.get("access_token") or "").strip()
+        print(f"[upstox-oauth] token exchange OK — validating access_token prefix={access_token[:6]}…")
+        validation = await _validate_trading_token(access_token)
+        if not validation["ok"]:
+            print(f"[upstox-oauth] REJECTED token after exchange: {validation['reason']}")
+            return JSONResponse(
+                {"error": "invalid_trading_token", "detail": validation["reason"], "validation": validation},
+                status_code=400,
+            )
         expires_in = tok.get("expires_in")
         save_settings({
-            "upstox_access_token": tok.get("access_token"),
+            "upstox_access_token": access_token,
             "upstox_refresh_token": tok.get("refresh_token"),
             "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None,
             "redirect_uri": redirect_uri,
             "user_id": user_id or settings.get("user_id"),
         })
+        print(f"[upstox-oauth] SAVED validated trading token for user_id={user_id or '∅'}")
         sync_result = await _sync_token_to_supabase(user_id, tok, redirect_uri)
-        return JSONResponse({"success": True, "supabaseSync": sync_result})
+        return JSONResponse({"success": True, "supabaseSync": sync_result, "validation": validation})
 
     raise HTTPException(status_code=400, detail="mode must be 'url' or 'token'")
 
@@ -407,9 +466,22 @@ async def upstox_callback(req: Request):
         resp = await c.post("https://api.upstox.com/v2/login/authorization/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
     tok = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     if resp.status_code >= 400:
+        print(f"[callback] token exchange FAILED status={resp.status_code} body={tok}")
         return HTMLResponse(f"<h3>Upstox token exchange failed.</h3><pre>{json.dumps(tok)}</pre>", status_code=resp.status_code)
+    access_token = (tok.get("access_token") or "").strip()
+    print(f"[callback] token exchange OK — validating access_token prefix={access_token[:6]}…")
+    validation = await _validate_trading_token(access_token)
+    if not validation["ok"]:
+        print(f"[callback] REJECTED non-trading token: {validation['reason']}")
+        return HTMLResponse(
+            f"<h3>Upstox token rejected.</h3><p>{validation['reason']}</p>"
+            f"<p>This looks like a Sandbox / Analytics / Extended token, not an OAuth trading access token. "
+            f"Re-run Get Code from a real trading Upstox app.</p>",
+            status_code=400,
+        )
     expires_in = tok.get("expires_in")
-    save_settings({"upstox_access_token": tok.get("access_token"), "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    save_settings({"upstox_access_token": access_token, "upstox_refresh_token": tok.get("refresh_token"), "token_expires_at": int(time.time()) + int(expires_in) if expires_in else None, "redirect_uri": redirect_uri, "user_id": user_id})
+    print(f"[callback] SAVED validated trading token for user_id={user_id or '∅'}")
     await _sync_token_to_supabase(user_id, tok, redirect_uri)
     return HTMLResponse(
         "<h3>Upstox connected. You can close this tab and return to Zenith Trader.</h3>"
