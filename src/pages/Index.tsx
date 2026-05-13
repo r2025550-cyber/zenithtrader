@@ -709,7 +709,6 @@ const Index = () => {
 
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
-    let cancelled = false;
     const ping = async () => {
       try {
         const method = getStatusEndpointMethod(vpsStatusEndpoint);
@@ -718,22 +717,19 @@ const Index = () => {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
-        if (!cancelled) setTunnelOnline(r.ok);
+        setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
           recordVpsError(`${method} ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
         }
       } catch (err) {
-        if (!cancelled) setTunnelOnline(false);
+        setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
     const t = setInterval(ping, 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
   }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
   // Force-reset trades remaining to 4/4 on mount per user spec.
