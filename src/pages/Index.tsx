@@ -2279,7 +2279,10 @@ const Index = () => {
         marketPollInFlightRef.current = true;
         try {
           await fetchLiveNifty();
+          // Backend online status depends ONLY on /fetch-nifty-data success.
+          setBackendOnline(true);
         } catch (error) {
+          setBackendOnline(false);
           showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
         } finally {
           marketPollInFlightRef.current = false;
