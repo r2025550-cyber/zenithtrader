@@ -1707,6 +1707,31 @@ const Index = () => {
         ltp: indiaVixFlat,
       };
     }
+    // BankNifty
+    const bankNiftyFlat = Number(rawData?.bankNifty ?? rawData?.bank_nifty);
+    if (Number.isFinite(bankNiftyFlat)) {
+      rawData.raw_payload.context.bankNifty = {
+        ...(rawData.raw_payload.context.bankNifty || {}),
+        ltp: bankNiftyFlat,
+      };
+    }
+    // PCR
+    const pcrFlat = Number(rawData?.PCR ?? rawData?.pcr);
+    if (Number.isFinite(pcrFlat)) {
+      rawData.raw_payload.optionChain = {
+        ...(rawData.raw_payload.optionChain || {}),
+        pcr: pcrFlat,
+      };
+    }
+    // Heavyweights
+    if (rawData?.heavyweights) {
+      rawData.raw_payload.context.heavyweights = rawData.heavyweights;
+    }
+    // ATM expiry
+    if (rawData?.atm_expiry) {
+      atmCtx.expiry = rawData.atm_expiry;
+      rawData.raw_payload.context.atm = atmCtx;
+    }
     // Inject normalized fields so downstream UI bindings work uniformly
     if (Number.isFinite(value)) {
       rawData.ltp = value;
