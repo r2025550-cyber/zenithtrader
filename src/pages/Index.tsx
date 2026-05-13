@@ -1231,7 +1231,6 @@ const Index = () => {
           mode: "cors",
           credentials: "omit",
           cache: "no-store",
-          keepalive: true,
         });
         const text = await res.text();
         const payload = text
