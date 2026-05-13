@@ -1661,13 +1661,52 @@ const Index = () => {
             (v: any) => v && typeof v === "object" && (v.last_price ?? v.ltp) != null,
           ) as any)
         : null);
-    let value = Number(rawData?.ltp);
+    // Map new VPS snake_case response into legacy raw_payload shape so all UI bindings keep working.
+    let value = Number(rawData?.spot_ltp ?? rawData?.ltp);
     if (!Number.isFinite(value)) value = Number(niftyNode?.last_price ?? niftyNode?.ltp);
     const availableCash =
+      rawData?.available_cash ??
       rawData?.raw_payload?.account?.margin?.availableCash ??
       rawData?.account?.margin?.availableCash ??
-      rawData?.funds?.equity?.available_margin ??
-      rawData?.available_cash;
+      rawData?.funds?.equity?.available_margin;
+    const todayPnl = rawData?.today_pnl ?? rawData?.raw_payload?.account?.todayPnl;
+    const ceLtpFlat = Number(rawData?.atm_ce_ltp);
+    const peLtpFlat = Number(rawData?.atm_pe_ltp);
+    const atmStrikeFlat = Number(rawData?.atm_strike);
+    const indiaVixFlat = Number(rawData?.indiaVix ?? rawData?.india_vix);
+    rawData.raw_payload = rawData.raw_payload ?? {};
+    rawData.raw_payload.account = rawData.raw_payload.account ?? {};
+    rawData.raw_payload.account.margin = rawData.raw_payload.account.margin ?? {};
+    if (availableCash != null) rawData.raw_payload.account.margin.availableCash = availableCash;
+    if (todayPnl != null) rawData.raw_payload.account.todayPnl = todayPnl;
+    rawData.raw_payload.context = rawData.raw_payload.context ?? {};
+    const atmCtx: any = rawData.raw_payload.context.atm ?? {};
+    if (Number.isFinite(atmStrikeFlat)) atmCtx.strike = atmStrikeFlat;
+    if (Number.isFinite(ceLtpFlat) || rawData?.ce_symbol || rawData?.ce_instrument_token) {
+      atmCtx.ce = {
+        ...(atmCtx.ce || {}),
+        ltp: Number.isFinite(ceLtpFlat) ? ceLtpFlat : atmCtx.ce?.ltp,
+        strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.ce?.strike,
+        symbol: rawData?.ce_symbol ?? atmCtx.ce?.symbol,
+        instrument_token: rawData?.ce_instrument_token ?? atmCtx.ce?.instrument_token,
+      };
+    }
+    if (Number.isFinite(peLtpFlat) || rawData?.pe_symbol || rawData?.pe_instrument_token) {
+      atmCtx.pe = {
+        ...(atmCtx.pe || {}),
+        ltp: Number.isFinite(peLtpFlat) ? peLtpFlat : atmCtx.pe?.ltp,
+        strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.pe?.strike,
+        symbol: rawData?.pe_symbol ?? atmCtx.pe?.symbol,
+        instrument_token: rawData?.pe_instrument_token ?? atmCtx.pe?.instrument_token,
+      };
+    }
+    rawData.raw_payload.context.atm = atmCtx;
+    if (Number.isFinite(indiaVixFlat)) {
+      rawData.raw_payload.context.indiaVix = {
+        ...(rawData.raw_payload.context.indiaVix || {}),
+        ltp: indiaVixFlat,
+      };
+    }
     // Inject normalized fields so downstream UI bindings work uniformly
     if (Number.isFinite(value)) {
       rawData.ltp = value;
