@@ -1630,25 +1630,15 @@ const Index = () => {
 
   const fetchLiveNifty = async (executionIntent = false, _skipReadyCheck = true) => {
     // OAuth gating removed: REST polling uses the manual access token stored on the VPS.
-    let market: MarketFetchResult | null = null;
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
-          tradingLotSize: normalizedTradingLotSize,
-          tradingQuantity: totalTradingQuantity,
-          executionIntent,
-        });
-        if (market?.data) break;
-        lastErr = new Error(market?.error || "no market data");
-      } catch (e) {
-        lastErr = e;
-      }
-      if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-    }
-    if (!market) throw new Error(lastErr instanceof Error ? lastErr.message : "Upstox market data unavailable");
+    const market = await invokeFunction<MarketFetchResult | (NiftyData & Record<string, unknown>)>("fetch-nifty-data", {
+      tradingLotSize: normalizedTradingLotSize,
+      tradingQuantity: totalTradingQuantity,
+      executionIntent,
+    });
+    const rawMarket: any = market;
+    const marketData: any = rawMarket?.data ?? rawMarket;
     if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
-    if (!market.data)
+    if (!marketData)
       throw new Error(
         [market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
       );
@@ -1664,7 +1654,7 @@ const Index = () => {
       checkedAt: new Date().toISOString(),
     }));
     // Normalize: VPS may return raw quote map keyed by "NSE_INDEX:Nifty 50" (or "|" variant)
-    const rawData: any = market.data;
+    const rawData: any = marketData;
     const niftyNode =
       rawData?.["NSE_INDEX:Nifty 50"] ||
       rawData?.["NSE_INDEX|Nifty 50"] ||
@@ -1754,14 +1744,14 @@ const Index = () => {
     console.log("[REST] parsed LTP:", value, "availableCash:", availableCash);
     setLatestData(rawData);
     if (Number.isFinite(value)) {
-      const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
+      const timestamp = rawData.source_timestamp ?? rawData.created_at ?? new Date().toISOString();
       setMarketHistory((prev) => {
         const next = [...prev, { value, time: timestamp }].slice(-30);
         console.log("[REST] marketHistory updated, points:", next.length, "latest:", value);
         return next;
       });
       // Update ATM CE/PE rolling series; reset when strike changes
-      const atm = (market.data?.raw_payload as any)?.context?.atm;
+      const atm = (rawData?.raw_payload as any)?.context?.atm;
       const ceLtp = Number(atm?.ce?.ltp);
       const peLtp = Number(atm?.pe?.ltp);
       const ceStrike = Number(atm?.ce?.strike ?? atm?.strike);
@@ -1790,7 +1780,7 @@ const Index = () => {
         runTradingCycle().catch(() => {});
       }
     }
-    return market.data;
+    return rawData;
   };
 
   const checkSystemStatus = async (showToast = true) => {
