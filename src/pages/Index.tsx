@@ -1637,16 +1637,16 @@ const Index = () => {
     });
     const rawMarket: any = market;
     const marketData: any = rawMarket?.data ?? rawMarket;
-    if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
+    if (rawMarket.rateLimited) applyUpstoxBackoff(rawMarket.retryAfterMs);
     if (!marketData)
       throw new Error(
-        [market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
+        [rawMarket.error, rawMarket.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
       );
     setSystemStatus((prev) => ({
       ready: prev?.gemini?.ok ? true : (prev?.ready ?? true),
       upstox: {
         ok: true,
-        message: market.fallback
+        message: rawMarket.fallback
           ? "Upstox rate-limited; using last cached market data while waiting 5 seconds."
           : "Upstox token verified by live market data fetch.",
       },
