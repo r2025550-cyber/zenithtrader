@@ -2290,43 +2290,46 @@ const Index = () => {
       };
       pollMarket();
       marketIntervalRef.current = setInterval(pollMarket, UPSTOX_POLL_INTERVAL_MS);
-      if (aiEnabled) {
-        aiIntervalRef.current = setInterval(() => {
-          if (tradingBlocked) return;
-          withTimeout(
-            invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-              tradingMode,
-              tradingLotSize: normalizedTradingLotSize,
-              dailyProfitTarget: normalizedDailyTarget,
-              maxDailyLoss: normalizedMaxDailyLoss,
-              dailyPnl,
-              userTargetPoints: Number(userTargetPoints) || null,
-              userSlPoints: Number(userSlPoints) || null,
-            }),
-            25_000,
-            "OpenAI analysis timed out; continuing Upstox polling.",
-          )
-            .then((ai) => applySniperSignal(ai.signal))
-            .catch((error) =>
-              showRetryToast(
-                error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll.",
-              ),
-            );
-        }, AI_REASONING_INTERVAL_MS);
-      }
     }
     return () => {
       if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, normalizedTradingLotSize, totalTradingQuantity, normalizedVpsBaseUrl]);
+
+  useEffect(() => {
+    if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+    if (session && aiEnabled) {
+      aiIntervalRef.current = setInterval(() => {
+        if (tradingBlocked) return;
+        withTimeout(
+          invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+            tradingMode,
+            tradingLotSize: normalizedTradingLotSize,
+            dailyProfitTarget: normalizedDailyTarget,
+            maxDailyLoss: normalizedMaxDailyLoss,
+            dailyPnl,
+            userTargetPoints: Number(userTargetPoints) || null,
+            userSlPoints: Number(userSlPoints) || null,
+          }),
+          25_000,
+          "OpenAI analysis timed out; continuing Upstox polling.",
+        )
+          .then((ai) => applySniperSignal(ai.signal))
+          .catch((error) =>
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."),
+          );
+      }, AI_REASONING_INTERVAL_MS);
+    }
+    return () => {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     session,
-    upstoxReady,
     aiEnabled,
-    normalizedTradingLotSize,
-    totalTradingQuantity,
     tradingBlocked,
+    normalizedTradingLotSize,
     normalizedDailyTarget,
     normalizedMaxDailyLoss,
     dailyPnl,
