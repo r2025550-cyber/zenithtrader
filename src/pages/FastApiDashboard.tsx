@@ -25,7 +25,6 @@ async function apiCall<T = any>(path: string, init?: RequestInit): Promise<T> {
     mode: "cors",
     credentials: "omit",
     cache: "no-store",
-    keepalive: true,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
   const ct = res.headers.get("content-type") || "";
