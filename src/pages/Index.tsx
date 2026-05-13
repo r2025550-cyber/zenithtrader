@@ -104,7 +104,7 @@ const COOLDOWN_UNTIL_STORAGE_KEY = "zenith-cooldown-until";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
-const UPSTOX_POLL_INTERVAL_MS = 1_000;
+const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
@@ -358,6 +358,7 @@ const Index = () => {
   const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
+  const marketPollInFlightRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -708,7 +709,6 @@ const Index = () => {
 
   // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
   useEffect(() => {
-    let cancelled = false;
     const ping = async () => {
       try {
         const method = getStatusEndpointMethod(vpsStatusEndpoint);
@@ -717,22 +717,19 @@ const Index = () => {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
-        if (!cancelled) setTunnelOnline(r.ok);
+        setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
           recordVpsError(`${method} ${vpsStatusEndpoint}`, `${r.status} ${txt || r.statusText}`);
         }
       } catch (err) {
-        if (!cancelled) setTunnelOnline(false);
+        setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
       }
     };
     ping();
     const t = setInterval(ping, 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
   }, [normalizedVpsBaseUrl, vpsStatusEndpoint]);
 
   // Force-reset trades remaining to 4/4 on mount per user spec.
@@ -1142,7 +1139,7 @@ const Index = () => {
       return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
     if (riskMode === "aggressive")
       return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
-    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.`;
+    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.`;
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
@@ -1219,8 +1216,7 @@ const Index = () => {
         // Headers tuned for Cloudflare tunnel + CORS:
         //  - Only set Content-Type on POST (avoids unnecessary preflight on GET)
         //  - mode: "cors" + credentials: "omit" → simple CORS, no cookies
-        //  - cache: "no-store" → prevents Cloudflare from canceling stale dupes
-        //  - keepalive: true → request survives component unmount / tab switch
+        //  - cache: "no-store" → prevents stale tunnel responses
         const headers: Record<string, string> = { Accept: "application/json" };
         if (method === "POST") headers["Content-Type"] = "application/json";
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
@@ -1230,7 +1226,6 @@ const Index = () => {
           mode: "cors",
           credentials: "omit",
           cache: "no-store",
-          keepalive: true,
         });
         const text = await res.text();
         const payload = text
@@ -1629,33 +1624,23 @@ const Index = () => {
 
   const fetchLiveNifty = async (executionIntent = false, _skipReadyCheck = true) => {
     // OAuth gating removed: REST polling uses the manual access token stored on the VPS.
-    let market: MarketFetchResult | null = null;
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        market = await invokeFunction<MarketFetchResult>("fetch-nifty-data", {
-          tradingLotSize: normalizedTradingLotSize,
-          tradingQuantity: totalTradingQuantity,
-          executionIntent,
-        });
-        if (market?.data) break;
-        lastErr = new Error(market?.error || "no market data");
-      } catch (e) {
-        lastErr = e;
-      }
-      if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-    }
-    if (!market) throw new Error(lastErr instanceof Error ? lastErr.message : "Upstox market data unavailable");
-    if (market.rateLimited) applyUpstoxBackoff(market.retryAfterMs);
-    if (!market.data)
+    const market = await invokeFunction<MarketFetchResult | (NiftyData & Record<string, unknown>)>("fetch-nifty-data", {
+      tradingLotSize: normalizedTradingLotSize,
+      tradingQuantity: totalTradingQuantity,
+      executionIntent,
+    });
+    const rawMarket: any = market;
+    const marketData: any = rawMarket?.data !== undefined ? rawMarket.data : rawMarket;
+    if (rawMarket.rateLimited) applyUpstoxBackoff(rawMarket.retryAfterMs);
+    if (!marketData)
       throw new Error(
-        [market.error, market.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
+        [rawMarket.error, rawMarket.details].filter(Boolean).join(" — ") || "Upstox market data is temporarily unavailable.",
       );
     setSystemStatus((prev) => ({
       ready: prev?.gemini?.ok ? true : (prev?.ready ?? true),
       upstox: {
         ok: true,
-        message: market.fallback
+        message: rawMarket.fallback
           ? "Upstox rate-limited; using last cached market data while waiting 5 seconds."
           : "Upstox token verified by live market data fetch.",
       },
@@ -1663,7 +1648,7 @@ const Index = () => {
       checkedAt: new Date().toISOString(),
     }));
     // Normalize: VPS may return raw quote map keyed by "NSE_INDEX:Nifty 50" (or "|" variant)
-    const rawData: any = market.data;
+    const rawData: any = marketData;
     const niftyNode =
       rawData?.["NSE_INDEX:Nifty 50"] ||
       rawData?.["NSE_INDEX|Nifty 50"] ||
@@ -1753,14 +1738,14 @@ const Index = () => {
     console.log("[REST] parsed LTP:", value, "availableCash:", availableCash);
     setLatestData(rawData);
     if (Number.isFinite(value)) {
-      const timestamp = market.data.source_timestamp ?? market.data.created_at ?? new Date().toISOString();
+      const timestamp = rawData.source_timestamp ?? rawData.created_at ?? new Date().toISOString();
       setMarketHistory((prev) => {
         const next = [...prev, { value, time: timestamp }].slice(-30);
         console.log("[REST] marketHistory updated, points:", next.length, "latest:", value);
         return next;
       });
       // Update ATM CE/PE rolling series; reset when strike changes
-      const atm = (market.data?.raw_payload as any)?.context?.atm;
+      const atm = (rawData?.raw_payload as any)?.context?.atm;
       const ceLtp = Number(atm?.ce?.ltp);
       const peLtp = Number(atm?.pe?.ltp);
       const ceStrike = Number(atm?.ce?.strike ?? atm?.strike);
@@ -1789,7 +1774,7 @@ const Index = () => {
         runTradingCycle().catch(() => {});
       }
     }
-    return market.data;
+    return rawData;
   };
 
   const checkSystemStatus = async (showToast = true) => {
@@ -2252,7 +2237,7 @@ const Index = () => {
       toast({
         title: checked ? "AI trading loop started" : "AI trading loop stopped",
         description: checked
-          ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open."
+          ? "Upstox market polling runs every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open."
           : "Automation is paused.",
       });
 
@@ -2288,49 +2273,59 @@ const Index = () => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session) {
-      marketIntervalRef.current = setInterval(() => {
-        if (Date.now() < upstoxBackoffUntilRef.current) return;
-        fetchLiveNifty().catch((error) =>
-          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."),
-        );
-      }, UPSTOX_POLL_INTERVAL_MS);
-      if (aiEnabled) {
-        aiIntervalRef.current = setInterval(() => {
-          if (tradingBlocked) return;
-          withTimeout(
-            invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-              tradingMode,
-              tradingLotSize: normalizedTradingLotSize,
-              dailyProfitTarget: normalizedDailyTarget,
-              maxDailyLoss: normalizedMaxDailyLoss,
-              dailyPnl,
-              userTargetPoints: Number(userTargetPoints) || null,
-              userSlPoints: Number(userSlPoints) || null,
-            }),
-            25_000,
-            "OpenAI analysis timed out; continuing Upstox polling.",
-          )
-            .then((ai) => applySniperSignal(ai.signal))
-            .catch((error) =>
-              showRetryToast(
-                error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll.",
-              ),
-            );
-        }, AI_REASONING_INTERVAL_MS);
-      }
+      const pollMarket = async () => {
+        if (marketPollInFlightRef.current) return;
+        marketPollInFlightRef.current = true;
+        try {
+          await fetchLiveNifty();
+        } catch (error) {
+          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
+        } finally {
+          marketPollInFlightRef.current = false;
+        }
+      };
+      pollMarket();
+      marketIntervalRef.current = setInterval(pollMarket, UPSTOX_POLL_INTERVAL_MS);
     }
     return () => {
       if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, normalizedTradingLotSize, totalTradingQuantity, normalizedVpsBaseUrl]);
+
+  useEffect(() => {
+    if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+    if (session && aiEnabled) {
+      aiIntervalRef.current = setInterval(() => {
+        if (tradingBlocked) return;
+        withTimeout(
+          invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+            tradingMode,
+            tradingLotSize: normalizedTradingLotSize,
+            dailyProfitTarget: normalizedDailyTarget,
+            maxDailyLoss: normalizedMaxDailyLoss,
+            dailyPnl,
+            userTargetPoints: Number(userTargetPoints) || null,
+            userSlPoints: Number(userSlPoints) || null,
+          }),
+          25_000,
+          "OpenAI analysis timed out; continuing Upstox polling.",
+        )
+          .then((ai) => applySniperSignal(ai.signal))
+          .catch((error) =>
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."),
+          );
+      }, AI_REASONING_INTERVAL_MS);
+    }
+    return () => {
       if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     session,
-    upstoxReady,
     aiEnabled,
-    normalizedTradingLotSize,
-    totalTradingQuantity,
     tradingBlocked,
+    normalizedTradingLotSize,
     normalizedDailyTarget,
     normalizedMaxDailyLoss,
     dailyPnl,
@@ -2344,10 +2339,7 @@ const Index = () => {
     restoreSavedUpstoxSession()
       .catch(() => null)
       .then(() => checkSystemStatus(false))
-      .then((status) => {
-        if (status?.upstox.ok) return fetchLiveNifty(false, true);
-        return null;
-      })
+      .then(() => null)
       .catch(() => {
         // Connection Pulse will show missing setup after a manual check.
       });
