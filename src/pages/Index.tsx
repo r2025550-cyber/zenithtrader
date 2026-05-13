@@ -2278,12 +2278,19 @@ const Index = () => {
     if (marketIntervalRef.current) clearInterval(marketIntervalRef.current);
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session) {
-      marketIntervalRef.current = setInterval(() => {
-        if (Date.now() < upstoxBackoffUntilRef.current) return;
-        fetchLiveNifty().catch((error) =>
-          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data."),
-        );
-      }, UPSTOX_POLL_INTERVAL_MS);
+      const pollMarket = async () => {
+        if (marketPollInFlightRef.current) return;
+        marketPollInFlightRef.current = true;
+        try {
+          await fetchLiveNifty();
+        } catch (error) {
+          showRetryToast(error instanceof Error ? error.message : "Unable to fetch Upstox market data.");
+        } finally {
+          marketPollInFlightRef.current = false;
+        }
+      };
+      pollMarket();
+      marketIntervalRef.current = setInterval(pollMarket, UPSTOX_POLL_INTERVAL_MS);
       if (aiEnabled) {
         aiIntervalRef.current = setInterval(() => {
           if (tradingBlocked) return;
