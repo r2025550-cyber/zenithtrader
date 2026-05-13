@@ -1634,7 +1634,7 @@ const Index = () => {
       executionIntent,
     });
     const rawMarket: any = market;
-    const marketData: any = rawMarket?.data ?? rawMarket;
+    const marketData: any = rawMarket?.data !== undefined ? rawMarket.data : rawMarket;
     if (rawMarket.rateLimited) applyUpstoxBackoff(rawMarket.retryAfterMs);
     if (!marketData)
       throw new Error(
@@ -2343,10 +2343,7 @@ const Index = () => {
     restoreSavedUpstoxSession()
       .catch(() => null)
       .then(() => checkSystemStatus(false))
-      .then((status) => {
-        if (status?.upstox.ok) return fetchLiveNifty(false, true);
-        return null;
-      })
+      .then(() => null)
       .catch(() => {
         // Connection Pulse will show missing setup after a manual check.
       });
