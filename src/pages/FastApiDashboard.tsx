@@ -14,9 +14,18 @@ type LogEntry = { id: string; ts: number; kind: "info" | "success" | "error"; te
 const fmtTime = (t: number) => new Date(t).toLocaleTimeString();
 
 async function apiCall<T = any>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const headers: Record<string, string> = { Accept: "application/json", ...(init?.headers as Record<string, string> || {}) };
+  if (method !== "GET" && method !== "HEAD" && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers,
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
+    keepalive: true,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
   const ct = res.headers.get("content-type") || "";
