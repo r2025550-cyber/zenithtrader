@@ -2242,10 +2242,11 @@ const Index = () => {
       });
 
       // Sync FastAPI backend mode (AUTO when armed, MANUAL when off)
+      // NOTE: AI/autotrade endpoint failure must NOT mark backend offline.
+      // VPS online status is determined solely by /fetch-nifty-data success.
       try {
         const target = checked ? "auto" : "manual";
         const result = await syncFastApiMode(target, normalizedVpsBaseUrl);
-        setBackendOnline(true);
         const m = (result.mode || "").toUpperCase();
         if (m === "AUTO" || m === "MANUAL") setBackendMode(m);
         toast({
@@ -2253,12 +2254,12 @@ const Index = () => {
           description: `Backend status: ${result.status}`,
         });
       } catch (err) {
-        setBackendOnline(false);
+        // Do NOT flip backendOnline here — market polling owns that signal.
         setBackendMode("UNKNOWN");
         toast({
-          title: "Backend Offline",
-          description: err instanceof Error ? err.message : "Could not reach FastAPI backend.",
-          variant: "destructive",
+          title: "AI Engine Not Configured",
+          description: err instanceof Error ? err.message : "AI/autotrade endpoint unreachable. Market data polling continues.",
+          variant: "default",
         });
       }
     } catch (error) {
