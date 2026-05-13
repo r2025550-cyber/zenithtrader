@@ -1143,7 +1143,7 @@ const Index = () => {
       return `Current Mode: ${modeLabel} — AI loop armed: waiting for high-confidence RSI and trend confirmation.`;
     if (riskMode === "aggressive")
       return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
-    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices with 1-second throttling while OpenAI confirms trend every 30 seconds.`;
+    return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.`;
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
@@ -2241,7 +2241,7 @@ const Index = () => {
       toast({
         title: checked ? "AI trading loop started" : "AI trading loop stopped",
         description: checked
-          ? "Upstox requests are throttled to 1 per second; OpenAI reasoning runs every 30 seconds while this page is open."
+          ? "Upstox market polling runs every 5 seconds; OpenAI reasoning runs every 30 seconds while this page is open."
           : "Automation is paused.",
       });
 
