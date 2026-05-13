@@ -104,7 +104,7 @@ const COOLDOWN_UNTIL_STORAGE_KEY = "zenith-cooldown-until";
 const MARKET_OPEN_MINUTE = 9 * 60 + 15;
 const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
-const UPSTOX_POLL_INTERVAL_MS = 1_000;
+const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 30_000;
 const NIFTY_LOT_SIZE = 65;
@@ -358,6 +358,7 @@ const Index = () => {
   const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
+  const marketPollInFlightRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
