@@ -1216,10 +1216,21 @@ const Index = () => {
           : VPS_PATH_OVERRIDES[name] ?? `/${name}`;
       const method = name === "system-status" ? getStatusEndpointMethod(path) : "POST";
       try {
+        // Headers tuned for Cloudflare tunnel + CORS:
+        //  - Only set Content-Type on POST (avoids unnecessary preflight on GET)
+        //  - mode: "cors" + credentials: "omit" → simple CORS, no cookies
+        //  - cache: "no-store" → prevents Cloudflare from canceling stale dupes
+        //  - keepalive: true → request survives component unmount / tab switch
+        const headers: Record<string, string> = { Accept: "application/json" };
+        if (method === "POST") headers["Content-Type"] = "application/json";
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
           method,
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers,
           body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+          mode: "cors",
+          credentials: "omit",
+          cache: "no-store",
+          keepalive: true,
         });
         const text = await res.text();
         const payload = text
