@@ -1220,8 +1220,7 @@ const Index = () => {
         // Headers tuned for Cloudflare tunnel + CORS:
         //  - Only set Content-Type on POST (avoids unnecessary preflight on GET)
         //  - mode: "cors" + credentials: "omit" → simple CORS, no cookies
-        //  - cache: "no-store" → prevents Cloudflare from canceling stale dupes
-        //  - keepalive: true → request survives component unmount / tab switch
+        //  - cache: "no-store" → prevents stale tunnel responses
         const headers: Record<string, string> = { Accept: "application/json" };
         if (method === "POST") headers["Content-Type"] = "application/json";
         const res = await fetch(`${normalizedVpsBaseUrl}${path}`, {
