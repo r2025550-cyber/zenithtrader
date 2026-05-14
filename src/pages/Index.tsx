@@ -1276,10 +1276,21 @@ const Index = () => {
       let serverMessage = error.message;
       const context = (error as unknown as { context?: Response }).context;
       if (context) {
-        const payload = await context
-          .clone()
-          .json()
-          .catch(() => null);
+        const payload = await (async () => {
+          try {
+            const src = typeof (context as Response)?.clone === "function" ? (context as Response).clone() : context;
+            if (src && typeof (src as Response).json === "function") {
+              return await (src as Response).json();
+            }
+            if (src && typeof (src as Response).text === "function") {
+              const txt = await (src as Response).text();
+              try { return JSON.parse(txt); } catch { return { error: txt }; }
+            }
+            return src ?? null;
+          } catch {
+            return null;
+          }
+        })();
         serverMessage = [payload?.error, payload?.details].filter(Boolean).join(" — ") || serverMessage;
       }
       const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
