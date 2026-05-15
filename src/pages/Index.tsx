@@ -489,7 +489,53 @@ const Index = () => {
     else console.log(tag, evt.title, payload);
   };
 
+  const clearAiRuntimeState = () => {
+    signalLockRef.current = null;
+    levelsAnchorLtpRef.current = null;
+    lastSignalAutofillRef.current = "";
+    lastSignalAlertRef.current = "";
+    lastDebugSignalKeyRef.current = "";
+    lastAutoFiredSignalRef.current = "";
+    setLatestSignal(null);
+  };
+
+  const signalLiveSpot = (signal?: Signal | null) =>
+    toNumber(signal?.liveSpot ?? signal?.ruleContext?.rules?.ltp ?? (signal as any)?.entry ?? (signal as any)?.entryPrice);
+  const isSignalStaleVsSpot = (signal: Signal | null | undefined, spot: number | null = hasLivePrice ? latestLtp : null) => {
+    const liveSpot = toNumber(spot);
+    if (!signal || liveSpot === null) return Boolean(signal);
+    const signalSpot = signalLiveSpot(signal);
+    const rules: any = signal.ruleContext?.rules ?? {};
+    const sup = toNumber(rules.immediateSupport ?? rules.support15);
+    const res = toNumber(rules.immediateResistance ?? rules.resistance15);
+    return (
+      (signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) ||
+      (sup !== null && Math.abs(liveSpot - sup) > SR_STALE_DISTANCE_PTS) ||
+      (res !== null && Math.abs(liveSpot - res) > SR_STALE_DISTANCE_PTS)
+    );
+  };
+
+  const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
+    const signalSpot = signalLiveSpot(signal);
+    if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
+      clearAiRuntimeState();
+      return false;
+    }
+    if (isSignalStaleVsSpot(signal, liveSpot)) {
+      clearAiRuntimeState();
+      return false;
+    }
+    levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
+    signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
+    setLatestSignal(signal);
+    return true;
+  };
+
   const applySniperSignal = (signal: Signal) => {
+    if (isSignalStaleVsSpot(signal)) {
+      clearAiRuntimeState();
+      return;
+    }
     const locked = signalLockRef.current;
     const now = Date.now();
     if (locked && now < locked.lockedUntil) {
