@@ -743,6 +743,22 @@ const Index = () => {
   // is the only auth source we trust — no stale OAuth code, no stale flag.
   useEffect(() => {
     try {
+      const cacheVersion = localStorage.getItem(AI_RUNTIME_CACHE_VERSION_KEY);
+      if (cacheVersion !== AI_RUNTIME_CACHE_VERSION) {
+        Object.keys(localStorage).forEach((key) => {
+          const lower = key.toLowerCase();
+          if (lower.includes("signal") || lower.includes("reason") || lower.includes("level") || lower.includes("current")) {
+            localStorage.removeItem(key);
+          }
+        });
+        Object.keys(sessionStorage).forEach((key) => {
+          const lower = key.toLowerCase();
+          if (lower.includes("signal") || lower.includes("reason") || lower.includes("level") || lower.includes("current")) {
+            sessionStorage.removeItem(key);
+          }
+        });
+        localStorage.setItem(AI_RUNTIME_CACHE_VERSION_KEY, AI_RUNTIME_CACHE_VERSION);
+      }
       localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
       localStorage.removeItem("zenith-upstox-oauth-code");
       localStorage.removeItem("zenith-upstox-oauth-state");
@@ -753,6 +769,7 @@ const Index = () => {
     setOauthCode("");
     setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
     setSystemStatus(null);
+    clearAiRuntimeState();
   }, []);
 
   useEffect(() => {
