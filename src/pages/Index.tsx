@@ -1782,11 +1782,18 @@ const Index = () => {
       }
       if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
       if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
-      // Force a fresh AI cycle when price moves >15pts from anchor (re-baseline immediate S/R reasoning)
+      // Force a fresh AI cycle when:
+      //  • spot drifts >AI_SPOT_DRIFT_TRIGGER_PTS from anchor, OR
+      //  • cached S/R is implausibly far from live spot (stale session levels).
       const anchor = levelsAnchorLtpRef.current;
+      const sup = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport);
+      const res = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance);
+      const srLooksStale =
+        (sup !== null && Math.abs(value - sup) > SR_STALE_DISTANCE_PTS) ||
+        (res !== null && Math.abs(value - res) > SR_STALE_DISTANCE_PTS);
       if (anchor === null) levelsAnchorLtpRef.current = value;
       else if (
-        Math.abs(value - anchor) > 15 &&
+        (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
         aiEnabled &&
         !tradingBlocked &&
         Date.now() - lastForcedAiAtRef.current > 15_000
