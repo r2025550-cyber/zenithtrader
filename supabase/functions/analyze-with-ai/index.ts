@@ -791,6 +791,8 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       momentumStrength,
     };
 
+    const analysisTimestamp = new Date().toISOString();
+    const payloadTimestamp = liveTimestamp;
     const signal = {
       action,
       strike: strikeLabel,
@@ -817,6 +819,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
       engineVersion: "price-action-scalper-v6-safe",
+      liveSpot: pa.ltp,
+      analysisTimestamp,
+      payloadTimestamp,
     };
 
     const highProbability = action !== "WAIT";
@@ -915,6 +920,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         engine: "price-action-scalper-v5",
         tradingMode,
         signal,
+        analysisTimestamp,
+        payloadTimestamp,
+        liveSpot: pa.ltp,
         ruleContext,
         executionIntent,
         tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity,
@@ -990,6 +998,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         trailMode: signal.trailMode,
         trailSteps: signal.trailSteps,
         engineVersion: signal.engineVersion,
+        liveSpot: signal.liveSpot,
+        analysisTimestamp: signal.analysisTimestamp,
+        payloadTimestamp: signal.payloadTimestamp,
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,
