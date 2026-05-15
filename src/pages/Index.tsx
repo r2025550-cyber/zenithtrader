@@ -2116,6 +2116,7 @@ const Index = () => {
     if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
     aiAnalysisInFlightRef.current = true;
+    console.log("[AI_LOOP] start", new Date().toISOString());
     try {
       if (!upstoxReady) {
         const status = await retestUpstox(true);
@@ -2144,6 +2145,7 @@ const Index = () => {
         "OpenAI analysis timed out; continuing Upstox polling.",
       );
       applyFreshSignal(ai.signal, liveSpot);
+      console.log("[AI_LOOP] completed", { spot: liveSpot, action: ai?.signal?.action });
     } finally {
       aiAnalysisInFlightRef.current = false;
     }
