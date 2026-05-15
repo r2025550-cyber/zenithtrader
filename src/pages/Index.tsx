@@ -80,6 +80,7 @@ async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FAST
   const res = await fetch(`${apiBase}/mode/${target}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
   const statusRes = await fetch(`${apiBase}/status`, {
@@ -831,7 +832,8 @@ const Index = () => {
         });
         if (sr.ok) {
           const sd = await sr.json().catch(() => null);
-          const m = String(sd?.mode ?? sd?.current_mode ?? "").toUpperCase();
+          const autoMode = typeof sd?.auto_mode === "boolean" ? (sd.auto_mode ? "AUTO" : "MANUAL") : "";
+          const m = String(sd?.mode ?? sd?.current_mode ?? sd?.trading_mode ?? autoMode).toUpperCase();
           if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
         }
       } catch {
