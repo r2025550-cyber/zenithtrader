@@ -391,6 +391,11 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Session-restore guards: prevent the "Saved Upstox access token found…" flow
+  // from spamming /system-status calls and re-triggering the AI loop on every render.
+  const sessionRestoreInFlightRef = useRef<Promise<UpstoxStatus | null> | null>(null);
+  const sessionRestoreCacheRef = useRef<{ at: number; data: UpstoxStatus | null } | null>(null);
+  const SESSION_RESTORE_TTL_MS = 60_000;
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
