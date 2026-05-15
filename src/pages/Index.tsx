@@ -547,7 +547,18 @@ const Index = () => {
     );
   };
 
+  // True while an order is being attempted (incl. retry backoff window).
+  const isExecutionActive = () => {
+    const s = executionStateRef.current;
+    return s === "PENDING" || s === "SENDING" || s === "VPS_CONNECTED" || s === "EXECUTING";
+  };
+
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
+    // Freeze signal panel while an execution is in-flight.
+    if (isExecutionActive() && signalLockRef.current) {
+      console.log("[SIGNAL LOCK] suppressed AI overwrite — execution active");
+      return false;
+    }
     const signalSpot = signalLiveSpot(signal);
     if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
       clearAiRuntimeState();
