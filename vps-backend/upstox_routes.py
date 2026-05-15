@@ -956,8 +956,44 @@ async def fetch_option_premium(req: Request):
     data = payload.get("data") or {}
     node = next(iter(data.values()), {}) if data else {}
     premium = _num(node.get("last_price"), node.get("ltp"), node.get("lastPrice")) or 0
-    symbol = node.get("symbol") or node.get("trading_symbol") or str(instrument_token)
-    return JSONResponse({"premium": premium, "instrument": {"tradingSymbol": symbol}})
+    symbol = (resolved_instrument or {}).get("tradingSymbol") or node.get("symbol") or node.get("trading_symbol") or str(instrument_token)
+    return JSONResponse({"premium": premium, "instrument": {"tradingSymbol": symbol, "instrumentToken": str(instrument_token)}})
+
+
+# ---------------------------------------------------------------------------
+# /status + /mode/{target} — lightweight mode tracking the frontend polls.
+# ---------------------------------------------------------------------------
+
+@router.get("/status")
+async def status_get():
+    s = load_settings()
+    mode = str(s.get("trading_mode") or "").upper()
+    if mode not in ("AUTO", "MANUAL"):
+        mode = "MANUAL"
+    has_token = bool((s.get("upstox_access_token") or "").strip())
+    return JSONResponse({
+        "status": "ONLINE",
+        "mode": mode,
+        "current_mode": mode,
+        "trading_mode": mode,
+        "auto_mode": mode == "AUTO",
+        "upstox_connected": has_token,
+        "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    })
+
+
+@router.post("/status")
+async def status_post():
+    return await status_get()
+
+
+@router.post("/mode/{target}")
+async def set_mode(target: str):
+    target_norm = (target or "").strip().lower()
+    if target_norm not in ("auto", "manual"):
+        raise HTTPException(status_code=400, detail="mode must be auto or manual")
+    save_settings({"trading_mode": target_norm.upper()})
+    return JSONResponse({"success": True, "mode": target_norm.upper(), "message": f"{target_norm.upper()} ENABLED"})
 
 
 # ---------------------------------------------------------------------------
