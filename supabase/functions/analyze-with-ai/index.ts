@@ -909,9 +909,29 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       tradeGapMinutes: Math.round(minutesSinceLastTrade === Infinity ? -1 : minutesSinceLastTrade),
     };
 
+    // Validate market_data_id is a real DB row id (UUID-shaped). liveMarket payloads
+    // from the frontend may not have a valid id and would otherwise fail the FK.
+    const latestId = (latest as any)?.id;
+    const safeMarketDataId =
+      typeof latestId === "string" && /^[0-9a-f-]{36}$/i.test(latestId) ? latestId : null;
+
+    console.log("[AI RAW]", { aiText: aiText.slice(0, 500), action, strikeLabel });
+    console.log("[AI PARSED]", {
+      support: pa.support, resistance: pa.resistance, ltp: pa.ltp,
+      ema21: pa.ema21, ema21Slope: pa.ema21Slope,
+      momentumBull: pa.momentumBull, momentumBear: pa.momentumBear,
+      trendUp: pa.trendUp, trendDown: pa.trendDown,
+      conviction, action,
+    });
+    if (action === "BUY" || action === "SELL") {
+      console.log("[SIGNAL GENERATED]", { action, strike: strikeLabel, conviction, entry, stopLoss, target });
+    } else {
+      console.log("[NO TRADE CONDITIONS]", { reason: reasonParts.join(" ") });
+    }
+
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
-      market_data_id: latest.id,
+      market_data_id: safeMarketDataId,
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
