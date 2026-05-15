@@ -544,6 +544,7 @@ const Index = () => {
     }
     const locked = signalLockRef.current;
     const now = Date.now();
+    if (locked && isSignalStaleVsSpot(locked.signal)) signalLockRef.current = null;
     if (locked && now < locked.lockedUntil) {
       const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
       const majorBreak =
