@@ -548,6 +548,7 @@ const Index = () => {
     levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
     signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
     setLatestSignal(signal);
+    setLastAiUpdateAt(Date.now());
     return true;
   };
 
