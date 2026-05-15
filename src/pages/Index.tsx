@@ -1896,6 +1896,10 @@ const Index = () => {
       if (srLooksStale) {
         clearAiRuntimeState();
         levelsAnchorLtpRef.current = value;
+        if (aiEnabled && !tradingBlocked && !aiAnalysisInFlightRef.current) {
+          lastForcedAiAtRef.current = Date.now();
+          runTradingCycle().catch(() => {});
+        }
       } else if (anchor === null) levelsAnchorLtpRef.current = value;
       else if (
         (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
@@ -2467,25 +2471,9 @@ const Index = () => {
     if (session && aiEnabled) {
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        withTimeout(
-          invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-            tradingMode,
-            tradingLotSize: normalizedTradingLotSize,
-            dailyProfitTarget: normalizedDailyTarget,
-            maxDailyLoss: normalizedMaxDailyLoss,
-            dailyPnl,
-            userTargetPoints: Number(userTargetPoints) || null,
-            userSlPoints: Number(userSlPoints) || null,
-            spotPrice: Number(latestData?.ltp) || null,
-            timestamp: new Date().toISOString(),
-            forceRefresh: true,
-          }),
-          25_000,
-          "OpenAI analysis timed out; continuing Upstox polling.",
-        )
-          .then((ai) => applySniperSignal(ai.signal))
+        runTradingCycle()
           .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 1-minute poll."),
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 5-second poll."),
           );
       }, AI_REASONING_INTERVAL_MS);
     }
