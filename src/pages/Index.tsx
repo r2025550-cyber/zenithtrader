@@ -2072,6 +2072,7 @@ const Index = () => {
           userTargetPoints: Number(userTargetPoints) || null,
           userSlPoints: Number(userSlPoints) || null,
           spotPrice: liveSpot,
+          liveMarket,
           timestamp: new Date().toISOString(),
           payloadTimestamp,
           forceRefresh: true,
