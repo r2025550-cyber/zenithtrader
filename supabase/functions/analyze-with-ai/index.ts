@@ -42,11 +42,29 @@ const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
 const SPIKE_COOLDOWN_MIN = 1.5;          // v7: was 5 — short cooldown, then trade spike
 const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
 const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
+const SR_STALE_DISTANCE_PTS = 200;
+const FALLBACK_SR_DISTANCE_PTS = 35;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sanitizeImmediateLevels(ltp: number | null, support: number | null, resistance: number | null, history: MarketRow[]) {
+  if (ltp === null) return { support, resistance, stale: false };
+  const staleSupport = support === null || support >= ltp || Math.abs(ltp - support) > SR_STALE_DISTANCE_PTS;
+  const staleResistance = resistance === null || resistance <= ltp || Math.abs(ltp - resistance) > SR_STALE_DISTANCE_PTS;
+  if (!staleSupport && !staleResistance) return { support, resistance, stale: false };
+
+  const recent = history.slice(0, 20);
+  const lows = recent.flatMap((r) => [num(r?.low_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v < ltp && ltp - v <= SR_STALE_DISTANCE_PTS);
+  const highs = recent.flatMap((r) => [num(r?.high_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v > ltp && v - ltp <= SR_STALE_DISTANCE_PTS);
+  return {
+    support: staleSupport ? (lows.length ? Math.max(...lows) : Number((ltp - FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : support,
+    resistance: staleResistance ? (highs.length ? Math.min(...highs) : Number((ltp + FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : resistance,
+    stale: true,
+  };
 }
 
 function emaSeries(values: number[], period: number): number[] {
