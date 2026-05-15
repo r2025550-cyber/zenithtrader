@@ -449,6 +449,8 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [lastAiUpdateAt, setLastAiUpdateAt] = useState<number | null>(null);
+  const [aiHeartbeat, setAiHeartbeat] = useState<string>("Analyzing trend...");
   const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(() => {
     if (typeof window === "undefined") return null;
