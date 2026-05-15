@@ -2053,36 +2053,36 @@ const Index = () => {
     if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
     aiAnalysisInFlightRef.current = true;
-    if (!upstoxReady) {
-      const status = await retestUpstox(true);
-      if (!status.upstox.ok) {
-        aiAnalysisInFlightRef.current = false;
-        return;
+    try {
+      if (!upstoxReady) {
+        const status = await retestUpstox(true);
+        if (!status.upstox.ok) return;
       }
+      clearAiRuntimeState();
+      const liveMarket = await fetchLiveNifty(false, true);
+      const liveSpot = toNumber(liveMarket?.ltp);
+      const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
+      const ai = await withTimeout(
+        invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+          tradingMode,
+          tradingLotSize: normalizedTradingLotSize,
+          dailyProfitTarget: normalizedDailyTarget,
+          maxDailyLoss: normalizedMaxDailyLoss,
+          dailyPnl,
+          userTargetPoints: Number(userTargetPoints) || null,
+          userSlPoints: Number(userSlPoints) || null,
+          spotPrice: liveSpot,
+          timestamp: new Date().toISOString(),
+          payloadTimestamp,
+          forceRefresh: true,
+        }),
+        25_000,
+        "OpenAI analysis timed out; continuing Upstox polling.",
+      );
+      applyFreshSignal(ai.signal, liveSpot);
+    } finally {
+      aiAnalysisInFlightRef.current = false;
     }
-    clearAiRuntimeState();
-    const liveMarket = await fetchLiveNifty(false, true);
-    const liveSpot = toNumber(liveMarket?.ltp);
-    const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
-    const ai = await withTimeout(
-      invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-        tradingMode,
-        tradingLotSize: normalizedTradingLotSize,
-        dailyProfitTarget: normalizedDailyTarget,
-        maxDailyLoss: normalizedMaxDailyLoss,
-        dailyPnl,
-        userTargetPoints: Number(userTargetPoints) || null,
-        userSlPoints: Number(userSlPoints) || null,
-        spotPrice: liveSpot,
-        timestamp: new Date().toISOString(),
-        payloadTimestamp,
-        forceRefresh: true,
-      }),
-      25_000,
-      "OpenAI analysis timed out; continuing Upstox polling.",
-    );
-    applyFreshSignal(ai.signal, liveSpot);
-    aiAnalysisInFlightRef.current = false;
   };
 
   const executeTradingSignal = async () => {
