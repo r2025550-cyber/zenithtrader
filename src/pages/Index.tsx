@@ -3890,6 +3890,18 @@ const Index = () => {
                   }
                 })()}
               </p>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                  AI Heartbeat: {aiHeartbeat}
+                </span>
+                <span>
+                  Last AI Update:{" "}
+                  {lastAiUpdateAt
+                    ? new Date(lastAiUpdateAt).toLocaleTimeString("en-IN")
+                    : "—"}
+                </span>
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-surface p-3">
                   <div className="mb-2 flex items-center justify-between text-sm">
