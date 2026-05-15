@@ -1217,8 +1217,13 @@ const Index = () => {
 
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
+    try {
     if (latestSignal) {
-      const rules = latestSignal.ruleContext?.rules;
+      const rules = latestSignal.ruleContext?.rules ?? {};
+      const safeAction = latestSignal.action ?? "WAIT";
+      const safeStrike = latestSignal.strike ?? "—";
+      const safeReason = latestSignal.reason ?? "Waiting for fresh market analysis…";
+      const safeConviction = latestSignal.conviction ?? "MEDIUM";
       const triggered = [
         `${modeLabel} active`,
         rules?.sustainedBullish1m && "3 bullish 1m candles",
