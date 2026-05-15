@@ -1217,8 +1217,13 @@ const Index = () => {
 
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
   const reasoning = useMemo(() => {
+    try {
     if (latestSignal) {
-      const rules = latestSignal.ruleContext?.rules;
+      const rules = latestSignal.ruleContext?.rules ?? {};
+      const safeAction = latestSignal.action ?? "WAIT";
+      const safeStrike = latestSignal.strike ?? "—";
+      const safeReason = latestSignal.reason ?? "Waiting for fresh market analysis…";
+      const safeConviction = latestSignal.conviction ?? "MEDIUM";
       const triggered = [
         `${modeLabel} active`,
         rules?.sustainedBullish1m && "3 bullish 1m candles",
@@ -1240,7 +1245,7 @@ const Index = () => {
       ]
         .filter(Boolean)
         .join(" · ");
-      return `Current Mode: ${modeLabel} — ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Current Mode: ${modeLabel} — ${safeAction === "WAIT" ? "WAITING FOR CONFIRMATION" : `${safeAction} LOCKED`} ${safeStrike} · ${safeConviction} Conviction${triggered ? ` · ${triggered}` : ""} — ${safeReason}`;
     }
     if (targetAchieved)
       return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
@@ -1253,6 +1258,10 @@ const Index = () => {
     if (riskMode === "aggressive")
       return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
     return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.`;
+    } catch (err) {
+      console.warn("[AI_REASONING] render fallback", err);
+      return "Waiting for fresh market analysis…";
+    }
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
@@ -2471,10 +2480,15 @@ const Index = () => {
     if (session && aiEnabled) {
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        runTradingCycle()
-          .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 5-second poll."),
+        runTradingCycle().catch((error) => {
+          // Do NOT show destructive popup if AI reasoning endpoint fails —
+          // the dashboard keeps polling Upstox and shows "Waiting for fresh
+          // market analysis…" instead of crashing the UI.
+          console.warn(
+            "[AI_REASONING] cycle failed — will retry next tick:",
+            error instanceof Error ? error.message : error,
           );
+        });
       }, AI_REASONING_INTERVAL_MS);
     }
     return () => {
@@ -3814,7 +3828,16 @@ const Index = () => {
                 <Activity className="h-5 w-5" />
                 <h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2>
               </div>
-              <p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p>
+              <p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>
+                {(() => {
+                  try {
+                    const text = typeof reasoning === "string" ? reasoning.trim() : "";
+                    return text.length > 0 ? text : "Waiting for fresh market analysis…";
+                  } catch {
+                    return "Waiting for fresh market analysis…";
+                  }
+                })()}
+              </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-surface p-3">
                   <div className="mb-2 flex items-center justify-between text-sm">
