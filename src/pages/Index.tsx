@@ -2343,13 +2343,16 @@ const Index = () => {
             dailyPnl,
             userTargetPoints: Number(userTargetPoints) || null,
             userSlPoints: Number(userSlPoints) || null,
+            spotPrice: Number(latestData?.ltp) || null,
+            timestamp: new Date().toISOString(),
+            forceRefresh: true,
           }),
           25_000,
           "OpenAI analysis timed out; continuing Upstox polling.",
         )
           .then((ai) => applySniperSignal(ai.signal))
           .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."),
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 1-minute poll."),
           );
       }, AI_REASONING_INTERVAL_MS);
     }
