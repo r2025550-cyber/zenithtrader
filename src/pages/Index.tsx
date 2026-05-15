@@ -576,6 +576,10 @@ const Index = () => {
   };
 
   const applySniperSignal = (signal: Signal) => {
+    if (isExecutionActive() && signalLockRef.current) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
+      return;
+    }
     if (isSignalStaleVsSpot(signal)) {
       clearAiRuntimeState();
       return;
