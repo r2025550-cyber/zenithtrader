@@ -218,6 +218,11 @@ type RuleContext = {
     multiTimeframeAligned?: boolean;
     trend5?: string;
     entry1m?: string;
+    ltp?: number | null;
+    support15?: number | null;
+    resistance15?: number | null;
+    immediateSupport?: number | null;
+    immediateResistance?: number | null;
   };
 };
 type Signal = {
