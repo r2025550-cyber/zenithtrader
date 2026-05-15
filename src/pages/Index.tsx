@@ -391,6 +391,11 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Session-restore guards: prevent the "Saved Upstox access token found…" flow
+  // from spamming /system-status calls and re-triggering the AI loop on every render.
+  const sessionRestoreInFlightRef = useRef<Promise<UpstoxStatus | null> | null>(null);
+  const sessionRestoreCacheRef = useRef<{ at: number; data: UpstoxStatus | null } | null>(null);
+  const SESSION_RESTORE_TTL_MS = 60_000;
   const [session, setSession] = useState<Session | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -428,7 +433,7 @@ const Index = () => {
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
   const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
   const [redirectUriManuallyEdited, setRedirectUriManuallyEdited] = useState(false);
-  const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
+  const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "WAIT" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
   const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
@@ -444,6 +449,8 @@ const Index = () => {
   const [latestData, setLatestData] = useState<NiftyData | null>(null);
   const [marketHistory, setMarketHistory] = useState<MarketPoint[]>([]);
   const [latestSignal, setLatestSignal] = useState<Signal | null>(null);
+  const [lastAiUpdateAt, setLastAiUpdateAt] = useState<number | null>(null);
+  const [aiHeartbeat, setAiHeartbeat] = useState<string>("Analyzing trend...");
   const [suggestedEntryPremium, setSuggestedEntryPremium] = useState<number | null>(null);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(() => {
     if (typeof window === "undefined") return null;
@@ -541,6 +548,7 @@ const Index = () => {
     levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
     signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
     setLatestSignal(signal);
+    setLastAiUpdateAt(Date.now());
     return true;
   };
 
@@ -572,6 +580,7 @@ const Index = () => {
     if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
     else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
     setLatestSignal(signal);
+    setLastAiUpdateAt(Date.now());
   };
 
   const latestLtp = Number(latestData?.ltp);
@@ -789,6 +798,24 @@ const Index = () => {
     return () => clearInterval(clock);
   }, []);
 
+  // Rotating AI heartbeat: independent of polling cycles so the reasoning panel
+  // always shows visible "alive" feedback even when no fresh signal arrives.
+  useEffect(() => {
+    const messages = [
+      "Analyzing trend...",
+      "Checking momentum...",
+      "Evaluating volatility...",
+      "Scanning support/resistance...",
+    ];
+    let i = 0;
+    setAiHeartbeat(messages[0]);
+    const t = setInterval(() => {
+      i = (i + 1) % messages.length;
+      setAiHeartbeat(messages[i]);
+    }, 30_000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => {
     if (!redirectUriManuallyEdited) {
       setSettings((prev) =>
@@ -835,6 +862,10 @@ const Index = () => {
           const autoMode = typeof sd?.auto_mode === "boolean" ? (sd.auto_mode ? "AUTO" : "MANUAL") : "";
           const m = String(sd?.mode ?? sd?.current_mode ?? sd?.trading_mode ?? autoMode).toUpperCase();
           if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
+          // If backend healthy but didn't report a mode, default to WAIT (not UNKNOWN).
+          else setBackendMode((prev) => (prev === "AUTO" || prev === "MANUAL" ? prev : "WAIT"));
+        } else {
+          setBackendMode((prev) => (prev === "AUTO" || prev === "MANUAL" ? prev : "WAIT"));
         }
       } catch {
         /* mode sync is best-effort; ignore failures */
@@ -1201,18 +1232,37 @@ const Index = () => {
     localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
   };
 
-  const restoreSavedUpstoxSession = async () => {
-    const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
-      body: { target: "upstox", tokenOnly: true },
+  const restoreSavedUpstoxSession = async (force = false): Promise<UpstoxStatus | null> => {
+    // De-dupe + cache the session-restore call so frontend re-renders, AI cycles
+    // and status checks don't re-spam /system-status (which was causing repeated
+    // "Saved Upstox access token found…" toast spam and AI loop restarts).
+    const cached = sessionRestoreCacheRef.current;
+    if (!force && cached && Date.now() - cached.at < SESSION_RESTORE_TTL_MS) {
+      return cached.data;
+    }
+    if (sessionRestoreInFlightRef.current) return sessionRestoreInFlightRef.current;
+    const p = (async () => {
+      console.log("[AUTH_REFRESH] restoring saved Upstox session (single-flight)");
+      const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
+        body: { target: "upstox", tokenOnly: true },
+      });
+      if (error) throw error;
+      if (data?.upstox?.ok) {
+        localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
+        setSystemStatus((prev) => {
+          // Avoid unnecessary re-renders if upstox state hasn't changed.
+          if (prev?.upstox?.ok === data.upstox.ok && prev?.upstox?.message === data.upstox.message) return prev;
+          const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
+          return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+        });
+      }
+      sessionRestoreCacheRef.current = { at: Date.now(), data: data ?? null };
+      return data ?? null;
+    })().finally(() => {
+      sessionRestoreInFlightRef.current = null;
     });
-    if (error) throw error;
-    if (!data?.upstox?.ok) return data;
-    localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
-    setSystemStatus((prev) => {
-      const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
-      return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
-    });
-    return data;
+    sessionRestoreInFlightRef.current = p;
+    return p;
   };
 
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
@@ -2066,6 +2116,7 @@ const Index = () => {
     if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
     aiAnalysisInFlightRef.current = true;
+    console.log("[AI_LOOP] start", new Date().toISOString());
     try {
       if (!upstoxReady) {
         const status = await retestUpstox(true);
@@ -2094,6 +2145,7 @@ const Index = () => {
         "OpenAI analysis timed out; continuing Upstox polling.",
       );
       applyFreshSignal(ai.signal, liveSpot);
+      console.log("[AI_LOOP] completed", { spot: liveSpot, action: ai?.signal?.action });
     } finally {
       aiAnalysisInFlightRef.current = false;
     }
@@ -2475,12 +2527,21 @@ const Index = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, normalizedTradingLotSize, totalTradingQuantity, normalizedVpsBaseUrl]);
 
+  // Keep latest runTradingCycle in a ref so the interval doesn't tear down on
+  // every render (dailyPnl, lot size, etc. previously caused the AI loop to
+  // restart constantly, making reasoning appear frozen).
+  const runTradingCycleRef = useRef(runTradingCycle);
+  useEffect(() => {
+    runTradingCycleRef.current = runTradingCycle;
+  });
+
   useEffect(() => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session && aiEnabled) {
+      console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        runTradingCycle().catch((error) => {
+        runTradingCycleRef.current().catch((error) => {
           // Do NOT show destructive popup if AI reasoning endpoint fails —
           // the dashboard keeps polling Upstox and shows "Waiting for fresh
           // market analysis…" instead of crashing the UI.
@@ -2492,20 +2553,12 @@ const Index = () => {
       }, AI_REASONING_INTERVAL_MS);
     }
     return () => {
-      if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+      if (aiIntervalRef.current) {
+        clearInterval(aiIntervalRef.current);
+        console.log("[AI_REASONING] interval stopped");
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    session,
-    aiEnabled,
-    tradingBlocked,
-    normalizedTradingLotSize,
-    normalizedDailyTarget,
-    normalizedMaxDailyLoss,
-    dailyPnl,
-    userTargetPoints,
-    userSlPoints,
-  ]);
+  }, [session, aiEnabled, tradingBlocked]);
 
   useEffect(() => {
     if (!session) return;
@@ -3838,6 +3891,18 @@ const Index = () => {
                   }
                 })()}
               </p>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                  AI Heartbeat: {aiHeartbeat}
+                </span>
+                <span>
+                  Last AI Update:{" "}
+                  {lastAiUpdateAt
+                    ? new Date(lastAiUpdateAt).toLocaleTimeString("en-IN")
+                    : "—"}
+                </span>
+              </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-surface p-3">
                   <div className="mb-2 flex items-center justify-between text-sm">
