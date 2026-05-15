@@ -495,14 +495,14 @@ serve(async (req) => {
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
 
-    // AGGRESSIVE ENTRY MODE
-    if (pa.momentumBull || pa.emaBullish || pa.trendUp) {
-      action = "BUY";
-    }
+    // ===== v8 SIGNAL COOLDOWN =====
+    // Same-direction BUY/SELL cannot repeat within SIGNAL_COOLDOWN_SEC.
+    // This prevents the spammy 4-5s repeat signals seen in v7.
+    const SIGNAL_COOLDOWN_SEC = 90;
+    const lastSignalAction = (todayTrades[0]?.action as "BUY" | "SELL" | undefined) ?? null;
+    const secsSinceLastSignal = lastTradeAt ? (Date.now() - lastTradeAt) / 1000 : Infinity;
+    const cooldownActive = lastSignalAction !== null && secsSinceLastSignal < SIGNAL_COOLDOWN_SEC;
 
-    if (pa.momentumBear || pa.emaBearish || pa.trendDown) {
-      action = "SELL";
-    }
     const reasonParts: string[] = [];
 
     // Setup detection (v3 retained)
