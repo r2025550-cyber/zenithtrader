@@ -846,6 +846,7 @@ const Index = () => {
   // and keeps backendMode (AUTO/MANUAL) in sync via /status.
   useEffect(() => {
     const ping = async () => {
+      let healthy = false;
       try {
         const method = getStatusEndpointMethod(vpsStatusEndpoint);
         const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
@@ -853,6 +854,7 @@ const Index = () => {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
+        healthy = r.ok;
         setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
@@ -861,6 +863,30 @@ const Index = () => {
       } catch (err) {
         setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+      }
+      // Track sustained offline duration → auto-disable AUTO trading after 60s.
+      const now = Date.now();
+      if (healthy) {
+        if (vpsOfflineSinceRef.current !== null) {
+          console.log("[TUNNEL STATUS] reconnected after", now - vpsOfflineSinceRef.current, "ms");
+        }
+        vpsOfflineSinceRef.current = null;
+      } else {
+        if (vpsOfflineSinceRef.current === null) {
+          vpsOfflineSinceRef.current = now;
+          console.warn("[TUNNEL STATUS] offline — starting outage timer");
+        } else if (now - vpsOfflineSinceRef.current > VPS_OFFLINE_AUTODISABLE_MS) {
+          if (storedValue(AUTO_TRADE_STORAGE_KEY) === "true") {
+            console.error("[TUNNEL STATUS] offline >60s → disabling AUTO trading");
+            setAutoTradeMode(false);
+            localStorage.setItem(AUTO_TRADE_STORAGE_KEY, "false");
+            toast({
+              title: "AUTO trading disabled",
+              description: "VPS unreachable for >60s. Reconnect tunnel and re-arm AUTO mode.",
+              variant: "destructive",
+            });
+          }
+        }
       }
       // Independent /status fetch to refresh trading mode (never affects tunnel/backend-online state).
       try {
