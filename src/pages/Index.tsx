@@ -1429,9 +1429,8 @@ const Index = () => {
     if (routeToVps) {
       // VPS endpoint mapping: order placement uses `/place-order` on the VPS
       // (FastAPI backend handles the actual Upstox API call with stored token).
-      const VPS_PATH_OVERRIDES: Record<string, string> = {
-        "place-live-order": "/place-order",
-      };
+      // VPS endpoints match the function name 1:1 (e.g. POST /place-live-order).
+      const VPS_PATH_OVERRIDES: Record<string, string> = {};
       const path =
         name === "system-status"
           ? vpsStatusEndpoint
