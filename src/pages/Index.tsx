@@ -3747,7 +3747,8 @@ const Index = () => {
               <h2 className="text-xl font-semibold">Current Levels</h2>
             </div>
             <span className="text-xs text-muted-foreground">
-              Auto-refresh every 1m · forced re-analysis on &gt;15pt move
+              Auto-refresh every 1m · forced re-analysis on &gt;{AI_SPOT_DRIFT_TRIGGER_PTS}pt move or stale S/R
+              {srStale ? " · stale levels hidden" : ""}
               {yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}
             </span>
           </div>
