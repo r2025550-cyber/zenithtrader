@@ -145,8 +145,11 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const low = num(latest?.low_price);
   const close = num(latest?.close_price);
 
-  // Confirmed swing S/R
-  const { support, resistance } = confirmedSwings(history, 30, 2, 4);
+  // Confirmed swing S/R, rebased around the latest live LTP if previous-session levels leak in.
+  const rawLevels = confirmedSwings(history, 30, 2, 4);
+  const sanitizedLevels = sanitizeImmediateLevels(ltp, rawLevels.support, rawLevels.resistance, history);
+  const support = sanitizedLevels.support;
+  const resistance = sanitizedLevels.resistance;
 
   // EMA21 series + slope
   const closesChrono = [...history].reverse().map((r) => num(r?.ltp) ?? num(r?.close_price)).filter((v): v is number => v !== null);
@@ -397,7 +400,7 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     earlyBuy, earlySell,
     // v5 additions
     bullTrap, bearTrap, liveBullTrap, liveBearTrap,
-    spikeDetected, spikeAgeMin,
+    spikeDetected, spikeAgeMin, staleLevelsRebased: sanitizedLevels.stale,
     compression, compressionBreakout,
   };
 }
