@@ -2050,12 +2050,20 @@ const Index = () => {
   };
 
   const runTradingCycle = async () => {
+    if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
+    aiAnalysisInFlightRef.current = true;
     if (!upstoxReady) {
       const status = await retestUpstox(true);
-      if (!status.upstox.ok) return;
+      if (!status.upstox.ok) {
+        aiAnalysisInFlightRef.current = false;
+        return;
+      }
     }
-    await fetchLiveNifty(false, true);
+    clearAiRuntimeState();
+    const liveMarket = await fetchLiveNifty(false, true);
+    const liveSpot = toNumber(liveMarket?.ltp);
+    const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
     const ai = await withTimeout(
       invokeFunction<{ signal: Signal }>("analyze-with-ai", {
         tradingMode,
@@ -2065,14 +2073,16 @@ const Index = () => {
         dailyPnl,
         userTargetPoints: Number(userTargetPoints) || null,
         userSlPoints: Number(userSlPoints) || null,
-        spotPrice: Number(latestData?.ltp) || null,
+        spotPrice: liveSpot,
         timestamp: new Date().toISOString(),
+        payloadTimestamp,
         forceRefresh: true,
       }),
       25_000,
       "OpenAI analysis timed out; continuing Upstox polling.",
     );
-    applySniperSignal(ai.signal);
+    applyFreshSignal(ai.signal, liveSpot);
+    aiAnalysisInFlightRef.current = false;
   };
 
   const executeTradingSignal = async () => {
