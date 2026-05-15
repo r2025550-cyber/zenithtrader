@@ -42,11 +42,29 @@ const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
 const SPIKE_COOLDOWN_MIN = 1.5;          // v7: was 5 — short cooldown, then trade spike
 const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
 const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
+const SR_STALE_DISTANCE_PTS = 200;
+const FALLBACK_SR_DISTANCE_PTS = 35;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sanitizeImmediateLevels(ltp: number | null, support: number | null, resistance: number | null, history: MarketRow[]) {
+  if (ltp === null) return { support, resistance, stale: false };
+  const staleSupport = support === null || support >= ltp || Math.abs(ltp - support) > SR_STALE_DISTANCE_PTS;
+  const staleResistance = resistance === null || resistance <= ltp || Math.abs(ltp - resistance) > SR_STALE_DISTANCE_PTS;
+  if (!staleSupport && !staleResistance) return { support, resistance, stale: false };
+
+  const recent = history.slice(0, 20);
+  const lows = recent.flatMap((r) => [num(r?.low_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v < ltp && ltp - v <= SR_STALE_DISTANCE_PTS);
+  const highs = recent.flatMap((r) => [num(r?.high_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v > ltp && v - ltp <= SR_STALE_DISTANCE_PTS);
+  return {
+    support: staleSupport ? (lows.length ? Math.max(...lows) : Number((ltp - FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : support,
+    resistance: staleResistance ? (highs.length ? Math.min(...highs) : Number((ltp + FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : resistance,
+    stale: true,
+  };
 }
 
 function emaSeries(values: number[], period: number): number[] {
@@ -127,8 +145,11 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const low = num(latest?.low_price);
   const close = num(latest?.close_price);
 
-  // Confirmed swing S/R
-  const { support, resistance } = confirmedSwings(history, 30, 2, 4);
+  // Confirmed swing S/R, rebased around the latest live LTP if previous-session levels leak in.
+  const rawLevels = confirmedSwings(history, 30, 2, 4);
+  const sanitizedLevels = sanitizeImmediateLevels(ltp, rawLevels.support, rawLevels.resistance, history);
+  const support = sanitizedLevels.support;
+  const resistance = sanitizedLevels.resistance;
 
   // EMA21 series + slope
   const closesChrono = [...history].reverse().map((r) => num(r?.ltp) ?? num(r?.close_price)).filter((v): v is number => v !== null);
@@ -379,7 +400,7 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
     earlyBuy, earlySell,
     // v5 additions
     bullTrap, bearTrap, liveBullTrap, liveBearTrap,
-    spikeDetected, spikeAgeMin,
+    spikeDetected, spikeAgeMin, staleLevelsRebased: sanitizedLevels.stale,
     compression, compressionBreakout,
   };
 }
@@ -414,16 +435,22 @@ serve(async (req) => {
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
 
-    const { data: history, error: latestError } = await auth.adminClient
+    const { data: storedHistory, error: latestError } = await auth.adminClient
       .from("nifty_market_data")
       .select("*")
       .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false })
       .limit(80);
-    const latest = history?.[0] as MarketRow | undefined;
+    const liveMarket = body?.liveMarket && typeof body.liveMarket === "object" ? body.liveMarket as MarketRow : null;
+    const liveSpot = num(body?.spotPrice ?? liveMarket?.ltp);
+    const liveTimestamp = String(body?.payloadTimestamp ?? liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString());
+    const latest = liveMarket && liveSpot !== null
+      ? { ...liveMarket, ltp: liveSpot, source_timestamp: liveTimestamp, created_at: liveTimestamp } as MarketRow
+      : storedHistory?.[0] as MarketRow | undefined;
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
+    const history = [latest, ...((storedHistory ?? []) as MarketRow[]).filter((row) => String((row as any).id ?? "") !== String((latest as any).id ?? ""))];
 
-    const pa = buildPriceAction(latest, (history ?? []) as MarketRow[]);
+    const pa = buildPriceAction(latest, history as MarketRow[]);
 
     const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
     const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
@@ -764,6 +791,8 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       momentumStrength,
     };
 
+    const analysisTimestamp = new Date().toISOString();
+    const payloadTimestamp = liveTimestamp;
     const signal = {
       action,
       strike: strikeLabel,
@@ -790,6 +819,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
       engineVersion: "price-action-scalper-v6-safe",
+      liveSpot: pa.ltp,
+      analysisTimestamp,
+      payloadTimestamp,
     };
 
     const highProbability = action !== "WAIT";
@@ -888,6 +920,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         engine: "price-action-scalper-v5",
         tradingMode,
         signal,
+        analysisTimestamp,
+        payloadTimestamp,
+        liveSpot: pa.ltp,
         ruleContext,
         executionIntent,
         tradingLotSize, niftyLotSize: NIFTY_LOT_SIZE, tradingQuantity,
@@ -963,6 +998,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         trailMode: signal.trailMode,
         trailSteps: signal.trailSteps,
         engineVersion: signal.engineVersion,
+        liveSpot: signal.liveSpot,
+        analysisTimestamp: signal.analysisTimestamp,
+        payloadTimestamp: signal.payloadTimestamp,
         trail: {
           triggerPts: TRAIL_TRIGGER_PTS,
           lockAtProfit: TRAIL_LOCK_AT_PROFIT,

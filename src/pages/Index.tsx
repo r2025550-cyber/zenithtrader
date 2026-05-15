@@ -80,12 +80,19 @@ async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FAST
   const res = await fetch(`${apiBase}/mode/${target}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
+    cache: "no-store",
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${apiBase}/status`, { headers: { Accept: "application/json", "Content-Type": "application/json" } });
+  const statusRes = await fetch(`${apiBase}/status`, {
+    method: "GET",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    cache: "no-store",
+  });
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
-  return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
+  const fallbackMode = target.toUpperCase();
+  const parsedMode = String(data?.mode ?? data?.current_mode ?? data?.trading_mode ?? data?.auto_mode ?? fallbackMode).toUpperCase();
+  return { status: String(data?.status ?? "ONLINE"), mode: parsedMode === "AUTO" || parsedMode === "MANUAL" ? parsedMode : fallbackMode };
 }
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
@@ -106,7 +113,9 @@ const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
-const AI_REASONING_INTERVAL_MS = 60_000;
+const AI_REASONING_INTERVAL_MS = 5_000;
+const AI_RUNTIME_CACHE_VERSION = "ai-reasoning-live-v3";
+const AI_RUNTIME_CACHE_VERSION_KEY = "zenith-ai-runtime-cache-version";
 // Force fresh AI analysis when spot drifts >50pts from anchor (per spec).
 const AI_SPOT_DRIFT_TRIGGER_PTS = 50;
 // Treat cached S/R as stale when level is implausibly far from current spot.
@@ -216,6 +225,11 @@ type RuleContext = {
     multiTimeframeAligned?: boolean;
     trend5?: string;
     entry1m?: string;
+    ltp?: number | null;
+    support15?: number | null;
+    resistance15?: number | null;
+    immediateSupport?: number | null;
+    immediateResistance?: number | null;
   };
 };
 type Signal = {
@@ -230,6 +244,9 @@ type Signal = {
   effectiveLotSize?: number;
   effectiveTradingQuantity?: number;
   riskSizeDown?: boolean;
+  analysisTimestamp?: string;
+  payloadTimestamp?: string;
+  liveSpot?: number | null;
 };
 type NiftyData = {
   ltp?: number | string | null;
@@ -363,6 +380,7 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const marketPollInFlightRef = useRef(false);
+  const aiAnalysisInFlightRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -484,9 +502,59 @@ const Index = () => {
     else console.log(tag, evt.title, payload);
   };
 
+  const clearAiRuntimeState = () => {
+    signalLockRef.current = null;
+    levelsAnchorLtpRef.current = null;
+    lastSignalAutofillRef.current = "";
+    lastSignalAlertRef.current = "";
+    lastDebugSignalKeyRef.current = "";
+    lastAutoFiredSignalRef.current = "";
+    setLatestSignal(null);
+  };
+
+  const signalLiveSpot = (signal?: Signal | null) =>
+    toNumber(signal?.liveSpot ?? signal?.ruleContext?.rules?.ltp ?? (signal as any)?.entry ?? (signal as any)?.entryPrice);
+  const isSignalStaleVsSpot = (signal: Signal | null | undefined, spot: number | null = hasLivePrice ? latestLtp : null) => {
+    const liveSpot = toNumber(spot);
+    if (!signal || liveSpot === null) return Boolean(signal);
+    const signalSpot = signalLiveSpot(signal);
+    const rules: any = signal.ruleContext?.rules ?? {};
+    const sup = toNumber(rules.immediateSupport ?? rules.support15);
+    const res = toNumber(rules.immediateResistance ?? rules.resistance15);
+    return (
+      (signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) ||
+      (sup !== null && Math.abs(liveSpot - sup) > SR_STALE_DISTANCE_PTS) ||
+      (res !== null && Math.abs(liveSpot - res) > SR_STALE_DISTANCE_PTS)
+    );
+  };
+
+  const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
+    const signalSpot = signalLiveSpot(signal);
+    if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
+      clearAiRuntimeState();
+      return false;
+    }
+    if (isSignalStaleVsSpot(signal, liveSpot)) {
+      clearAiRuntimeState();
+      return false;
+    }
+    levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
+    signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
+    setLatestSignal(signal);
+    return true;
+  };
+
   const applySniperSignal = (signal: Signal) => {
-    const locked = signalLockRef.current;
+    if (isSignalStaleVsSpot(signal)) {
+      clearAiRuntimeState();
+      return;
+    }
+    let locked = signalLockRef.current;
     const now = Date.now();
+    if (locked && isSignalStaleVsSpot(locked.signal)) {
+      signalLockRef.current = null;
+      locked = null;
+    }
     if (locked && now < locked.lockedUntil) {
       const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
       const majorBreak =
@@ -687,6 +755,22 @@ const Index = () => {
   // is the only auth source we trust — no stale OAuth code, no stale flag.
   useEffect(() => {
     try {
+      const cacheVersion = localStorage.getItem(AI_RUNTIME_CACHE_VERSION_KEY);
+      if (cacheVersion !== AI_RUNTIME_CACHE_VERSION) {
+        Object.keys(localStorage).forEach((key) => {
+          const lower = key.toLowerCase();
+          if (lower.includes("signal") || lower.includes("reason") || lower.includes("level") || lower.includes("current")) {
+            localStorage.removeItem(key);
+          }
+        });
+        Object.keys(sessionStorage).forEach((key) => {
+          const lower = key.toLowerCase();
+          if (lower.includes("signal") || lower.includes("reason") || lower.includes("level") || lower.includes("current")) {
+            sessionStorage.removeItem(key);
+          }
+        });
+        localStorage.setItem(AI_RUNTIME_CACHE_VERSION_KEY, AI_RUNTIME_CACHE_VERSION);
+      }
       localStorage.removeItem(UPSTOX_CONNECTED_FLAG_KEY);
       localStorage.removeItem("zenith-upstox-oauth-code");
       localStorage.removeItem("zenith-upstox-oauth-state");
@@ -697,6 +781,7 @@ const Index = () => {
     setOauthCode("");
     setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
     setSystemStatus(null);
+    clearAiRuntimeState();
   }, []);
 
   useEffect(() => {
@@ -747,7 +832,8 @@ const Index = () => {
         });
         if (sr.ok) {
           const sd = await sr.json().catch(() => null);
-          const m = String(sd?.mode ?? sd?.current_mode ?? "").toUpperCase();
+          const autoMode = typeof sd?.auto_mode === "boolean" ? (sd.auto_mode ? "AUTO" : "MANUAL") : "";
+          const m = String(sd?.mode ?? sd?.current_mode ?? sd?.trading_mode ?? autoMode).toUpperCase();
           if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
         }
       } catch {
@@ -1807,11 +1893,19 @@ const Index = () => {
       const srLooksStale =
         (sup !== null && Math.abs(value - sup) > SR_STALE_DISTANCE_PTS) ||
         (res !== null && Math.abs(value - res) > SR_STALE_DISTANCE_PTS);
-      if (anchor === null) levelsAnchorLtpRef.current = value;
+      if (srLooksStale) {
+        clearAiRuntimeState();
+        levelsAnchorLtpRef.current = value;
+        if (aiEnabled && !tradingBlocked && !aiAnalysisInFlightRef.current) {
+          lastForcedAiAtRef.current = Date.now();
+          runTradingCycle().catch(() => {});
+        }
+      } else if (anchor === null) levelsAnchorLtpRef.current = value;
       else if (
         (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
         aiEnabled &&
         !tradingBlocked &&
+        !aiAnalysisInFlightRef.current &&
         Date.now() - lastForcedAiAtRef.current > 15_000
       ) {
         levelsAnchorLtpRef.current = value;
@@ -1960,29 +2054,40 @@ const Index = () => {
   };
 
   const runTradingCycle = async () => {
+    if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
-    if (!upstoxReady) {
-      const status = await retestUpstox(true);
-      if (!status.upstox.ok) return;
+    aiAnalysisInFlightRef.current = true;
+    try {
+      if (!upstoxReady) {
+        const status = await retestUpstox(true);
+        if (!status.upstox.ok) return;
+      }
+      clearAiRuntimeState();
+      const liveMarket = await fetchLiveNifty(false, true);
+      const liveSpot = toNumber(liveMarket?.ltp);
+      const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
+      const ai = await withTimeout(
+        invokeFunction<{ signal: Signal }>("analyze-with-ai", {
+          tradingMode,
+          tradingLotSize: normalizedTradingLotSize,
+          dailyProfitTarget: normalizedDailyTarget,
+          maxDailyLoss: normalizedMaxDailyLoss,
+          dailyPnl,
+          userTargetPoints: Number(userTargetPoints) || null,
+          userSlPoints: Number(userSlPoints) || null,
+          spotPrice: liveSpot,
+          liveMarket,
+          timestamp: new Date().toISOString(),
+          payloadTimestamp,
+          forceRefresh: true,
+        }),
+        25_000,
+        "OpenAI analysis timed out; continuing Upstox polling.",
+      );
+      applyFreshSignal(ai.signal, liveSpot);
+    } finally {
+      aiAnalysisInFlightRef.current = false;
     }
-    await fetchLiveNifty(false, true);
-    const ai = await withTimeout(
-      invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-        tradingMode,
-        tradingLotSize: normalizedTradingLotSize,
-        dailyProfitTarget: normalizedDailyTarget,
-        maxDailyLoss: normalizedMaxDailyLoss,
-        dailyPnl,
-        userTargetPoints: Number(userTargetPoints) || null,
-        userSlPoints: Number(userSlPoints) || null,
-        spotPrice: Number(latestData?.ltp) || null,
-        timestamp: new Date().toISOString(),
-        forceRefresh: true,
-      }),
-      25_000,
-      "OpenAI analysis timed out; continuing Upstox polling.",
-    );
-    applySniperSignal(ai.signal);
   };
 
   const executeTradingSignal = async () => {
@@ -2366,25 +2471,9 @@ const Index = () => {
     if (session && aiEnabled) {
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        withTimeout(
-          invokeFunction<{ signal: Signal }>("analyze-with-ai", {
-            tradingMode,
-            tradingLotSize: normalizedTradingLotSize,
-            dailyProfitTarget: normalizedDailyTarget,
-            maxDailyLoss: normalizedMaxDailyLoss,
-            dailyPnl,
-            userTargetPoints: Number(userTargetPoints) || null,
-            userSlPoints: Number(userSlPoints) || null,
-            spotPrice: Number(latestData?.ltp) || null,
-            timestamp: new Date().toISOString(),
-            forceRefresh: true,
-          }),
-          25_000,
-          "OpenAI analysis timed out; continuing Upstox polling.",
-        )
-          .then((ai) => applySniperSignal(ai.signal))
+        runTradingCycle()
           .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 1-minute poll."),
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 5-second poll."),
           );
       }, AI_REASONING_INTERVAL_MS);
     }
