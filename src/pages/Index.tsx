@@ -862,6 +862,10 @@ const Index = () => {
           const autoMode = typeof sd?.auto_mode === "boolean" ? (sd.auto_mode ? "AUTO" : "MANUAL") : "";
           const m = String(sd?.mode ?? sd?.current_mode ?? sd?.trading_mode ?? autoMode).toUpperCase();
           if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
+          // If backend healthy but didn't report a mode, default to WAIT (not UNKNOWN).
+          else setBackendMode((prev) => (prev === "AUTO" || prev === "MANUAL" ? prev : "WAIT"));
+        } else {
+          setBackendMode((prev) => (prev === "AUTO" || prev === "MANUAL" ? prev : "WAIT"));
         }
       } catch {
         /* mode sync is best-effort; ignore failures */
