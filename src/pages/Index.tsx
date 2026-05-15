@@ -2480,10 +2480,15 @@ const Index = () => {
     if (session && aiEnabled) {
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        runTradingCycle()
-          .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 5-second poll."),
+        runTradingCycle().catch((error) => {
+          // Do NOT show destructive popup if AI reasoning endpoint fails —
+          // the dashboard keeps polling Upstox and shows "Waiting for fresh
+          // market analysis…" instead of crashing the UI.
+          console.warn(
+            "[AI_REASONING] cycle failed — will retry next tick:",
+            error instanceof Error ? error.message : error,
           );
+        });
       }, AI_REASONING_INTERVAL_MS);
     }
     return () => {
