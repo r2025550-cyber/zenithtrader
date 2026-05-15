@@ -396,6 +396,10 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
+  // even across temporary VPS unreachable errors.
+  const executionStateRef = useRef<ExecutionState>("IDLE");
+  const vpsOfflineSinceRef = useRef<number | null>(null);
   // Session-restore guards: prevent the "Saved Upstox access token found…" flow
   // from spamming /system-status calls and re-triggering the AI loop on every render.
   const sessionRestoreInFlightRef = useRef<Promise<UpstoxStatus | null> | null>(null);
