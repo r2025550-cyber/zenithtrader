@@ -718,7 +718,8 @@ const Index = () => {
     localStorage.setItem(VPS_STATUS_ENDPOINT_STORAGE_KEY, vpsStatusEndpoint);
   }, [vpsStatusEndpoint]);
 
-  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
+  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge
+  // and keeps backendMode (AUTO/MANUAL) in sync via /status.
   useEffect(() => {
     const ping = async () => {
       try {
@@ -736,6 +737,21 @@ const Index = () => {
       } catch (err) {
         setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+      }
+      // Independent /status fetch to refresh trading mode (never affects tunnel/backend-online state).
+      try {
+        const sr = await fetch(`${normalizedVpsBaseUrl}/status`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (sr.ok) {
+          const sd = await sr.json().catch(() => null);
+          const m = String(sd?.mode ?? sd?.current_mode ?? "").toUpperCase();
+          if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
+        }
+      } catch {
+        /* mode sync is best-effort; ignore failures */
       }
     };
     ping();
