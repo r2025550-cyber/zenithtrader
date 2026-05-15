@@ -2325,9 +2325,67 @@ const Index = () => {
         detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
         data: orderPayload,
       });
-      const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+
+      // ====== Execution state machine + retry queue (3 attempts, expo backoff) ======
+      const setExecState = (s: ExecutionState, err: string | null = null) => {
+        executionStateRef.current = s;
+        setExecutionState(s);
+        setExecutionError(err);
+      };
+      setExecState("PENDING");
+      console.log("[VPS CONNECT] target", normalizedVpsBaseUrl);
+
+      let liveOrder: LiveOrderResult | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= EXEC_MAX_ATTEMPTS; attempt++) {
+        setExecutionAttempt(attempt);
+        setExecState("SENDING");
+        // Extend signal lock so AI loop cannot replace the in-flight signal during retries.
+        if (signalLockRef.current) {
+          signalLockRef.current.lockedUntil = Date.now() + SIGNAL_LOCK_MS;
+        }
+        console.log(`[ORDER SEND] attempt ${attempt}/${EXEC_MAX_ATTEMPTS}`, {
+          action: orderPayload.action,
+          strike: suggestedStrike,
+        });
+        try {
+          if (tunnelOnline) setExecState("VPS_CONNECTED");
+          setExecState("EXECUTING");
+          liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+          break;
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
+          if (attempt < EXEC_MAX_ATTEMPTS) {
+            setExecState("FAILED", msg);
+            await new Promise((r) => setTimeout(r, EXEC_BACKOFF_MS[attempt - 1] ?? 4_000));
+          } else {
+            console.error("[ORDER FAIL] giving up after", attempt, "attempts:", msg);
+          }
+        }
+      }
+
+      if (!liveOrder) {
+        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+        setExecState("FAILED", msg);
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: "ORDER FAILED (retries exhausted)",
+          detail: msg,
+        });
+        toast({
+          title: "Live execution failed",
+          description: `${msg} — signal kept; will retry on next cycle.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       setLastExecution(liveOrder);
       if (!liveOrder.success) {
+        setExecState("FAILED", liveOrder.error ?? "blocked");
         pushDebug({
           stage: "ERROR",
           level: "error",
@@ -2342,6 +2400,7 @@ const Index = () => {
         });
         return;
       }
+      setExecState("FILLED");
       pushDebug({
         stage: "ORDER",
         level: "success",
