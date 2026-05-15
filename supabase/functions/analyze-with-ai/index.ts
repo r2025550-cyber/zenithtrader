@@ -909,9 +909,29 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       tradeGapMinutes: Math.round(minutesSinceLastTrade === Infinity ? -1 : minutesSinceLastTrade),
     };
 
+    // Validate market_data_id is a real DB row id (UUID-shaped). liveMarket payloads
+    // from the frontend may not have a valid id and would otherwise fail the FK.
+    const latestId = (latest as any)?.id;
+    const safeMarketDataId =
+      typeof latestId === "string" && /^[0-9a-f-]{36}$/i.test(latestId) ? latestId : null;
+
+    console.log("[AI RAW]", { aiText: aiText.slice(0, 500), action, strikeLabel });
+    console.log("[AI PARSED]", {
+      support: pa.support, resistance: pa.resistance, ltp: pa.ltp,
+      ema21: pa.ema21, ema21Slope: pa.ema21Slope,
+      momentumBull: pa.momentumBull, momentumBear: pa.momentumBear,
+      trendUp: pa.trendUp, trendDown: pa.trendDown,
+      conviction, action,
+    });
+    if (action === "BUY" || action === "SELL") {
+      console.log("[SIGNAL GENERATED]", { action, strike: strikeLabel, conviction, entry, stopLoss, target });
+    } else {
+      console.log("[NO TRADE CONDITIONS]", { reason: reasonParts.join(" ") });
+    }
+
     const { data, error } = await auth.adminClient.from("ai_trade_signals").insert({
       user_id: auth.user.id,
-      market_data_id: latest.id,
+      market_data_id: safeMarketDataId,
       action: signal.action,
       strike: signal.strike,
       reason: signal.reason,
@@ -1027,22 +1047,42 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       },
     });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "AI analysis failed";
-    console.error("[analyze-with-ai] fallback triggered:", reason, error instanceof Error ? error.stack : undefined);
+    const reason =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : (error as any)?.message ?? (error as any)?.error_description ?? "AI analysis failed";
+    let detail: string = "";
+    try { detail = JSON.stringify(error, Object.getOwnPropertyNames(error as any)); } catch { detail = String(error); }
+    console.error("[AI FALLBACK] analyze-with-ai failed:", reason, detail);
+
+    // Attempt to read the live spot from the request body for fallback S/R generation.
+    let fbSpot: number | null = null;
+    try {
+      const cloned = (error as any)?.__body ?? null;
+      if (cloned && typeof cloned === "object") fbSpot = num((cloned as any).spotPrice);
+    } catch { /* ignore */ }
+    // Body wasn't captured — derive nothing more; frontend will pass spot on next cycle.
+    const fbSupport = fbSpot !== null ? Number((fbSpot - FALLBACK_SR_DISTANCE_PTS).toFixed(2)) : null;
+    const fbResistance = fbSpot !== null ? Number((fbSpot + FALLBACK_SR_DISTANCE_PTS).toFixed(2)) : null;
+
     return json({
       fallback: true,
       mode: "WAIT",
       action: "WAIT",
-      reasoning: "Waiting for fresh market analysis...",
-      reason: "Waiting for fresh market analysis...",
-      support: null,
-      resistance: null,
-      ltp: null,
+      reasoning: "Price consolidating — waiting for fresh market analysis.",
+      reason: "Price consolidating — waiting for fresh market analysis.",
+      support: fbSupport,
+      resistance: fbResistance,
+      ltp: fbSpot,
       confidence: "LOW",
       conviction: "LOW",
       strike: null,
       error: reason,
+      errorDetail: detail.slice(0, 500),
       analysisTimestamp: new Date().toISOString(),
+      version: "fallback-v2",
     }, 200);
   }
 });
