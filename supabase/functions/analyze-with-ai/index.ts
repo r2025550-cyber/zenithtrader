@@ -638,6 +638,14 @@ serve(async (req) => {
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
     }
 
+    // ===== v8 SIGNAL COOLDOWN ENFORCEMENT =====
+    // After candidate action is decided, if same direction was issued in the
+    // last SIGNAL_COOLDOWN_SEC, suppress to WAIT. Prevents spam/duplicate signals.
+    if (action !== "WAIT" && cooldownActive && lastSignalAction === action) {
+      reasonParts.unshift(`Signal cooldown: same ${action} signal issued ${Math.round(secsSinceLastSignal)}s ago (cooldown ${SIGNAL_COOLDOWN_SEC}s).`);
+      action = "WAIT";
+    }
+
     if (gapBypassedByReEntry && action !== "WAIT") {
       reasonParts.push(`(Re-entry: trend ${pa.trendUp ? "UP" : "DOWN"} still valid, gap bypassed.)`);
     }
