@@ -1005,15 +1005,92 @@ async def set_mode(target: str):
 
 @router.post("/place-live-order")
 async def place_live_order(req: Request):
+    """
+    Accepts EITHER:
+      A) Raw Upstox /v2/order/place payload (instrument_token, transaction_type, ...)
+      B) Supabase-style payload from frontend:
+         { action: "BUY"|"SELL", spotPrice, strike?, tradingLotSize, effectiveLotSize?, ... }
+         → resolves CE (BUY) or PE (SELL) for the requested/ATM strike, sets
+           transaction_type=BUY (option-buying), MARKET order.
+    Validates everything before hitting Upstox so we never send a 400-prone payload.
+    """
     body = await _read_json(req)
     headers = {**_auth_headers(), "Content-Type": "application/json"}
+
+    upstox_payload: Dict[str, Any]
+    resolved_meta: Optional[Dict[str, Any]] = None
+
+    # --- Mode A: raw Upstox payload pass-through ---
+    if body.get("instrument_token") and body.get("transaction_type"):
+        upstox_payload = body
+    else:
+        # --- Mode B: Supabase-style payload — translate ---
+        action = str(body.get("action") or "").upper()
+        if action not in ("BUY", "SELL"):
+            raise HTTPException(status_code=400, detail="action must be BUY or SELL")
+        spot_price = _num(body.get("spotPrice"), body.get("spot_price"))
+        if spot_price is None or spot_price <= 0:
+            raise HTTPException(status_code=400, detail="spotPrice is required and must be > 0")
+        trading_lot_size = body.get("effectiveLotSize") or body.get("tradingLotSize")
+        try:
+            trading_lot_size = int(trading_lot_size)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="tradingLotSize/effectiveLotSize must be a positive integer")
+        if trading_lot_size <= 0:
+            raise HTTPException(status_code=400, detail="lot size must be > 0")
+        requested_strike = _num(body.get("strike"))
+        target_strike = float(requested_strike) if requested_strike else round(spot_price / 50.0) * 50.0
+
+        resolved_meta = await _resolve_option_token(headers, target_strike, action)
+        if not resolved_meta.get("instrumentToken"):
+            raise HTTPException(status_code=400, detail="Could not resolve option instrument token")
+
+        quantity = trading_lot_size * NIFTY_LOT_SIZE
+        if quantity <= 0:
+            raise HTTPException(status_code=400, detail="quantity computed as 0")
+
+        upstox_payload = {
+            "quantity": quantity,
+            "product": "D",
+            "validity": "DAY",
+            "price": 0,
+            "tag": body.get("tag") or "zenith-vps-live",
+            "instrument_token": resolved_meta["instrumentToken"],
+            "order_type": "MARKET",
+            "transaction_type": "BUY",   # always BUY — CE for BUY signal, PE for SELL signal
+            "disclosed_quantity": 0,
+            "trigger_price": 0,
+            "is_amo": False,
+        }
+
     async with _client() as client:
-        resp = await client.post("https://api.upstox.com/v2/order/place", json=body, headers=headers)
+        resp = await client.post("https://api.upstox.com/v2/order/place", json=upstox_payload, headers=headers)
     try:
         payload = resp.json()
     except ValueError:
         payload = {}
-    return JSONResponse(payload, status_code=resp.status_code)
+    if resp.status_code >= 400:
+        return JSONResponse(
+            {
+                "success": False,
+                "error": payload.get("errors") or payload.get("error") or f"Upstox HTTP {resp.status_code}",
+                "details": payload,
+                "instrument": resolved_meta,
+                "sentPayload": upstox_payload,
+            },
+            status_code=resp.status_code,
+        )
+    return JSONResponse(
+        {
+            "success": True,
+            "order": payload,
+            "instrument": resolved_meta,
+            "instrumentToken": upstox_payload.get("instrument_token"),
+            "quantity": upstox_payload.get("quantity"),
+            "execution": {"orderPlaced": True, "orderFilled": False, "slActive": False, "trailingActive": False},
+        },
+        status_code=200,
+    )
 
 
 @router.post("/modify-stop-loss-order")

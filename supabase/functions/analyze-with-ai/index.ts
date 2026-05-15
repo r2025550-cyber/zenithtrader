@@ -495,14 +495,14 @@ serve(async (req) => {
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
 
-    // AGGRESSIVE ENTRY MODE
-    if (pa.momentumBull || pa.emaBullish || pa.trendUp) {
-      action = "BUY";
-    }
+    // ===== v8 SIGNAL COOLDOWN =====
+    // Same-direction BUY/SELL cannot repeat within SIGNAL_COOLDOWN_SEC.
+    // This prevents the spammy 4-5s repeat signals seen in v7.
+    const SIGNAL_COOLDOWN_SEC = 90;
+    const lastSignalAction = (todayTrades[0]?.action as "BUY" | "SELL" | undefined) ?? null;
+    const secsSinceLastSignal = lastTradeAt ? (Date.now() - lastTradeAt) / 1000 : Infinity;
+    const cooldownActive = lastSignalAction !== null && secsSinceLastSignal < SIGNAL_COOLDOWN_SEC;
 
-    if (pa.momentumBear || pa.emaBearish || pa.trendDown) {
-      action = "SELL";
-    }
     const reasonParts: string[] = [];
 
     // Setup detection (v3 retained)
@@ -636,6 +636,14 @@ serve(async (req) => {
     } else {
       const wickNote = pa.longUpperWick ? " upper-wick rejected" : pa.longLowerWick ? " lower-wick rejected" : "";
       reasonParts.push(`No qualifying setup. S=${pa.support?.toFixed(2) ?? "—"} R=${pa.resistance?.toFixed(2) ?? "—"} LTP=${pa.ltp?.toFixed(2) ?? "—"}${wickNote}.`);
+    }
+
+    // ===== v8 SIGNAL COOLDOWN ENFORCEMENT =====
+    // After candidate action is decided, if same direction was issued in the
+    // last SIGNAL_COOLDOWN_SEC, suppress to WAIT. Prevents spam/duplicate signals.
+    if (action !== "WAIT" && cooldownActive && lastSignalAction === action) {
+      reasonParts.unshift(`Signal cooldown: same ${action} signal issued ${Math.round(secsSinceLastSignal)}s ago (cooldown ${SIGNAL_COOLDOWN_SEC}s).`);
+      action = "WAIT";
     }
 
     if (gapBypassedByReEntry && action !== "WAIT") {

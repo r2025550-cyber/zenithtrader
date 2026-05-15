@@ -2206,6 +2206,17 @@ const Index = () => {
   const executeTradingSignal = async () => {
     setIsBusy(true);
     try {
+      // ===== ACTIVE POSITION LOCK =====
+      // Block new entries (AUTO or manual force-trade) while a trade is open
+      // or while an order is mid-flight. Unlock only on SL/target/manual exit.
+      if (activeTrade || isExecutionActive()) {
+        toast({
+          title: "Trade already active",
+          description: "Wait for SL hit, target hit, or manual exit before a new entry.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (!upstoxReady) {
         const status = await retestUpstox(true);
         if (!status.upstox.ok) return;
