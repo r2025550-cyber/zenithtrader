@@ -474,6 +474,9 @@ const Index = () => {
   const [tunnelOnline, setTunnelOnline] = useState<boolean | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [executionState, setExecutionState] = useState<ExecutionState>("IDLE");
+  const [executionAttempt, setExecutionAttempt] = useState(0);
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
   const [ceSeries, setCeSeries] = useState<MarketPoint[]>([]);
