@@ -1245,7 +1245,7 @@ const Index = () => {
       ]
         .filter(Boolean)
         .join(" · ");
-      return `Current Mode: ${modeLabel} — ${latestSignal.action === "WAIT" ? "WAITING FOR CONFIRMATION" : `${latestSignal.action} LOCKED`} ${latestSignal.strike} · ${latestSignal.conviction ?? "MEDIUM"} Conviction${triggered ? ` · ${triggered}` : ""} — ${latestSignal.reason}`;
+      return `Current Mode: ${modeLabel} — ${safeAction === "WAIT" ? "WAITING FOR CONFIRMATION" : `${safeAction} LOCKED`} ${safeStrike} · ${safeConviction} Conviction${triggered ? ` · ${triggered}` : ""} — ${safeReason}`;
     }
     if (targetAchieved)
       return `Current Mode: ${modeLabel} — Target Achieved: daily profit goal reached. AI trading is stopped for the day.`;
@@ -1258,6 +1258,10 @@ const Index = () => {
     if (riskMode === "aggressive")
       return `Current Mode: ${modeLabel} — AI loop armed: scanning momentum breakouts with tight VWAP risk control.`;
     return `Current Mode: ${modeLabel} — AI loop armed: streaming Upstox prices every 5 seconds while OpenAI confirms trend every 30 seconds.`;
+    } catch (err) {
+      console.warn("[AI_REASONING] render fallback", err);
+      return "Waiting for fresh market analysis…";
+    }
   }, [aiEnabled, hardKillActive, latestSignal, riskMode, targetAchieved, modeLabel, tradingMode]);
 
   const signIn = async (event: FormEvent) => {
