@@ -1885,11 +1885,15 @@ const Index = () => {
       const srLooksStale =
         (sup !== null && Math.abs(value - sup) > SR_STALE_DISTANCE_PTS) ||
         (res !== null && Math.abs(value - res) > SR_STALE_DISTANCE_PTS);
-      if (anchor === null) levelsAnchorLtpRef.current = value;
+      if (srLooksStale) {
+        clearAiRuntimeState();
+        levelsAnchorLtpRef.current = value;
+      } else if (anchor === null) levelsAnchorLtpRef.current = value;
       else if (
         (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
         aiEnabled &&
         !tradingBlocked &&
+        !aiAnalysisInFlightRef.current &&
         Date.now() - lastForcedAiAtRef.current > 15_000
       ) {
         levelsAnchorLtpRef.current = value;
