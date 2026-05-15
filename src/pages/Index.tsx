@@ -3828,7 +3828,16 @@ const Index = () => {
                 <Activity className="h-5 w-5" />
                 <h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2>
               </div>
-              <p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>{reasoning}</p>
+              <p className={`min-h-20 rounded-md border bg-surface p-4 text-sm leading-6 ${aiTextTone}`}>
+                {(() => {
+                  try {
+                    const text = typeof reasoning === "string" ? reasoning.trim() : "";
+                    return text.length > 0 ? text : "Waiting for fresh market analysis…";
+                  } catch {
+                    return "Waiting for fresh market analysis…";
+                  }
+                })()}
+              </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-surface p-3">
                   <div className="mb-2 flex items-center justify-between text-sm">
