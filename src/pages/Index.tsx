@@ -2790,6 +2790,21 @@ const Index = () => {
                   />
                   {tunnelOnline ? "VPS TUNNEL ACTIVE" : tunnelOnline === false ? "VPS TUNNEL DOWN" : "VPS TUNNEL ?"}
                 </span>
+                {executionState !== "IDLE" && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase ${
+                      executionState === "FAILED"
+                        ? "border-loss/40 bg-loss/10 text-loss"
+                        : executionState === "FILLED"
+                          ? "border-profit/40 bg-profit/10 text-profit"
+                          : "border-warning/40 bg-warning/10 text-warning animate-pulse"
+                    }`}
+                    title={executionError ?? undefined}
+                  >
+                    EXEC: {executionState}
+                    {executionAttempt > 0 && executionState !== "FILLED" ? ` · ${executionAttempt}/${EXEC_MAX_ATTEMPTS}` : ""}
+                  </span>
+                )}
               </div>
             </div>
             <div className="rounded-md border border-border bg-surface px-4 py-3">
