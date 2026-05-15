@@ -106,7 +106,11 @@ const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
-const AI_REASONING_INTERVAL_MS = 30_000;
+const AI_REASONING_INTERVAL_MS = 60_000;
+// Force fresh AI analysis when spot drifts >50pts from anchor (per spec).
+const AI_SPOT_DRIFT_TRIGGER_PTS = 50;
+// Treat cached S/R as stale when level is implausibly far from current spot.
+const SR_STALE_DISTANCE_PTS = 200;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
@@ -542,13 +546,20 @@ const Index = () => {
   const pdhVal = toNumber(yesterdayLevels?.pdh);
   const pdlVal = toNumber(yesterdayLevels?.pdl);
   const pdcVal = toNumber(yesterdayLevels?.pdc);
-  const immediateSupport = toNumber(
+  const rawImmediateSupport = toNumber(
     (latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15,
   );
-  const immediateResistance = toNumber(
+  const rawImmediateResistance = toNumber(
     (latestSignal?.ruleContext?.rules as any)?.immediateResistance ??
       (latestSignal?.ruleContext?.rules as any)?.resistance15,
   );
+  // Hide S/R when implausibly far from current spot — prevents stale session levels from misleading.
+  const srStale =
+    Number.isFinite(latestLtp) &&
+    ((rawImmediateSupport !== null && Math.abs(latestLtp - rawImmediateSupport) > SR_STALE_DISTANCE_PTS) ||
+      (rawImmediateResistance !== null && Math.abs(latestLtp - rawImmediateResistance) > SR_STALE_DISTANCE_PTS));
+  const immediateSupport = srStale ? null : rawImmediateSupport;
+  const immediateResistance = srStale ? null : rawImmediateResistance;
   const pdhY =
     pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
   const pdlY =
@@ -707,7 +718,8 @@ const Index = () => {
     localStorage.setItem(VPS_STATUS_ENDPOINT_STORAGE_KEY, vpsStatusEndpoint);
   }, [vpsStatusEndpoint]);
 
-  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge.
+  // VPS tunnel health ping — every 5s. Drives the green "VPS TUNNEL ACTIVE" badge
+  // and keeps backendMode (AUTO/MANUAL) in sync via /status.
   useEffect(() => {
     const ping = async () => {
       try {
@@ -725,6 +737,21 @@ const Index = () => {
       } catch (err) {
         setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+      }
+      // Independent /status fetch to refresh trading mode (never affects tunnel/backend-online state).
+      try {
+        const sr = await fetch(`${normalizedVpsBaseUrl}/status`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (sr.ok) {
+          const sd = await sr.json().catch(() => null);
+          const m = String(sd?.mode ?? sd?.current_mode ?? "").toUpperCase();
+          if (m === "AUTO" || m === "MANUAL") setBackendMode(m as "AUTO" | "MANUAL");
+        }
+      } catch {
+        /* mode sync is best-effort; ignore failures */
       }
     };
     ping();
@@ -1771,11 +1798,18 @@ const Index = () => {
       }
       if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
       if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
-      // Force a fresh AI cycle when price moves >15pts from anchor (re-baseline immediate S/R reasoning)
+      // Force a fresh AI cycle when:
+      //  • spot drifts >AI_SPOT_DRIFT_TRIGGER_PTS from anchor, OR
+      //  • cached S/R is implausibly far from live spot (stale session levels).
       const anchor = levelsAnchorLtpRef.current;
+      const sup = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport);
+      const res = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance);
+      const srLooksStale =
+        (sup !== null && Math.abs(value - sup) > SR_STALE_DISTANCE_PTS) ||
+        (res !== null && Math.abs(value - res) > SR_STALE_DISTANCE_PTS);
       if (anchor === null) levelsAnchorLtpRef.current = value;
       else if (
-        Math.abs(value - anchor) > 15 &&
+        (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
         aiEnabled &&
         !tradingBlocked &&
         Date.now() - lastForcedAiAtRef.current > 15_000
@@ -1941,6 +1975,9 @@ const Index = () => {
         dailyPnl,
         userTargetPoints: Number(userTargetPoints) || null,
         userSlPoints: Number(userSlPoints) || null,
+        spotPrice: Number(latestData?.ltp) || null,
+        timestamp: new Date().toISOString(),
+        forceRefresh: true,
       }),
       25_000,
       "OpenAI analysis timed out; continuing Upstox polling.",
@@ -2022,6 +2059,22 @@ const Index = () => {
           description: "Cannot place a live order until Nifty spot is available.",
           variant: "destructive",
         });
+        return;
+      }
+      // Block AUTO/manual execution if locked signal's S/R is implausibly far from live spot.
+      const lockedRules: any = lockedSignal.ruleContext?.rules ?? {};
+      const lockedSup = toNumber(lockedRules.immediateSupport ?? lockedRules.support15);
+      const lockedRes = toNumber(lockedRules.immediateResistance ?? lockedRules.resistance15);
+      const srStaleVsLive =
+        (lockedSup !== null && Math.abs(liveSpot - lockedSup) > SR_STALE_DISTANCE_PTS) ||
+        (lockedRes !== null && Math.abs(liveSpot - lockedRes) > SR_STALE_DISTANCE_PTS);
+      if (srStaleVsLive) {
+        toast({
+          title: "Stale S/R levels — execution blocked",
+          description: `Signal levels are >${SR_STALE_DISTANCE_PTS}pt from live spot ${liveSpot.toFixed(2)}. Forcing fresh AI analysis.`,
+          variant: "destructive",
+        });
+        runTradingCycle().catch(() => {});
         return;
       }
       const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
@@ -2322,13 +2375,16 @@ const Index = () => {
             dailyPnl,
             userTargetPoints: Number(userTargetPoints) || null,
             userSlPoints: Number(userSlPoints) || null,
+            spotPrice: Number(latestData?.ltp) || null,
+            timestamp: new Date().toISOString(),
+            forceRefresh: true,
           }),
           25_000,
           "OpenAI analysis timed out; continuing Upstox polling.",
         )
           .then((ai) => applySniperSignal(ai.signal))
           .catch((error) =>
-            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 30-second poll."),
+            showRetryToast(error instanceof Error ? error.message : "OpenAI reasoning will retry on the next 1-minute poll."),
           );
       }, AI_REASONING_INTERVAL_MS);
     }
@@ -3707,7 +3763,8 @@ const Index = () => {
               <h2 className="text-xl font-semibold">Current Levels</h2>
             </div>
             <span className="text-xs text-muted-foreground">
-              Auto-refresh every 1m · forced re-analysis on &gt;15pt move
+              Auto-refresh every 1m · forced re-analysis on &gt;{AI_SPOT_DRIFT_TRIGGER_PTS}pt move or stale S/R
+              {srStale ? " · stale levels hidden" : ""}
               {yesterdayLevels?.date ? ` · Yesterday ${yesterdayLevels.date}` : ""}
             </span>
           </div>
