@@ -373,6 +373,7 @@ const Index = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const retryToastRef = useRef(0);
   const marketPollInFlightRef = useRef(false);
+  const aiAnalysisInFlightRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
