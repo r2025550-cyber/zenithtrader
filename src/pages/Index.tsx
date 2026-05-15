@@ -2527,12 +2527,21 @@ const Index = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, normalizedTradingLotSize, totalTradingQuantity, normalizedVpsBaseUrl]);
 
+  // Keep latest runTradingCycle in a ref so the interval doesn't tear down on
+  // every render (dailyPnl, lot size, etc. previously caused the AI loop to
+  // restart constantly, making reasoning appear frozen).
+  const runTradingCycleRef = useRef(runTradingCycle);
+  useEffect(() => {
+    runTradingCycleRef.current = runTradingCycle;
+  });
+
   useEffect(() => {
     if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
     if (session && aiEnabled) {
+      console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        runTradingCycle().catch((error) => {
+        runTradingCycleRef.current().catch((error) => {
           // Do NOT show destructive popup if AI reasoning endpoint fails —
           // the dashboard keeps polling Upstox and shows "Waiting for fresh
           // market analysis…" instead of crashing the UI.
@@ -2544,20 +2553,12 @@ const Index = () => {
       }, AI_REASONING_INTERVAL_MS);
     }
     return () => {
-      if (aiIntervalRef.current) clearInterval(aiIntervalRef.current);
+      if (aiIntervalRef.current) {
+        clearInterval(aiIntervalRef.current);
+        console.log("[AI_REASONING] interval stopped");
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    session,
-    aiEnabled,
-    tradingBlocked,
-    normalizedTradingLotSize,
-    normalizedDailyTarget,
-    normalizedMaxDailyLoss,
-    dailyPnl,
-    userTargetPoints,
-    userSlPoints,
-  ]);
+  }, [session, aiEnabled, tradingBlocked]);
 
   useEffect(() => {
     if (!session) return;
