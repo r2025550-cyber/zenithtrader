@@ -542,9 +542,12 @@ const Index = () => {
       clearAiRuntimeState();
       return;
     }
-    const locked = signalLockRef.current;
+    let locked = signalLockRef.current;
     const now = Date.now();
-    if (locked && isSignalStaleVsSpot(locked.signal)) signalLockRef.current = null;
+    if (locked && isSignalStaleVsSpot(locked.signal)) {
+      signalLockRef.current = null;
+      locked = null;
+    }
     if (locked && now < locked.lockedUntil) {
       const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
       const majorBreak =
