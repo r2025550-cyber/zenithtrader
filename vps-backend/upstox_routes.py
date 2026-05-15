@@ -891,13 +891,53 @@ async def get_funds():
 # fetch-option-premium — returns { premium, instrument: { tradingSymbol } }
 # ---------------------------------------------------------------------------
 
+async def _resolve_option_token(headers: Dict[str, str], strike: float, action: str) -> Dict[str, Any]:
+    option_type = "CE" if str(action).upper() == "BUY" else "PE"
+    async with _client() as c:
+        r = await c.get(
+            f"https://api.upstox.com/v2/option/contract?instrument_key={quote(INSTRUMENT_KEY, safe='')}",
+            headers=headers,
+        )
+    payload = {}
+    try:
+        payload = r.json()
+    except ValueError:
+        pass
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=f"option contract lookup failed: {payload}")
+    rows = payload.get("data") or []
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    expiries = sorted({str(row.get("expiry") or row.get("expiry_date") or "") for row in rows if row.get("expiry") or row.get("expiry_date")})
+    expiry = next((e for e in expiries if e >= today), expiries[0] if expiries else "")
+    selected = None
+    for row in rows:
+        row_expiry = str(row.get("expiry") or row.get("expiry_date") or "")
+        row_type = str(row.get("instrument_type") or row.get("option_type") or row.get("optionType") or "").upper()
+        row_strike = _num(row.get("strike_price"), row.get("strikePrice"), row.get("strike"))
+        if row_expiry == expiry and option_type in row_type and row_strike == float(strike):
+            selected = row
+            break
+    if not selected:
+        raise HTTPException(status_code=400, detail=f"Nifty {strike} {option_type} contract not found for expiry {expiry}")
+    token = selected.get("instrument_key") or selected.get("instrumentKey") or selected.get("instrument_token") or selected.get("instrumentToken")
+    if not token:
+        raise HTTPException(status_code=400, detail=f"Nifty {strike} {option_type} missing instrument_key")
+    return {"instrumentToken": str(token), "tradingSymbol": f"Nifty {int(strike)} {option_type}", "strike": float(strike), "optionType": option_type}
+
+
 @router.post("/fetch-option-premium")
 async def fetch_option_premium(req: Request):
     body = await _read_json(req)
     instrument_token = body.get("instrumentToken") or body.get("instrumentKey") or body.get("instrument_key")
-    if not instrument_token:
-        raise HTTPException(status_code=400, detail="instrumentToken is required")
     headers = _auth_headers()
+    resolved_instrument: Optional[Dict[str, Any]] = None
+    if not instrument_token:
+        strike = _num(body.get("strike"))
+        action = str(body.get("action") or "").upper()
+        if strike is None or action not in ("BUY", "SELL"):
+            raise HTTPException(status_code=400, detail="instrumentToken OR (strike + action BUY/SELL) is required")
+        resolved_instrument = await _resolve_option_token(headers, strike, action)
+        instrument_token = resolved_instrument["instrumentToken"]
     async with _client() as client:
         r = await client.get(
             f"https://api.upstox.com/v2/market-quote/ltp?instrument_key={quote(str(instrument_token), safe='')}",
