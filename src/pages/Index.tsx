@@ -2503,6 +2503,14 @@ const Index = () => {
       });
     } finally {
       setIsBusy(false);
+      // Reset transient execution state after a short delay so the UI shows
+      // FILLED/FAILED briefly before returning to IDLE.
+      window.setTimeout(() => {
+        if (executionStateRef.current === "FILLED" || executionStateRef.current === "FAILED") {
+          executionStateRef.current = "IDLE";
+          setExecutionState("IDLE");
+        }
+      }, 4_000);
     }
   };
 
