@@ -82,10 +82,16 @@ async function syncFastApiMode(target: "auto" | "manual", baseUrl = DEFAULT_FAST
     headers: { Accept: "application/json", "Content-Type": "application/json" },
   });
   if (!res.ok) throw new Error(`Backend ${res.status}`);
-  const statusRes = await fetch(`${apiBase}/status`, { headers: { Accept: "application/json", "Content-Type": "application/json" } });
+  const statusRes = await fetch(`${apiBase}/status`, {
+    method: "GET",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    cache: "no-store",
+  });
   if (!statusRes.ok) throw new Error(`Backend status ${statusRes.status}`);
   const data = await statusRes.json().catch(() => ({}));
-  return { status: String(data?.status ?? "UNKNOWN"), mode: String(data?.mode ?? target.toUpperCase()) };
+  const fallbackMode = target.toUpperCase();
+  const parsedMode = String(data?.mode ?? data?.current_mode ?? data?.trading_mode ?? data?.auto_mode ?? fallbackMode).toUpperCase();
+  return { status: String(data?.status ?? "ONLINE"), mode: parsedMode === "AUTO" || parsedMode === "MANUAL" ? parsedMode : fallbackMode };
 }
 const UPSTOX_INVALID_CODE_ERROR = "UDAPI100057";
 const UPSTOX_INVALID_TOKEN_ERROR = "UDAPI100050";
