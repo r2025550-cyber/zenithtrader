@@ -1206,18 +1206,37 @@ const Index = () => {
     localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:0`);
   };
 
-  const restoreSavedUpstoxSession = async () => {
-    const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
-      body: { target: "upstox", tokenOnly: true },
+  const restoreSavedUpstoxSession = async (force = false): Promise<UpstoxStatus | null> => {
+    // De-dupe + cache the session-restore call so frontend re-renders, AI cycles
+    // and status checks don't re-spam /system-status (which was causing repeated
+    // "Saved Upstox access token found…" toast spam and AI loop restarts).
+    const cached = sessionRestoreCacheRef.current;
+    if (!force && cached && Date.now() - cached.at < SESSION_RESTORE_TTL_MS) {
+      return cached.data;
+    }
+    if (sessionRestoreInFlightRef.current) return sessionRestoreInFlightRef.current;
+    const p = (async () => {
+      console.log("[AUTH_REFRESH] restoring saved Upstox session (single-flight)");
+      const { data, error } = await supabase.functions.invoke<UpstoxStatus>("system-status", {
+        body: { target: "upstox", tokenOnly: true },
+      });
+      if (error) throw error;
+      if (data?.upstox?.ok) {
+        localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
+        setSystemStatus((prev) => {
+          // Avoid unnecessary re-renders if upstox state hasn't changed.
+          if (prev?.upstox?.ok === data.upstox.ok && prev?.upstox?.message === data.upstox.message) return prev;
+          const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
+          return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
+        });
+      }
+      sessionRestoreCacheRef.current = { at: Date.now(), data: data ?? null };
+      return data ?? null;
+    })().finally(() => {
+      sessionRestoreInFlightRef.current = null;
     });
-    if (error) throw error;
-    if (!data?.upstox?.ok) return data;
-    localStorage.setItem(UPSTOX_CONNECTED_FLAG_KEY, "true");
-    setSystemStatus((prev) => {
-      const gemini = prev?.gemini ?? { ok: false, message: "Run Re-test OpenAI to confirm OpenAI API status." };
-      return { ready: true, upstox: data.upstox, gemini, checkedAt: data.checkedAt };
-    });
-    return data;
+    sessionRestoreInFlightRef.current = p;
+    return p;
   };
 
   const modeLabel = tradingMode === "scalping" ? "Scalping Mode" : "Sniper Mode";
