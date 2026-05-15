@@ -127,8 +127,13 @@ const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
-const SIGNAL_LOCK_MS = 20_000;
-const SIGNAL_STALE_MS = 30_000;
+const SIGNAL_LOCK_MS = 30_000;
+const SIGNAL_STALE_MS = 45_000;
+// Execution retry config — keep locked signal alive across transient VPS hiccups.
+const EXEC_MAX_ATTEMPTS = 3;
+const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
+const VPS_OFFLINE_AUTODISABLE_MS = 60_000;
+type ExecutionState = "IDLE" | "PENDING" | "SENDING" | "VPS_CONNECTED" | "EXECUTING" | "FILLED" | "FAILED";
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -391,6 +396,10 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
+  // even across temporary VPS unreachable errors.
+  const executionStateRef = useRef<ExecutionState>("IDLE");
+  const vpsOfflineSinceRef = useRef<number | null>(null);
   // Session-restore guards: prevent the "Saved Upstox access token found…" flow
   // from spamming /system-status calls and re-triggering the AI loop on every render.
   const sessionRestoreInFlightRef = useRef<Promise<UpstoxStatus | null> | null>(null);
@@ -465,6 +474,9 @@ const Index = () => {
   const [tunnelOnline, setTunnelOnline] = useState<boolean | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [executionState, setExecutionState] = useState<ExecutionState>("IDLE");
+  const [executionAttempt, setExecutionAttempt] = useState(0);
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const [exitFlashUntil, setExitFlashUntil] = useState(0);
   const [marketClock, setMarketClock] = useState(() => new Date());
   const [ceSeries, setCeSeries] = useState<MarketPoint[]>([]);
@@ -535,7 +547,18 @@ const Index = () => {
     );
   };
 
+  // True while an order is being attempted (incl. retry backoff window).
+  const isExecutionActive = () => {
+    const s = executionStateRef.current;
+    return s === "PENDING" || s === "SENDING" || s === "VPS_CONNECTED" || s === "EXECUTING";
+  };
+
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
+    // Freeze signal panel while an execution is in-flight.
+    if (isExecutionActive() && signalLockRef.current) {
+      console.log("[SIGNAL LOCK] suppressed AI overwrite — execution active");
+      return false;
+    }
     const signalSpot = signalLiveSpot(signal);
     if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
       clearAiRuntimeState();
@@ -553,6 +576,10 @@ const Index = () => {
   };
 
   const applySniperSignal = (signal: Signal) => {
+    if (isExecutionActive() && signalLockRef.current) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
+      return;
+    }
     if (isSignalStaleVsSpot(signal)) {
       clearAiRuntimeState();
       return;
@@ -834,6 +861,7 @@ const Index = () => {
   // and keeps backendMode (AUTO/MANUAL) in sync via /status.
   useEffect(() => {
     const ping = async () => {
+      let healthy = false;
       try {
         const method = getStatusEndpointMethod(vpsStatusEndpoint);
         const r = await fetch(`${normalizedVpsBaseUrl}${vpsStatusEndpoint}`, {
@@ -841,6 +869,7 @@ const Index = () => {
           headers: { Accept: "application/json", "Content-Type": "application/json" },
           body: method === "POST" ? JSON.stringify({ target: "upstox" }) : undefined,
         });
+        healthy = r.ok;
         setTunnelOnline(r.ok);
         if (!r.ok) {
           const txt = await r.text().catch(() => "");
@@ -849,6 +878,30 @@ const Index = () => {
       } catch (err) {
         setTunnelOnline(false);
         recordVpsError(`${getStatusEndpointMethod(vpsStatusEndpoint)} ${vpsStatusEndpoint}`, err instanceof Error ? err.message : String(err));
+      }
+      // Track sustained offline duration → auto-disable AUTO trading after 60s.
+      const now = Date.now();
+      if (healthy) {
+        if (vpsOfflineSinceRef.current !== null) {
+          console.log("[TUNNEL STATUS] reconnected after", now - vpsOfflineSinceRef.current, "ms");
+        }
+        vpsOfflineSinceRef.current = null;
+      } else {
+        if (vpsOfflineSinceRef.current === null) {
+          vpsOfflineSinceRef.current = now;
+          console.warn("[TUNNEL STATUS] offline — starting outage timer");
+        } else if (now - vpsOfflineSinceRef.current > VPS_OFFLINE_AUTODISABLE_MS) {
+          if (storedValue(AUTO_TRADE_STORAGE_KEY) === "true") {
+            console.error("[TUNNEL STATUS] offline >60s → disabling AUTO trading");
+            setAutoTradeMode(false);
+            localStorage.setItem(AUTO_TRADE_STORAGE_KEY, "false");
+            toast({
+              title: "AUTO trading disabled",
+              description: "VPS unreachable for >60s. Reconnect tunnel and re-arm AUTO mode.",
+              variant: "destructive",
+            });
+          }
+        }
       }
       // Independent /status fetch to refresh trading mode (never affects tunnel/backend-online state).
       try {
@@ -2272,9 +2325,67 @@ const Index = () => {
         detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
         data: orderPayload,
       });
-      const liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+
+      // ====== Execution state machine + retry queue (3 attempts, expo backoff) ======
+      const setExecState = (s: ExecutionState, err: string | null = null) => {
+        executionStateRef.current = s;
+        setExecutionState(s);
+        setExecutionError(err);
+      };
+      setExecState("PENDING");
+      console.log("[VPS CONNECT] target", normalizedVpsBaseUrl);
+
+      let liveOrder: LiveOrderResult | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= EXEC_MAX_ATTEMPTS; attempt++) {
+        setExecutionAttempt(attempt);
+        setExecState("SENDING");
+        // Extend signal lock so AI loop cannot replace the in-flight signal during retries.
+        if (signalLockRef.current) {
+          signalLockRef.current.lockedUntil = Date.now() + SIGNAL_LOCK_MS;
+        }
+        console.log(`[ORDER SEND] attempt ${attempt}/${EXEC_MAX_ATTEMPTS}`, {
+          action: orderPayload.action,
+          strike: suggestedStrike,
+        });
+        try {
+          if (tunnelOnline) setExecState("VPS_CONNECTED");
+          setExecState("EXECUTING");
+          liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+          break;
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
+          if (attempt < EXEC_MAX_ATTEMPTS) {
+            setExecState("FAILED", msg);
+            await new Promise((r) => setTimeout(r, EXEC_BACKOFF_MS[attempt - 1] ?? 4_000));
+          } else {
+            console.error("[ORDER FAIL] giving up after", attempt, "attempts:", msg);
+          }
+        }
+      }
+
+      if (!liveOrder) {
+        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+        setExecState("FAILED", msg);
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: "ORDER FAILED (retries exhausted)",
+          detail: msg,
+        });
+        toast({
+          title: "Live execution failed",
+          description: `${msg} — signal kept; will retry on next cycle.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       setLastExecution(liveOrder);
       if (!liveOrder.success) {
+        setExecState("FAILED", liveOrder.error ?? "blocked");
         pushDebug({
           stage: "ERROR",
           level: "error",
@@ -2289,6 +2400,7 @@ const Index = () => {
         });
         return;
       }
+      setExecState("FILLED");
       pushDebug({
         stage: "ORDER",
         level: "success",
@@ -2391,6 +2503,14 @@ const Index = () => {
       });
     } finally {
       setIsBusy(false);
+      // Reset transient execution state after a short delay so the UI shows
+      // FILLED/FAILED briefly before returning to IDLE.
+      window.setTimeout(() => {
+        if (executionStateRef.current === "FILLED" || executionStateRef.current === "FAILED") {
+          executionStateRef.current = "IDLE";
+          setExecutionState("IDLE");
+        }
+      }, 4_000);
     }
   };
 
@@ -2670,6 +2790,21 @@ const Index = () => {
                   />
                   {tunnelOnline ? "VPS TUNNEL ACTIVE" : tunnelOnline === false ? "VPS TUNNEL DOWN" : "VPS TUNNEL ?"}
                 </span>
+                {executionState !== "IDLE" && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase ${
+                      executionState === "FAILED"
+                        ? "border-loss/40 bg-loss/10 text-loss"
+                        : executionState === "FILLED"
+                          ? "border-profit/40 bg-profit/10 text-profit"
+                          : "border-warning/40 bg-warning/10 text-warning animate-pulse"
+                    }`}
+                    title={executionError ?? undefined}
+                  >
+                    EXEC: {executionState}
+                    {executionAttempt > 0 && executionState !== "FILLED" ? ` · ${executionAttempt}/${EXEC_MAX_ATTEMPTS}` : ""}
+                  </span>
+                )}
               </div>
             </div>
             <div className="rounded-md border border-border bg-surface px-4 py-3">
