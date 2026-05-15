@@ -433,7 +433,7 @@ const Index = () => {
   const normalizedVpsBaseUrl = getVpsBaseUrl(vpsTunnelUrl);
   const upstoxOAuthRedirectUri = getUpstoxRedirectUri(normalizedVpsBaseUrl);
   const [redirectUriManuallyEdited, setRedirectUriManuallyEdited] = useState(false);
-  const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "UNKNOWN">("UNKNOWN");
+  const [backendMode, setBackendMode] = useState<"AUTO" | "MANUAL" | "WAIT" | "UNKNOWN">("UNKNOWN");
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [vpsSaveStatus, setVpsSaveStatus] = useState<{ ok: boolean; message: string; at: number } | null>(null);
   const [vpsStatusEndpoint, setVpsStatusEndpoint] = useState(() =>
