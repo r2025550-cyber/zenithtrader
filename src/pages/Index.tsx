@@ -127,8 +127,13 @@ const DEFAULT_PREMIUM_TARGET_POINTS = 25;
 const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
-const SIGNAL_LOCK_MS = 20_000;
-const SIGNAL_STALE_MS = 30_000;
+const SIGNAL_LOCK_MS = 30_000;
+const SIGNAL_STALE_MS = 45_000;
+// Execution retry config — keep locked signal alive across transient VPS hiccups.
+const EXEC_MAX_ATTEMPTS = 3;
+const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
+const VPS_OFFLINE_AUTODISABLE_MS = 60_000;
+type ExecutionState = "IDLE" | "PENDING" | "SENDING" | "VPS_CONNECTED" | "EXECUTING" | "FILLED" | "FAILED";
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
