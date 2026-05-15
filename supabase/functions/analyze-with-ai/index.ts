@@ -1027,6 +1027,22 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       },
     });
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "AI analysis failed" }, 500);
+    const reason = error instanceof Error ? error.message : "AI analysis failed";
+    console.error("[analyze-with-ai] fallback triggered:", reason, error instanceof Error ? error.stack : undefined);
+    return json({
+      fallback: true,
+      mode: "WAIT",
+      action: "WAIT",
+      reasoning: "Waiting for fresh market analysis...",
+      reason: "Waiting for fresh market analysis...",
+      support: null,
+      resistance: null,
+      ltp: null,
+      confidence: "LOW",
+      conviction: "LOW",
+      strike: null,
+      error: reason,
+      analysisTimestamp: new Date().toISOString(),
+    }, 200);
   }
 });
