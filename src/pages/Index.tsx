@@ -2061,6 +2061,22 @@ const Index = () => {
         });
         return;
       }
+      // Block AUTO/manual execution if locked signal's S/R is implausibly far from live spot.
+      const lockedRules: any = lockedSignal.ruleContext?.rules ?? {};
+      const lockedSup = toNumber(lockedRules.immediateSupport ?? lockedRules.support15);
+      const lockedRes = toNumber(lockedRules.immediateResistance ?? lockedRules.resistance15);
+      const srStaleVsLive =
+        (lockedSup !== null && Math.abs(liveSpot - lockedSup) > SR_STALE_DISTANCE_PTS) ||
+        (lockedRes !== null && Math.abs(liveSpot - lockedRes) > SR_STALE_DISTANCE_PTS);
+      if (srStaleVsLive) {
+        toast({
+          title: "Stale S/R levels — execution blocked",
+          description: `Signal levels are >${SR_STALE_DISTANCE_PTS}pt from live spot ${liveSpot.toFixed(2)}. Forcing fresh AI analysis.`,
+          variant: "destructive",
+        });
+        runTradingCycle().catch(() => {});
+        return;
+      }
       const liveAvailableCash = toNumber(liveMarket?.raw_payload?.account?.margin?.availableCash) ?? availableCash;
       if (liveAvailableCash <= 0) {
         toast({
