@@ -546,13 +546,20 @@ const Index = () => {
   const pdhVal = toNumber(yesterdayLevels?.pdh);
   const pdlVal = toNumber(yesterdayLevels?.pdl);
   const pdcVal = toNumber(yesterdayLevels?.pdc);
-  const immediateSupport = toNumber(
+  const rawImmediateSupport = toNumber(
     (latestSignal?.ruleContext?.rules as any)?.immediateSupport ?? (latestSignal?.ruleContext?.rules as any)?.support15,
   );
-  const immediateResistance = toNumber(
+  const rawImmediateResistance = toNumber(
     (latestSignal?.ruleContext?.rules as any)?.immediateResistance ??
       (latestSignal?.ruleContext?.rules as any)?.resistance15,
   );
+  // Hide S/R when implausibly far from current spot — prevents stale session levels from misleading.
+  const srStale =
+    Number.isFinite(latestLtp) &&
+    ((rawImmediateSupport !== null && Math.abs(latestLtp - rawImmediateSupport) > SR_STALE_DISTANCE_PTS) ||
+      (rawImmediateResistance !== null && Math.abs(latestLtp - rawImmediateResistance) > SR_STALE_DISTANCE_PTS));
+  const immediateSupport = srStale ? null : rawImmediateSupport;
+  const immediateResistance = srStale ? null : rawImmediateResistance;
   const pdhY =
     pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
   const pdlY =
