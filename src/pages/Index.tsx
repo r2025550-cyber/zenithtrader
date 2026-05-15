@@ -106,7 +106,11 @@ const MARKET_CLOSE_MINUTE = 15 * 60 + 30;
 const AUTO_SQUAREOFF_MINUTE = 15 * 60 + 15;
 const UPSTOX_POLL_INTERVAL_MS = 5_000;
 const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
-const AI_REASONING_INTERVAL_MS = 30_000;
+const AI_REASONING_INTERVAL_MS = 60_000;
+// Force fresh AI analysis when spot drifts >50pts from anchor (per spec).
+const AI_SPOT_DRIFT_TRIGGER_PTS = 50;
+// Treat cached S/R as stale when level is implausibly far from current spot.
+const SR_STALE_DISTANCE_PTS = 200;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
