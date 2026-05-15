@@ -580,6 +580,7 @@ const Index = () => {
     if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
     else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
     setLatestSignal(signal);
+    setLastAiUpdateAt(Date.now());
   };
 
   const latestLtp = Number(latestData?.ltp);
