@@ -798,6 +798,24 @@ const Index = () => {
     return () => clearInterval(clock);
   }, []);
 
+  // Rotating AI heartbeat: independent of polling cycles so the reasoning panel
+  // always shows visible "alive" feedback even when no fresh signal arrives.
+  useEffect(() => {
+    const messages = [
+      "Analyzing trend...",
+      "Checking momentum...",
+      "Evaluating volatility...",
+      "Scanning support/resistance...",
+    ];
+    let i = 0;
+    setAiHeartbeat(messages[0]);
+    const t = setInterval(() => {
+      i = (i + 1) % messages.length;
+      setAiHeartbeat(messages[i]);
+    }, 30_000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => {
     if (!redirectUriManuallyEdited) {
       setSettings((prev) =>
