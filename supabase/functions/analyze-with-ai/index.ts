@@ -435,16 +435,22 @@ serve(async (req) => {
     if ("error" in auth) return auth.error;
     const settings = await getSettings(auth.adminClient, auth.user.id);
 
-    const { data: history, error: latestError } = await auth.adminClient
+    const { data: storedHistory, error: latestError } = await auth.adminClient
       .from("nifty_market_data")
       .select("*")
       .eq("user_id", auth.user.id)
       .order("created_at", { ascending: false })
       .limit(80);
-    const latest = history?.[0] as MarketRow | undefined;
+    const liveMarket = body?.liveMarket && typeof body.liveMarket === "object" ? body.liveMarket as MarketRow : null;
+    const liveSpot = num(body?.spotPrice ?? liveMarket?.ltp);
+    const liveTimestamp = String(body?.payloadTimestamp ?? liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString());
+    const latest = liveMarket && liveSpot !== null
+      ? { ...liveMarket, ltp: liveSpot, source_timestamp: liveTimestamp, created_at: liveTimestamp } as MarketRow
+      : storedHistory?.[0] as MarketRow | undefined;
     if (latestError || !latest) return json({ error: "Fetch Nifty data before running AI analysis." }, 400);
+    const history = [latest, ...((storedHistory ?? []) as MarketRow[]).filter((row) => String((row as any).id ?? "") !== String((latest as any).id ?? ""))];
 
-    const pa = buildPriceAction(latest, (history ?? []) as MarketRow[]);
+    const pa = buildPriceAction(latest, history as MarketRow[]);
 
     const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
     const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
