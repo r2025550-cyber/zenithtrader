@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
+import { ProEngineStatus, usePersistedEngineState } from "@/components/ProEngineStatus";
 
 const history = [
   {
