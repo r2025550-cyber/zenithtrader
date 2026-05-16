@@ -1135,6 +1135,18 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
           compression: pa.compression,
           compressionBreakout: pa.compressionBreakout,
         },
+        // ===== PRO+++ engine fields =====
+        confidenceScore,
+        aiMode,
+        mode: aiMode,
+        regime,
+        edgeFactors,
+        rejectionReason,
+        supportStrength,
+        resistanceStrength,
+        bullScore,
+        bearScore,
+        biasDir,
       },
     });
   } catch (error) {
