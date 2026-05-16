@@ -650,6 +650,89 @@ serve(async (req) => {
       reasonParts.push(`(Re-entry: trend ${pa.trendUp ? "UP" : "DOWN"} still valid, gap bypassed.)`);
     }
 
+    // ============================================================
+    // PRO+++ WEIGHTED CONFIDENCE ENGINE (additive, evolution patch)
+    // Replaces hard-filter bias with scoring; promotes missed FAST_SCALPs.
+    // ============================================================
+    const bullScoring = [
+      { w: 20, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },
+      { w: 20, ok: !!pa.trendUp, label: "5m trend up aligned" },
+      { w: 15, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },
+      { w: 15, ok: !!pa.momentumBull, label: "Momentum confirmed" },
+      { w: 10, ok: !!pa.nearSupport, label: "Support bounce zone" },
+      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
+      { w: 5,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },
+      { w: -10, ok: !!pa.longUpperWick, label: "Upper wick rejection" },
+      { w: -15, ok: !!pa.bullTrap, label: "Bull-trap risk" },
+    ];
+    const bearScoring = [
+      { w: 20, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },
+      { w: 20, ok: !!pa.trendDown, label: "5m trend down aligned" },
+      { w: 15, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
+      { w: 15, ok: !!pa.momentumBear, label: "Momentum confirmed" },
+      { w: 10, ok: !!pa.nearResistance, label: "Resistance rejection zone" },
+      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
+      { w: 5,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
+      { w: -10, ok: !!pa.longLowerWick, label: "Lower wick rejection" },
+      { w: -15, ok: !!pa.bearTrap, label: "Bear-trap risk" },
+    ];
+    const sumScore = (arr: typeof bullScoring) => arr.reduce((s, x) => s + (x.ok ? x.w : 0), 0);
+    const bullScore = Math.max(0, Math.min(100, sumScore(bullScoring)));
+    const bearScore = Math.max(0, Math.min(100, sumScore(bearScoring)));
+    const biasDir: "BUY" | "SELL" | null =
+      bullScore > bearScore + 5 ? "BUY" :
+      bearScore > bullScore + 5 ? "SELL" : null;
+    const confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
+    const edgeFactors = (biasDir === "SELL" ? bearScoring : bullScoring)
+      .filter((x) => x.ok && x.w > 0)
+      .map((x) => x.label);
+
+    const regime: "TRENDING" | "CHOPPY" | "COMPRESSION" =
+      pa.compression ? "COMPRESSION" :
+      (pa.trendUp || pa.trendDown) ? "TRENDING" : "CHOPPY";
+
+    const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
+
+    let aiMode: "HIGH_CONVICTION" | "FAST_SCALP" | "WAIT" = "WAIT";
+    if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
+    else if (action !== "WAIT" && confidenceScore >= 65) aiMode = "FAST_SCALP";
+    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= 65) {
+      // Promote missed setup — fixes over-filtering.
+      action = biasDir;
+      aiMode = "FAST_SCALP";
+      reasonParts.unshift(`FAST SCALP (${confidenceScore}/100): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
+    }
+
+    const rejectionReason = action === "WAIT"
+      ? (cooldownActive ? `Signal cooldown ${Math.round(SIGNAL_COOLDOWN_SEC - secsSinceLastSignal)}s`
+        : !tradeGapOk && !gapBypassedByReEntry ? `Min trade gap ${MIN_TRADE_GAP_MIN}m`
+        : !tradeCapOk ? `Daily cap reached`
+        : lossPauseActive ? `Loss-pause ${lossPauseRemainingMin}m`
+        : dailyTargetHit ? `Daily target hit`
+        : maxDailyLossHit ? `Kill-switch active`
+        : confidenceScore < 65 ? `Conviction ${confidenceScore}/100 below 65`
+        : `No directional bias (bull ${bullScore} / bear ${bearScore})`)
+      : null;
+
+    // Intelligent WAIT reasoning — never empty.
+    if (action === "WAIT" && reasonParts.length === 0) {
+      reasonParts.push(
+        pa.compression ? "WAIT — compression building, breakout probability increasing."
+        : (pa.trendUp || pa.trendDown) ? "WAIT — momentum building, awaiting confirmation."
+        : (pa.nearSupport || pa.nearResistance) ? "WAIT — EMA pullback forming near key level."
+        : "WAIT — low conviction only, holding for cleaner setup."
+      );
+    }
+
+    const supportStrength = pa.nearSupport
+      ? ((pa.bullishEngulfing || pa.strongGreen) ? 3 : ((pa.bullStreak ?? 0) >= 2 ? 2 : 1))
+      : 0;
+    const resistanceStrength = pa.nearResistance
+      ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
+      : 0;
+
+    console.log("[PRO+++ ENGINE]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason });
+
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
     let stopLoss: number | null = null;
