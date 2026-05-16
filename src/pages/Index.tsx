@@ -4033,6 +4033,8 @@ const Index = () => {
               tradesToday={(latestSignal?.ruleContext as any)?.tradesToday ?? 0}
             />
 
+            <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}>
+
               <div className="mb-3 flex items-center gap-2 text-primary">
                 <Activity className="h-5 w-5" />
                 <h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2>
