@@ -4022,7 +4022,17 @@ const Index = () => {
               </p>
             </section>
 
-            <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}>
+            <ProEngineStatus
+              signal={latestSignal as any}
+              activeTrade={activeTrade}
+              isExecutionActive={isExecutionActive()}
+              exitAlertReason={activeTradePlan?.exitAlertReason ?? null}
+              lastTradeAtMs={latestSignal?.created_at ? new Date(latestSignal.created_at).getTime() : null}
+              minTradeGapMin={5}
+              maxTradesPerDay={8}
+              tradesToday={(latestSignal?.ruleContext as any)?.tradesToday ?? 0}
+            />
+
               <div className="mb-3 flex items-center gap-2 text-primary">
                 <Activity className="h-5 w-5" />
                 <h2 className="text-lg font-semibold text-foreground">Live AI Reasoning</h2>
