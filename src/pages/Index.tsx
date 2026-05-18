@@ -3532,7 +3532,7 @@ const Index = () => {
                     onValueChange={(v) => {
                       setTradingMode(v as "scalping" | "sniper");
                       localStorage.setItem("zt_trading_mode", v);
-                      setLatestSignal(null);
+                      // Keep last signal visible; just unlock so new mode can produce a fresh one.
                       signalLockRef.current = null;
                       toast({
                         title: `Switched to ${v === "scalping" ? "Scalping" : "Sniper"} Mode`,
