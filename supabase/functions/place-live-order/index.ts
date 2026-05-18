@@ -419,19 +419,26 @@ serve(async (req) => {
     // ===== v6: SL-LMT instead of SL-M =====
     const slTrigger = Number(effectiveStopPremium.toFixed(2));
     const slLimit = Number(Math.max(0.05, slTrigger * (1 - SL_LMT_BUFFER_PCT / 100)).toFixed(2));
+    // v8: use same product as the successfully-placed entry to keep position consistent.
     const slPayload = {
       quantity,
-      product: "D",
+      product: entry.productUsed,
       validity: "DAY",
-      price: slLimit,                     // limit price (slightly worse than trigger to ensure fill)
+      price: slLimit,
       tag: "zenith-server-sl-lmt",
       instrument_token: option.instrumentToken,
-      order_type: "SL",                   // SL = Stop-Loss Limit (vs SL-M = market)
+      order_type: "SL",
       transaction_type: "SELL",
       disclosed_quantity: 0,
       trigger_price: slTrigger,
       is_amo: false,
     };
+    const slValidation = validateOrderPayload(slPayload);
+    if (slValidation.length) {
+      console.error("[SL PAYLOAD INVALID]", slValidation, slPayload);
+    } else {
+      console.log("[SL PAYLOAD]", JSON.stringify(slPayload));
+    }
     const sl = await placeOrderWithRetry(headers, slPayload, "SL-LMT").catch((e) => {
       return { result: { error: e instanceof Error ? e.message : String(e) }, attempts: [], failed: true } as any;
     });
@@ -440,7 +447,7 @@ serve(async (req) => {
 
     // ===== v7 FAIL-SAFE: if SL didn't activate after fill, immediately exit position =====
     if (fill.filled && !slActive) {
-      const exitPayload = { ...entryPayload, transaction_type: "SELL", tag: "zenith-sl-failsafe-exit" };
+      const exitPayload = { ...finalEntryPayload, transaction_type: "SELL", tag: "zenith-sl-failsafe-exit" };
       const exit = await placeOrderWithRetry(headers, exitPayload, "SL-failsafe exit").catch((e) => ({ result: { error: e instanceof Error ? e.message : String(e) }, attempts: [] }));
       return json({
         success: false,
@@ -450,6 +457,8 @@ serve(async (req) => {
         slippage: { quotedLtp: optionLtp, fillPrice, slippagePct: Number(slippagePct.toFixed(3)), tolerancePct: slippageTolerancePct },
         entry: entry.result, slOrder: sl.result, exit: (exit as any)?.result,
         instrument: option, quantity,
+        entryPremium: fillPrice, optionLtp,
+        errorDetails: { reason: (sl as any)?.result?.error ?? "SL not accepted", rejectedPayload: slPayload, failedField: "SL" },
       });
     }
 
