@@ -16,17 +16,21 @@ const FILL_POLL_INTERVAL_MS = 800;       // ~5s total wait for fill
 
 const BodySchema = z.object({
   action: z.enum(["BUY", "SELL"]),
+  // v8: explicit option side + market direction (preferred over deriving from action)
+  optionSide: z.enum(["CE", "PE"]).optional(),
+  direction: z.enum(["BULLISH", "BEARISH"]).optional(),
+  transactionType: z.enum(["BUY", "SELL"]).optional(),
   spotPrice: z.number().positive(),
   strike: z.number().positive().optional(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
   targetPremiumPoints: z.number().positive().optional(),
   stopLossPremiumPoints: z.number().positive().optional(),
-  // v6: optional override for slippage tolerance from client
   maxSlippagePct: z.number().positive().max(10).optional(),
-  // v6-safe: chart-based risk + RR from analyze-with-ai signal
   riskPoints: z.number().positive().optional(),
   rrMultiplier: z.number().positive().max(10).optional(),
+  // v8: product hint (defaults to "I" → fallback "D")
+  preferredProduct: z.enum(["I", "D"]).optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
