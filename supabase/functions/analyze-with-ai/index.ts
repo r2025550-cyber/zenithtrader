@@ -884,8 +884,17 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
 
     const analysisTimestamp = new Date().toISOString();
     const payloadTimestamp = liveTimestamp;
+    // v8: explicit market direction, option side, and transaction type
+    // (executor must not derive CE/PE from BUY/SELL — these are now first-class fields)
+    const direction: "BULLISH" | "BEARISH" | null =
+      action === "BUY" ? "BULLISH" : action === "SELL" ? "BEARISH" : null;
+    const optionSide: "CE" | "PE" | null = optionType as ("CE" | "PE" | null);
+    const transactionType: "BUY" = "BUY"; // we always BUY (long) the option leg
     const signal = {
       action,
+      direction,
+      optionSide,
+      transactionType,
       strike: strikeLabel,
       reason: finalReason,
       conviction,
