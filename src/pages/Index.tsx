@@ -117,10 +117,12 @@ const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 5_000;
 const AI_RUNTIME_CACHE_VERSION = "ai-reasoning-live-v3";
 const AI_RUNTIME_CACHE_VERSION_KEY = "zenith-ai-runtime-cache-version";
-// Force fresh AI analysis when spot drifts >50pts from anchor (per spec).
-const AI_SPOT_DRIFT_TRIGGER_PTS = 50;
-// Treat cached S/R as stale when level is implausibly far from current spot.
-const SR_STALE_DISTANCE_PTS = 200;
+// PRO+++ stability patch: relaxed drift triggers so scalping context stays stable.
+// Only force fresh AI analysis on large spot drifts; small ticks must NOT wipe state.
+const AI_SPOT_DRIFT_TRIGGER_PTS = 120;
+// Cached S/R is only considered "stale" when extremely far from current spot.
+// Frontend NEVER hides S/R based on this — backend is the only sanitizer.
+const SR_STALE_DISTANCE_PTS = 500;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
@@ -522,30 +524,32 @@ const Index = () => {
     else console.log(tag, evt.title, payload);
   };
 
-  const clearAiRuntimeState = () => {
+  // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
+  // visible signal so support/resistance, reasoning, and confidence persist.
+  // Active execution always wins — no reset is allowed while a trade is in-flight.
+  const clearAiRuntimeState = (opts: { force?: boolean } = {}) => {
+    if (!opts.force && isExecutionActive()) {
+      console.log("[STATE GUARD] suppressed clearAiRuntimeState — execution active");
+      return;
+    }
     signalLockRef.current = null;
     levelsAnchorLtpRef.current = null;
     lastSignalAutofillRef.current = "";
     lastSignalAlertRef.current = "";
     lastDebugSignalKeyRef.current = "";
     lastAutoFiredSignalRef.current = "";
-    setLatestSignal(null);
+    // Intentionally do NOT call setLatestSignal(null) — keep last valid signal
+    // visible so the dashboard never flickers or blanks. New signal will replace it.
   };
 
   const signalLiveSpot = (signal?: Signal | null) =>
     toNumber(signal?.liveSpot ?? signal?.ruleContext?.rules?.ltp ?? (signal as any)?.entry ?? (signal as any)?.entryPrice);
   const isSignalStaleVsSpot = (signal: Signal | null | undefined, spot: number | null = hasLivePrice ? latestLtp : null) => {
     const liveSpot = toNumber(spot);
-    if (!signal || liveSpot === null) return Boolean(signal);
+    if (!signal || liveSpot === null) return false;
     const signalSpot = signalLiveSpot(signal);
-    const rules: any = signal.ruleContext?.rules ?? {};
-    const sup = toNumber(rules.immediateSupport ?? rules.support15);
-    const res = toNumber(rules.immediateResistance ?? rules.resistance15);
-    return (
-      (signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) ||
-      (sup !== null && Math.abs(liveSpot - sup) > SR_STALE_DISTANCE_PTS) ||
-      (res !== null && Math.abs(liveSpot - res) > SR_STALE_DISTANCE_PTS)
-    );
+    // Only flag stale on large spot drift. S/R distance handled server-side.
+    return signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS;
   };
 
   // True while an order is being attempted (incl. retry backoff window).
@@ -560,16 +564,12 @@ const Index = () => {
       console.log("[SIGNAL LOCK] suppressed AI overwrite — execution active");
       return false;
     }
-    const signalSpot = signalLiveSpot(signal);
-    if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
-      clearAiRuntimeState();
-      return false;
-    }
+    // Stale signal: do NOT wipe UI. Keep last valid signal visible; just skip apply.
     if (isSignalStaleVsSpot(signal, liveSpot)) {
-      clearAiRuntimeState();
+      console.log("[SIGNAL STALE] ignored fresh signal — spot drift too large, keeping last valid");
       return false;
     }
-    levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
+    levelsAnchorLtpRef.current = liveSpot ?? signalLiveSpot(signal);
     signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
     setLatestSignal(signal);
     setLastAiUpdateAt(Date.now());
@@ -582,7 +582,7 @@ const Index = () => {
       return;
     }
     if (isSignalStaleVsSpot(signal)) {
-      clearAiRuntimeState();
+      console.log("[SIGNAL STALE] ignored sniper signal — spot drift too large");
       return;
     }
     let locked = signalLockRef.current;
@@ -597,11 +597,10 @@ const Index = () => {
         signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 ||
         signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
       if (signal.action === "WAIT" && !majorBreak) {
-        setLatestSignal(locked.signal);
+        // WAIT must not overwrite an active directional signal's visuals.
         return;
       }
       if (!fullReversal && signal.action !== locked.signal.action) {
-        setLatestSignal(locked.signal);
         return;
       }
     }
@@ -610,6 +609,7 @@ const Index = () => {
     setLatestSignal(signal);
     setLastAiUpdateAt(Date.now());
   };
+
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
@@ -658,13 +658,11 @@ const Index = () => {
     (latestSignal?.ruleContext?.rules as any)?.immediateResistance ??
       (latestSignal?.ruleContext?.rules as any)?.resistance15,
   );
-  // Hide S/R when implausibly far from current spot — prevents stale session levels from misleading.
-  const srStale =
-    Number.isFinite(latestLtp) &&
-    ((rawImmediateSupport !== null && Math.abs(latestLtp - rawImmediateSupport) > SR_STALE_DISTANCE_PTS) ||
-      (rawImmediateResistance !== null && Math.abs(latestLtp - rawImmediateResistance) > SR_STALE_DISTANCE_PTS));
-  const immediateSupport = srStale ? null : rawImmediateSupport;
-  const immediateResistance = srStale ? null : rawImmediateResistance;
+  // PRO+++ stability: backend is the only S/R sanitizer. Frontend MUST NOT hide
+  // valid levels based on small spot movements — keep displayed data visible.
+  const srStale = false;
+  const immediateSupport = rawImmediateSupport;
+  const immediateResistance = rawImmediateResistance;
   const pdhY =
     pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
   const pdlY =
@@ -818,7 +816,8 @@ const Index = () => {
     setOauthCode("");
     setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
     setSystemStatus(null);
-    clearAiRuntimeState();
+    clearAiRuntimeState({ force: true });
+    setLatestSignal(null);
   }, []);
 
   useEffect(() => {
@@ -1996,29 +1995,18 @@ const Index = () => {
       }
       if (Number.isFinite(ceLtp)) setCeSeries((prev) => [...prev, { value: ceLtp, time: timestamp }].slice(-30));
       if (Number.isFinite(peLtp)) setPeSeries((prev) => [...prev, { value: peLtp, time: timestamp }].slice(-30));
-      // Force a fresh AI cycle when:
-      //  • spot drifts >AI_SPOT_DRIFT_TRIGGER_PTS from anchor, OR
-      //  • cached S/R is implausibly far from live spot (stale session levels).
+      // PRO+++ stability: only force a fresh AI cycle on LARGE spot drift.
+      // Do NOT wipe runtime state on small ticks. Backend handles S/R sanitization.
       const anchor = levelsAnchorLtpRef.current;
-      const sup = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateSupport);
-      const res = toNumber((latestSignal?.ruleContext?.rules as any)?.immediateResistance);
-      const srLooksStale =
-        (sup !== null && Math.abs(value - sup) > SR_STALE_DISTANCE_PTS) ||
-        (res !== null && Math.abs(value - res) > SR_STALE_DISTANCE_PTS);
-      if (srLooksStale) {
-        clearAiRuntimeState();
+      if (anchor === null) {
         levelsAnchorLtpRef.current = value;
-        if (aiEnabled && !tradingBlocked && !aiAnalysisInFlightRef.current) {
-          lastForcedAiAtRef.current = Date.now();
-          runTradingCycle().catch(() => {});
-        }
-      } else if (anchor === null) levelsAnchorLtpRef.current = value;
-      else if (
-        (Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS || srLooksStale) &&
+      } else if (
+        Math.abs(value - anchor) > AI_SPOT_DRIFT_TRIGGER_PTS &&
         aiEnabled &&
         !tradingBlocked &&
         !aiAnalysisInFlightRef.current &&
-        Date.now() - lastForcedAiAtRef.current > 15_000
+        !isExecutionActive() &&
+        Date.now() - lastForcedAiAtRef.current > 30_000
       ) {
         levelsAnchorLtpRef.current = value;
         lastForcedAiAtRef.current = Date.now();
@@ -2175,7 +2163,8 @@ const Index = () => {
         const status = await retestUpstox(true);
         if (!status.upstox.ok) return;
       }
-      clearAiRuntimeState();
+      // PRO+++ stability: do NOT clear runtime state before AI fetch — keep last
+      // valid signal/S/R visible while the new analysis is in flight.
       const liveMarket = await fetchLiveNifty(false, true);
       const liveSpot = toNumber(liveMarket?.ltp);
       const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
@@ -3544,7 +3533,7 @@ const Index = () => {
                     onValueChange={(v) => {
                       setTradingMode(v as "scalping" | "sniper");
                       localStorage.setItem("zt_trading_mode", v);
-                      setLatestSignal(null);
+                      // Keep last signal visible; just unlock so new mode can produce a fresh one.
                       signalLockRef.current = null;
                       toast({
                         title: `Switched to ${v === "scalping" ? "Scalping" : "Sniper"} Mode`,
