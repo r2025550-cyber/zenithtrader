@@ -344,22 +344,48 @@ serve(async (req) => {
       });
     }
 
-    // ===== ENTRY ORDER (with retry) =====
-    const entryPayload = {
+    // ===== ENTRY ORDER (v8: explicit fields + product/order_type fallback chain) =====
+    // We always BUY the option leg (long CE for bullish, long PE for bearish).
+    // optionSide already determined upstream via resolveOption(explicitOptionSide).
+    const preferredProduct = parsed.data.preferredProduct ?? "I";
+    const entryBasePayload = {
       quantity,
-      product: "D",
       validity: "DAY",
-      price: 0,
       tag: "zenith-live-ai",
       instrument_token: option.instrumentToken,
-      order_type: "MARKET",
-      transaction_type: "BUY",
+      transaction_type: "BUY" as const,           // long option leg
       disclosed_quantity: 0,
-      trigger_price: 0,
       is_amo: false,
     };
-    const entry = await placeOrderWithRetry(headers, entryPayload, "Entry");
+
+    let entry: Awaited<ReturnType<typeof placeEntryWithFallback>>;
+    try {
+      entry = await placeEntryWithFallback(headers, entryBasePayload, optionLtp, preferredProduct, "Entry");
+    } catch (err: any) {
+      const reason = err?.message ?? "Entry placement failed";
+      console.error("[ORDER FAIL]", reason, err?.tried);
+      return json({
+        success: false,
+        error: "Upstox Order Rejected",
+        details: reason,
+        execution: { orderPlaced: false, orderFilled: false, slActive: false, trailingActive: false, blocked: "upstox-rejected" },
+        errorDetails: {
+          reason,
+          attempts: err?.tried ?? [],
+          failedField: (err?.tried ?? []).slice(-1)[0]?.error?.match(/(?:field |missing )([\w_.-]+)/i)?.[1] ?? null,
+          rejectedPayload: (err?.tried ?? []).slice(-1)[0]?.payload ?? null,
+        },
+        liquidity: liquidityChecks,
+        instrument: option,
+        optionLtp,
+        entryPremium: optionLtp,
+        quantity,
+      });
+    }
+
     const orderId = readOrderId(entry.result);
+    const finalEntryPayload = entry.finalPayload;
+    console.log("[ORDER PLACED] productUsed=", entry.productUsed, "order_type=", entry.orderTypeUsed, "orderId=", orderId);
 
     // ===== v6: Poll for fill + check slippage =====
     const fill = await pollOrderFill(headers, orderId);
@@ -368,8 +394,7 @@ serve(async (req) => {
     const slippageBreached = fill.filled && slippagePct > slippageTolerancePct;
 
     if (slippageBreached) {
-      // Immediately exit position with market SELL to cap loss; do NOT place SL
-      const exitPayload = { ...entryPayload, transaction_type: "SELL", tag: "zenith-slippage-exit" };
+      const exitPayload = { ...finalEntryPayload, transaction_type: "SELL", tag: "zenith-slippage-exit" };
       const exit = await placeOrderWithRetry(headers, exitPayload, "Slippage exit").catch((e) => ({ result: { error: e instanceof Error ? e.message : String(e) }, attempts: [] }));
       return json({
         success: false,
@@ -378,7 +403,7 @@ serve(async (req) => {
         execution: { orderPlaced: true, orderFilled: true, slActive: false, trailingActive: false, slippageExit: true },
         slippage: { quotedLtp: optionLtp, fillPrice, slippagePct: Number(slippagePct.toFixed(3)), tolerancePct: slippageTolerancePct },
         entry: entry.result, exit: (exit as any)?.result, retryAttempts: entry.attempts,
-        instrument: option, quantity,
+        instrument: option, quantity, entryPremium: fillPrice, optionLtp,
       });
     }
 
