@@ -117,10 +117,12 @@ const UPSTOX_RATE_LIMIT_BACKOFF_MS = 5_000;
 const AI_REASONING_INTERVAL_MS = 5_000;
 const AI_RUNTIME_CACHE_VERSION = "ai-reasoning-live-v3";
 const AI_RUNTIME_CACHE_VERSION_KEY = "zenith-ai-runtime-cache-version";
-// Force fresh AI analysis when spot drifts >50pts from anchor (per spec).
-const AI_SPOT_DRIFT_TRIGGER_PTS = 50;
-// Treat cached S/R as stale when level is implausibly far from current spot.
-const SR_STALE_DISTANCE_PTS = 200;
+// PRO+++ stability patch: relaxed drift triggers so scalping context stays stable.
+// Only force fresh AI analysis on large spot drifts; small ticks must NOT wipe state.
+const AI_SPOT_DRIFT_TRIGGER_PTS = 120;
+// Cached S/R is only considered "stale" when extremely far from current spot.
+// Frontend NEVER hides S/R based on this — backend is the only sanitizer.
+const SR_STALE_DISTANCE_PTS = 500;
 const NIFTY_LOT_SIZE = 65;
 const MAX_TRADES_PER_DAY = 4;
 const DAILY_STOP_LOSS = 2000;
