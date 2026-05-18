@@ -658,13 +658,11 @@ const Index = () => {
     (latestSignal?.ruleContext?.rules as any)?.immediateResistance ??
       (latestSignal?.ruleContext?.rules as any)?.resistance15,
   );
-  // Hide S/R when implausibly far from current spot — prevents stale session levels from misleading.
-  const srStale =
-    Number.isFinite(latestLtp) &&
-    ((rawImmediateSupport !== null && Math.abs(latestLtp - rawImmediateSupport) > SR_STALE_DISTANCE_PTS) ||
-      (rawImmediateResistance !== null && Math.abs(latestLtp - rawImmediateResistance) > SR_STALE_DISTANCE_PTS));
-  const immediateSupport = srStale ? null : rawImmediateSupport;
-  const immediateResistance = srStale ? null : rawImmediateResistance;
+  // PRO+++ stability: backend is the only S/R sanitizer. Frontend MUST NOT hide
+  // valid levels based on small spot movements — keep displayed data visible.
+  const srStale = false;
+  const immediateSupport = rawImmediateSupport;
+  const immediateResistance = rawImmediateResistance;
   const pdhY =
     pdhVal !== null && chartValues.length && pdhVal >= chartMin && pdhVal <= chartMax ? indexToY(pdhVal) : null;
   const pdlY =
