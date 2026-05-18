@@ -816,7 +816,8 @@ const Index = () => {
     setOauthCode("");
     setSettings((prev) => ({ ...prev, manualAccessToken: "" }));
     setSystemStatus(null);
-    clearAiRuntimeState();
+    clearAiRuntimeState({ force: true });
+    setLatestSignal(null);
   }, []);
 
   useEffect(() => {
