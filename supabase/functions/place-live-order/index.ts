@@ -16,17 +16,21 @@ const FILL_POLL_INTERVAL_MS = 800;       // ~5s total wait for fill
 
 const BodySchema = z.object({
   action: z.enum(["BUY", "SELL"]),
+  // v8: explicit option side + market direction (preferred over deriving from action)
+  optionSide: z.enum(["CE", "PE"]).optional(),
+  direction: z.enum(["BULLISH", "BEARISH"]).optional(),
+  transactionType: z.enum(["BUY", "SELL"]).optional(),
   spotPrice: z.number().positive(),
   strike: z.number().positive().optional(),
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
   targetPremiumPoints: z.number().positive().optional(),
   stopLossPremiumPoints: z.number().positive().optional(),
-  // v6: optional override for slippage tolerance from client
   maxSlippagePct: z.number().positive().max(10).optional(),
-  // v6-safe: chart-based risk + RR from analyze-with-ai signal
   riskPoints: z.number().positive().optional(),
   rrMultiplier: z.number().positive().max(10).optional(),
+  // v8: product hint (defaults to "I" → fallback "D")
+  preferredProduct: z.enum(["I", "D"]).optional(),
 });
 
 type UpstoxRecord = Record<string, unknown>;
@@ -57,8 +61,8 @@ async function getAvailableCash(headers: HeadersInit) {
   return numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net) ?? 0;
 }
 
-async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number) {
-  const optionType = action === "BUY" ? "CE" : "PE";
+async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number, explicitOptionSide?: "CE" | "PE") {
+  const optionType = explicitOptionSide ?? (action === "BUY" ? "CE" : "PE");
   const atmStrike = Math.round(spotPrice / 50) * 50;
   const targetStrike = requestedStrike ?? atmStrike;
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
@@ -182,6 +186,89 @@ async function cancelOrder(headers: HeadersInit, orderId: string) {
   }
 }
 
+// ===== v8: Required-field validation for Upstox order payload =====
+function validateOrderPayload(payload: Record<string, unknown>) {
+  const required = ["instrument_token", "quantity", "order_type", "transaction_type", "product"] as const;
+  const missing: string[] = [];
+  for (const k of required) {
+    const v = payload[k];
+    if (v === undefined || v === null || v === "" || (k === "quantity" && Number(v) <= 0)) {
+      missing.push(k);
+    }
+  }
+  if (!["MARKET", "LIMIT", "SL", "SL-M"].includes(String(payload.order_type))) missing.push("order_type:invalid");
+  if (!["BUY", "SELL"].includes(String(payload.transaction_type))) missing.push("transaction_type:invalid");
+  if (!["I", "D"].includes(String(payload.product))) missing.push("product:invalid");
+  if (String(payload.order_type) === "LIMIT" && Number(payload.price) <= 0) missing.push("price:required-for-LIMIT");
+  if (String(payload.order_type) === "SL" && (Number(payload.price) <= 0 || Number(payload.trigger_price) <= 0)) {
+    missing.push("price/trigger_price:required-for-SL");
+  }
+  return missing;
+}
+
+// ===== v8: Entry placement with PRODUCT (I→D) + ORDER_TYPE (MARKET→LIMIT) fallbacks =====
+async function placeEntryWithFallback(
+  headers: HeadersInit,
+  basePayload: Record<string, unknown>,
+  optionLtp: number,
+  preferredProduct: "I" | "D",
+  label: string,
+) {
+  const productOrder: Array<"I" | "D"> = preferredProduct === "I" ? ["I", "D"] : ["D", "I"];
+  const tried: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload: Record<string, unknown> }> = [];
+  let lastErr: unknown = null;
+
+  for (const product of productOrder) {
+    // First attempt: MARKET
+    const marketPayload = { ...basePayload, product, order_type: "MARKET", price: 0, trigger_price: 0 };
+    const validation = validateOrderPayload(marketPayload);
+    if (validation.length) {
+      const errMsg = `Payload validation failed: ${validation.join(", ")}`;
+      tried.push({ product, order_type: "MARKET", ok: false, error: errMsg, payload: marketPayload });
+      lastErr = new Error(errMsg);
+      continue;
+    }
+    console.log(`[ORDER PAYLOAD] ${label} product=${product} order_type=MARKET`, JSON.stringify(marketPayload));
+    try {
+      const r = await placeOrderWithRetry(headers, marketPayload, `${label}/MARKET/${product}`);
+      tried.push({ product, order_type: "MARKET", ok: true, payload: marketPayload });
+      return { result: r.result, attempts: r.attempts, finalPayload: marketPayload, tried, productUsed: product, orderTypeUsed: "MARKET" };
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      tried.push({ product, order_type: "MARKET", ok: false, error: msg, payload: marketPayload });
+      console.warn(`[ORDER FALLBACK] MARKET/${product} failed: ${msg}`);
+    }
+
+    // Second attempt: LIMIT @ LTP for same product
+    if (optionLtp > 0) {
+      const limitPrice = Number(optionLtp.toFixed(2));
+      const limitPayload = { ...basePayload, product, order_type: "LIMIT", price: limitPrice, trigger_price: 0 };
+      const validationL = validateOrderPayload(limitPayload);
+      if (validationL.length) {
+        const errMsg = `Payload validation failed: ${validationL.join(", ")}`;
+        tried.push({ product, order_type: "LIMIT", ok: false, error: errMsg, payload: limitPayload });
+        lastErr = new Error(errMsg);
+        continue;
+      }
+      console.log(`[ORDER PAYLOAD] ${label} product=${product} order_type=LIMIT price=${limitPrice}`, JSON.stringify(limitPayload));
+      try {
+        const r = await placeOrderWithRetry(headers, limitPayload, `${label}/LIMIT/${product}`);
+        tried.push({ product, order_type: "LIMIT", ok: true, payload: limitPayload });
+        return { result: r.result, attempts: r.attempts, finalPayload: limitPayload, tried, productUsed: product, orderTypeUsed: "LIMIT" };
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        tried.push({ product, order_type: "LIMIT", ok: false, error: msg, payload: limitPayload });
+        console.warn(`[ORDER FALLBACK] LIMIT/${product} failed: ${msg}`);
+      }
+    }
+  }
+
+  const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+  throw Object.assign(new Error(`${label} failed across all product/order_type fallbacks: ${errMsg}`), { tried });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -197,7 +284,9 @@ serve(async (req) => {
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
     const slippageTolerancePct = parsed.data.maxSlippagePct ?? ENTRY_SLIPPAGE_PCT;
 
-    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike);
+    // v8: explicit optionSide preferred; fallback derives from action (BUY→CE / SELL→PE) for backwards-compat
+    const explicitOptionSide = parsed.data.optionSide;
+    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike, explicitOptionSide);
 
     // ===== v6 LIQUIDITY FILTER =====
     const quote = await getOptionQuote(headers, String(option.instrumentToken));
@@ -255,22 +344,48 @@ serve(async (req) => {
       });
     }
 
-    // ===== ENTRY ORDER (with retry) =====
-    const entryPayload = {
+    // ===== ENTRY ORDER (v8: explicit fields + product/order_type fallback chain) =====
+    // We always BUY the option leg (long CE for bullish, long PE for bearish).
+    // optionSide already determined upstream via resolveOption(explicitOptionSide).
+    const preferredProduct = parsed.data.preferredProduct ?? "I";
+    const entryBasePayload = {
       quantity,
-      product: "D",
       validity: "DAY",
-      price: 0,
       tag: "zenith-live-ai",
       instrument_token: option.instrumentToken,
-      order_type: "MARKET",
-      transaction_type: "BUY",
+      transaction_type: "BUY" as const,           // long option leg
       disclosed_quantity: 0,
-      trigger_price: 0,
       is_amo: false,
     };
-    const entry = await placeOrderWithRetry(headers, entryPayload, "Entry");
+
+    let entry: Awaited<ReturnType<typeof placeEntryWithFallback>>;
+    try {
+      entry = await placeEntryWithFallback(headers, entryBasePayload, optionLtp, preferredProduct, "Entry");
+    } catch (err: any) {
+      const reason = err?.message ?? "Entry placement failed";
+      console.error("[ORDER FAIL]", reason, err?.tried);
+      return json({
+        success: false,
+        error: "Upstox Order Rejected",
+        details: reason,
+        execution: { orderPlaced: false, orderFilled: false, slActive: false, trailingActive: false, blocked: "upstox-rejected" },
+        errorDetails: {
+          reason,
+          attempts: err?.tried ?? [],
+          failedField: (err?.tried ?? []).slice(-1)[0]?.error?.match(/(?:field |missing )([\w_.-]+)/i)?.[1] ?? null,
+          rejectedPayload: (err?.tried ?? []).slice(-1)[0]?.payload ?? null,
+        },
+        liquidity: liquidityChecks,
+        instrument: option,
+        optionLtp,
+        entryPremium: optionLtp,
+        quantity,
+      });
+    }
+
     const orderId = readOrderId(entry.result);
+    const finalEntryPayload = entry.finalPayload;
+    console.log("[ORDER PLACED] productUsed=", entry.productUsed, "order_type=", entry.orderTypeUsed, "orderId=", orderId);
 
     // ===== v6: Poll for fill + check slippage =====
     const fill = await pollOrderFill(headers, orderId);
@@ -279,8 +394,7 @@ serve(async (req) => {
     const slippageBreached = fill.filled && slippagePct > slippageTolerancePct;
 
     if (slippageBreached) {
-      // Immediately exit position with market SELL to cap loss; do NOT place SL
-      const exitPayload = { ...entryPayload, transaction_type: "SELL", tag: "zenith-slippage-exit" };
+      const exitPayload = { ...finalEntryPayload, transaction_type: "SELL", tag: "zenith-slippage-exit" };
       const exit = await placeOrderWithRetry(headers, exitPayload, "Slippage exit").catch((e) => ({ result: { error: e instanceof Error ? e.message : String(e) }, attempts: [] }));
       return json({
         success: false,
@@ -289,7 +403,7 @@ serve(async (req) => {
         execution: { orderPlaced: true, orderFilled: true, slActive: false, trailingActive: false, slippageExit: true },
         slippage: { quotedLtp: optionLtp, fillPrice, slippagePct: Number(slippagePct.toFixed(3)), tolerancePct: slippageTolerancePct },
         entry: entry.result, exit: (exit as any)?.result, retryAttempts: entry.attempts,
-        instrument: option, quantity,
+        instrument: option, quantity, entryPremium: fillPrice, optionLtp,
       });
     }
 
@@ -305,19 +419,26 @@ serve(async (req) => {
     // ===== v6: SL-LMT instead of SL-M =====
     const slTrigger = Number(effectiveStopPremium.toFixed(2));
     const slLimit = Number(Math.max(0.05, slTrigger * (1 - SL_LMT_BUFFER_PCT / 100)).toFixed(2));
+    // v8: use same product as the successfully-placed entry to keep position consistent.
     const slPayload = {
       quantity,
-      product: "D",
+      product: entry.productUsed,
       validity: "DAY",
-      price: slLimit,                     // limit price (slightly worse than trigger to ensure fill)
+      price: slLimit,
       tag: "zenith-server-sl-lmt",
       instrument_token: option.instrumentToken,
-      order_type: "SL",                   // SL = Stop-Loss Limit (vs SL-M = market)
+      order_type: "SL",
       transaction_type: "SELL",
       disclosed_quantity: 0,
       trigger_price: slTrigger,
       is_amo: false,
     };
+    const slValidation = validateOrderPayload(slPayload);
+    if (slValidation.length) {
+      console.error("[SL PAYLOAD INVALID]", slValidation, slPayload);
+    } else {
+      console.log("[SL PAYLOAD]", JSON.stringify(slPayload));
+    }
     const sl = await placeOrderWithRetry(headers, slPayload, "SL-LMT").catch((e) => {
       return { result: { error: e instanceof Error ? e.message : String(e) }, attempts: [], failed: true } as any;
     });
@@ -326,7 +447,7 @@ serve(async (req) => {
 
     // ===== v7 FAIL-SAFE: if SL didn't activate after fill, immediately exit position =====
     if (fill.filled && !slActive) {
-      const exitPayload = { ...entryPayload, transaction_type: "SELL", tag: "zenith-sl-failsafe-exit" };
+      const exitPayload = { ...finalEntryPayload, transaction_type: "SELL", tag: "zenith-sl-failsafe-exit" };
       const exit = await placeOrderWithRetry(headers, exitPayload, "SL-failsafe exit").catch((e) => ({ result: { error: e instanceof Error ? e.message : String(e) }, attempts: [] }));
       return json({
         success: false,
@@ -336,6 +457,8 @@ serve(async (req) => {
         slippage: { quotedLtp: optionLtp, fillPrice, slippagePct: Number(slippagePct.toFixed(3)), tolerancePct: slippageTolerancePct },
         entry: entry.result, slOrder: sl.result, exit: (exit as any)?.result,
         instrument: option, quantity,
+        entryPremium: fillPrice, optionLtp,
+        errorDetails: { reason: (sl as any)?.result?.error ?? "SL not accepted", rejectedPayload: slPayload, failedField: "SL" },
       });
     }
 
@@ -372,7 +495,11 @@ serve(async (req) => {
       stopLossPremiumPoints,
       riskPoints: v6RiskPoints ?? null,
       rrMultiplier: v6Rr,
-      version: "execution-layer-v6-safe",
+      productUsed: entry.productUsed,
+      orderTypeUsed: entry.orderTypeUsed,
+      entryAttempts: entry.tried,
+      fillPrice,
+      version: "execution-layer-v8-explicit",
     });
   } catch (error) {
     console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });

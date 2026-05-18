@@ -367,6 +367,18 @@ type LiveOrderResult = {
   liquidity?: LiquidityMeta;
   error?: string;
   details?: string;
+  // v8 additive: explicit fallback fields + Upstox rejection trace
+  fillPrice?: number;
+  optionLtp?: number;
+  productUsed?: "I" | "D";
+  orderTypeUsed?: "MARKET" | "LIMIT";
+  entryAttempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
+  errorDetails?: {
+    reason?: string;
+    attempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
+    failedField?: string | null;
+    rejectedPayload?: Record<string, unknown> | null;
+  };
 };
 const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
 type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
@@ -2306,8 +2318,15 @@ const Index = () => {
         return;
       }
       const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
+      const sigAny = ai.signal as any;
+      // v8: prefer explicit optionSide / direction from AI signal; fall back to BUY→CE / SELL→PE.
+      const derivedOptionSide: "CE" | "PE" = sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE");
+      const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
       const orderPayload = {
         action: ai.signal.action,
+        direction: derivedDirection,
+        optionSide: derivedOptionSide,
+        transactionType: "BUY" as const,
         spotPrice: liveSpot,
         strike: suggestedStrike ?? undefined,
         tradingLotSize: normalizedTradingLotSize,
@@ -2315,8 +2334,9 @@ const Index = () => {
         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
         stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
         maxSlippagePct: execSettings.slippagePct,
-        riskPoints: (ai.signal as any).riskPoints ?? undefined,
-        rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined,
+        riskPoints: sigAny.riskPoints ?? undefined,
+        rrMultiplier: sigAny.rrMultiplier ?? undefined,
+        preferredProduct: "I" as const,
       };
       pushDebug({
         stage: "ORDER",
@@ -2386,29 +2406,45 @@ const Index = () => {
       setLastExecution(liveOrder);
       if (!liveOrder.success) {
         setExecState("FAILED", liveOrder.error ?? "blocked");
+        const ed = liveOrder.errorDetails;
+        const lastAttempt = ed?.attempts?.slice(-1)[0];
+        const upstoxReason = ed?.reason ?? liveOrder.details ?? lastAttempt?.error ?? "blocked";
         pushDebug({
           stage: "ERROR",
           level: "error",
-          title: "ORDER FAILED",
-          detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`,
-          data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity },
+          title: `ORDER REJECTED — ${liveOrder.error ?? "Upstox"}`,
+          detail: upstoxReason,
+          data: {
+            execution: liveOrder.execution,
+            slippage: liveOrder.slippage,
+            liquidity: liveOrder.liquidity,
+            failedField: ed?.failedField ?? null,
+            rejectedPayload: ed?.rejectedPayload ?? lastAttempt?.payload ?? null,
+            attempts: ed?.attempts ?? liveOrder.entryAttempts ?? [],
+          },
         });
         toast({
           title: liveOrder.error ?? "Live order blocked",
-          description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.",
+          description: upstoxReason,
           variant: "destructive",
         });
         return;
       }
       setExecState("FILLED");
+      // v8: entryPremium fallback chain (some failure-paths only return fillPrice/optionLtp)
+      const resolvedEntryPremium =
+        (liveOrder as any).entryPremium ?? liveOrder.fillPrice ?? liveOrder.slippage?.fillPrice ?? liveOrder.optionLtp ?? 0;
+      (liveOrder as any).entryPremium = resolvedEntryPremium;
       pushDebug({
         stage: "ORDER",
         level: "success",
         title: "ORDER PLACED",
-        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`,
+        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity} · ${liveOrder.productUsed ?? "I"}/${liveOrder.orderTypeUsed ?? "MARKET"}`,
         data: {
           orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id,
           instrument: liveOrder.instrument,
+          productUsed: liveOrder.productUsed,
+          orderTypeUsed: liveOrder.orderTypeUsed,
         },
       });
       if (liveOrder.execution?.orderFilled) {
