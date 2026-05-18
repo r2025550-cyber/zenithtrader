@@ -367,6 +367,18 @@ type LiveOrderResult = {
   liquidity?: LiquidityMeta;
   error?: string;
   details?: string;
+  // v8 additive: explicit fallback fields + Upstox rejection trace
+  fillPrice?: number;
+  optionLtp?: number;
+  productUsed?: "I" | "D";
+  orderTypeUsed?: "MARKET" | "LIMIT";
+  entryAttempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
+  errorDetails?: {
+    reason?: string;
+    attempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
+    failedField?: string | null;
+    rejectedPayload?: Record<string, unknown> | null;
+  };
 };
 const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
 type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
