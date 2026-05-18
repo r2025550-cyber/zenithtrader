@@ -2162,7 +2162,8 @@ const Index = () => {
         const status = await retestUpstox(true);
         if (!status.upstox.ok) return;
       }
-      clearAiRuntimeState();
+      // PRO+++ stability: do NOT clear runtime state before AI fetch — keep last
+      // valid signal/S/R visible while the new analysis is in flight.
       const liveMarket = await fetchLiveNifty(false, true);
       const liveSpot = toNumber(liveMarket?.ltp);
       const payloadTimestamp = liveMarket?.source_timestamp ?? liveMarket?.created_at ?? new Date().toISOString();
