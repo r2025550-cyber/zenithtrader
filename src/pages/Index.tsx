@@ -2306,8 +2306,15 @@ const Index = () => {
         return;
       }
       const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
+      const sigAny = ai.signal as any;
+      // v8: prefer explicit optionSide / direction from AI signal; fall back to BUY→CE / SELL→PE.
+      const derivedOptionSide: "CE" | "PE" = sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE");
+      const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
       const orderPayload = {
         action: ai.signal.action,
+        direction: derivedDirection,
+        optionSide: derivedOptionSide,
+        transactionType: "BUY" as const,
         spotPrice: liveSpot,
         strike: suggestedStrike ?? undefined,
         tradingLotSize: normalizedTradingLotSize,
@@ -2315,8 +2322,9 @@ const Index = () => {
         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
         stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
         maxSlippagePct: execSettings.slippagePct,
-        riskPoints: (ai.signal as any).riskPoints ?? undefined,
-        rrMultiplier: (ai.signal as any).rrMultiplier ?? undefined,
+        riskPoints: sigAny.riskPoints ?? undefined,
+        rrMultiplier: sigAny.rrMultiplier ?? undefined,
+        preferredProduct: "I" as const,
       };
       pushDebug({
         stage: "ORDER",
