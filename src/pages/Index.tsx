@@ -610,40 +610,6 @@ const Index = () => {
     setLastAiUpdateAt(Date.now());
   };
 
-  const applySniperSignal = (signal: Signal) => {
-    if (isExecutionActive() && signalLockRef.current) {
-      console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
-      return;
-    }
-    if (isSignalStaleVsSpot(signal)) {
-      clearAiRuntimeState();
-      return;
-    }
-    let locked = signalLockRef.current;
-    const now = Date.now();
-    if (locked && isSignalStaleVsSpot(locked.signal)) {
-      signalLockRef.current = null;
-      locked = null;
-    }
-    if (locked && now < locked.lockedUntil) {
-      const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
-      const majorBreak =
-        signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 ||
-        signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
-      if (signal.action === "WAIT" && !majorBreak) {
-        setLatestSignal(locked.signal);
-        return;
-      }
-      if (!fullReversal && signal.action !== locked.signal.action) {
-        setLatestSignal(locked.signal);
-        return;
-      }
-    }
-    if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
-    else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
-    setLatestSignal(signal);
-    setLastAiUpdateAt(Date.now());
-  };
 
   const latestLtp = Number(latestData?.ltp);
   const hasLivePrice = Number.isFinite(latestLtp);
