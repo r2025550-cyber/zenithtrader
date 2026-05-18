@@ -186,7 +186,88 @@ async function cancelOrder(headers: HeadersInit, orderId: string) {
   }
 }
 
-serve(async (req) => {
+// ===== v8: Required-field validation for Upstox order payload =====
+function validateOrderPayload(payload: Record<string, unknown>) {
+  const required = ["instrument_token", "quantity", "order_type", "transaction_type", "product"] as const;
+  const missing: string[] = [];
+  for (const k of required) {
+    const v = payload[k];
+    if (v === undefined || v === null || v === "" || (k === "quantity" && Number(v) <= 0)) {
+      missing.push(k);
+    }
+  }
+  if (!["MARKET", "LIMIT", "SL", "SL-M"].includes(String(payload.order_type))) missing.push("order_type:invalid");
+  if (!["BUY", "SELL"].includes(String(payload.transaction_type))) missing.push("transaction_type:invalid");
+  if (!["I", "D"].includes(String(payload.product))) missing.push("product:invalid");
+  if (String(payload.order_type) === "LIMIT" && Number(payload.price) <= 0) missing.push("price:required-for-LIMIT");
+  if (String(payload.order_type) === "SL" && (Number(payload.price) <= 0 || Number(payload.trigger_price) <= 0)) {
+    missing.push("price/trigger_price:required-for-SL");
+  }
+  return missing;
+}
+
+// ===== v8: Entry placement with PRODUCT (I→D) + ORDER_TYPE (MARKET→LIMIT) fallbacks =====
+async function placeEntryWithFallback(
+  headers: HeadersInit,
+  basePayload: Record<string, unknown>,
+  optionLtp: number,
+  preferredProduct: "I" | "D",
+  label: string,
+) {
+  const productOrder: Array<"I" | "D"> = preferredProduct === "I" ? ["I", "D"] : ["D", "I"];
+  const tried: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload: Record<string, unknown> }> = [];
+  let lastErr: unknown = null;
+
+  for (const product of productOrder) {
+    // First attempt: MARKET
+    const marketPayload = { ...basePayload, product, order_type: "MARKET", price: 0, trigger_price: 0 };
+    const validation = validateOrderPayload(marketPayload);
+    if (validation.length) {
+      const errMsg = `Payload validation failed: ${validation.join(", ")}`;
+      tried.push({ product, order_type: "MARKET", ok: false, error: errMsg, payload: marketPayload });
+      lastErr = new Error(errMsg);
+      continue;
+    }
+    console.log(`[ORDER PAYLOAD] ${label} product=${product} order_type=MARKET`, JSON.stringify(marketPayload));
+    try {
+      const r = await placeOrderWithRetry(headers, marketPayload, `${label}/MARKET/${product}`);
+      tried.push({ product, order_type: "MARKET", ok: true, payload: marketPayload });
+      return { result: r.result, attempts: r.attempts, finalPayload: marketPayload, tried, productUsed: product, orderTypeUsed: "MARKET" };
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      tried.push({ product, order_type: "MARKET", ok: false, error: msg, payload: marketPayload });
+      console.warn(`[ORDER FALLBACK] MARKET/${product} failed: ${msg}`);
+    }
+
+    // Second attempt: LIMIT @ LTP for same product
+    if (optionLtp > 0) {
+      const limitPrice = Number(optionLtp.toFixed(2));
+      const limitPayload = { ...basePayload, product, order_type: "LIMIT", price: limitPrice, trigger_price: 0 };
+      const validationL = validateOrderPayload(limitPayload);
+      if (validationL.length) {
+        const errMsg = `Payload validation failed: ${validationL.join(", ")}`;
+        tried.push({ product, order_type: "LIMIT", ok: false, error: errMsg, payload: limitPayload });
+        lastErr = new Error(errMsg);
+        continue;
+      }
+      console.log(`[ORDER PAYLOAD] ${label} product=${product} order_type=LIMIT price=${limitPrice}`, JSON.stringify(limitPayload));
+      try {
+        const r = await placeOrderWithRetry(headers, limitPayload, `${label}/LIMIT/${product}`);
+        tried.push({ product, order_type: "LIMIT", ok: true, payload: limitPayload });
+        return { result: r.result, attempts: r.attempts, finalPayload: limitPayload, tried, productUsed: product, orderTypeUsed: "LIMIT" };
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        tried.push({ product, order_type: "LIMIT", ok: false, error: msg, payload: limitPayload });
+        console.warn(`[ORDER FALLBACK] LIMIT/${product} failed: ${msg}`);
+      }
+    }
+  }
+
+  const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+  throw Object.assign(new Error(`${label} failed across all product/order_type fallbacks: ${errMsg}`), { tried });
+}
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
