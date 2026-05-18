@@ -495,7 +495,11 @@ serve(async (req) => {
       stopLossPremiumPoints,
       riskPoints: v6RiskPoints ?? null,
       rrMultiplier: v6Rr,
-      version: "execution-layer-v6-safe",
+      productUsed: entry.productUsed,
+      orderTypeUsed: entry.orderTypeUsed,
+      entryAttempts: entry.tried,
+      fillPrice,
+      version: "execution-layer-v8-explicit",
     });
   } catch (error) {
     console.error("place-live-order Upstox failure", { message: error instanceof Error ? error.message : String(error) });
