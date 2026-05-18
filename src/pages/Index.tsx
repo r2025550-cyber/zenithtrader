@@ -2406,29 +2406,45 @@ const Index = () => {
       setLastExecution(liveOrder);
       if (!liveOrder.success) {
         setExecState("FAILED", liveOrder.error ?? "blocked");
+        const ed = liveOrder.errorDetails;
+        const lastAttempt = ed?.attempts?.slice(-1)[0];
+        const upstoxReason = ed?.reason ?? liveOrder.details ?? lastAttempt?.error ?? "blocked";
         pushDebug({
           stage: "ERROR",
           level: "error",
-          title: "ORDER FAILED",
-          detail: `${liveOrder.error ?? "blocked"} — ${liveOrder.details ?? ""}`,
-          data: { execution: liveOrder.execution, slippage: liveOrder.slippage, liquidity: liveOrder.liquidity },
+          title: `ORDER REJECTED — ${liveOrder.error ?? "Upstox"}`,
+          detail: upstoxReason,
+          data: {
+            execution: liveOrder.execution,
+            slippage: liveOrder.slippage,
+            liquidity: liveOrder.liquidity,
+            failedField: ed?.failedField ?? null,
+            rejectedPayload: ed?.rejectedPayload ?? lastAttempt?.payload ?? null,
+            attempts: ed?.attempts ?? liveOrder.entryAttempts ?? [],
+          },
         });
         toast({
           title: liveOrder.error ?? "Live order blocked",
-          description: liveOrder.details ?? "Available Cash is insufficient for the selected lot size.",
+          description: upstoxReason,
           variant: "destructive",
         });
         return;
       }
       setExecState("FILLED");
+      // v8: entryPremium fallback chain (some failure-paths only return fillPrice/optionLtp)
+      const resolvedEntryPremium =
+        (liveOrder as any).entryPremium ?? liveOrder.fillPrice ?? liveOrder.slippage?.fillPrice ?? liveOrder.optionLtp ?? 0;
+      (liveOrder as any).entryPremium = resolvedEntryPremium;
       pushDebug({
         stage: "ORDER",
         level: "success",
         title: "ORDER PLACED",
-        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity}`,
+        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity} · ${liveOrder.productUsed ?? "I"}/${liveOrder.orderTypeUsed ?? "MARKET"}`,
         data: {
           orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id,
           instrument: liveOrder.instrument,
+          productUsed: liveOrder.productUsed,
+          orderTypeUsed: liveOrder.orderTypeUsed,
         },
       });
       if (liveOrder.execution?.orderFilled) {
