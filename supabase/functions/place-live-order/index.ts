@@ -268,6 +268,8 @@ async function placeEntryWithFallback(
   const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
   throw Object.assign(new Error(`${label} failed across all product/order_type fallbacks: ${errMsg}`), { tried });
 }
+
+serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
