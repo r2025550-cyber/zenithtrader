@@ -524,30 +524,32 @@ const Index = () => {
     else console.log(tag, evt.title, payload);
   };
 
-  const clearAiRuntimeState = () => {
+  // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
+  // visible signal so support/resistance, reasoning, and confidence persist.
+  // Active execution always wins — no reset is allowed while a trade is in-flight.
+  const clearAiRuntimeState = (opts: { force?: boolean } = {}) => {
+    if (!opts.force && isExecutionActive()) {
+      console.log("[STATE GUARD] suppressed clearAiRuntimeState — execution active");
+      return;
+    }
     signalLockRef.current = null;
     levelsAnchorLtpRef.current = null;
     lastSignalAutofillRef.current = "";
     lastSignalAlertRef.current = "";
     lastDebugSignalKeyRef.current = "";
     lastAutoFiredSignalRef.current = "";
-    setLatestSignal(null);
+    // Intentionally do NOT call setLatestSignal(null) — keep last valid signal
+    // visible so the dashboard never flickers or blanks. New signal will replace it.
   };
 
   const signalLiveSpot = (signal?: Signal | null) =>
     toNumber(signal?.liveSpot ?? signal?.ruleContext?.rules?.ltp ?? (signal as any)?.entry ?? (signal as any)?.entryPrice);
   const isSignalStaleVsSpot = (signal: Signal | null | undefined, spot: number | null = hasLivePrice ? latestLtp : null) => {
     const liveSpot = toNumber(spot);
-    if (!signal || liveSpot === null) return Boolean(signal);
+    if (!signal || liveSpot === null) return false;
     const signalSpot = signalLiveSpot(signal);
-    const rules: any = signal.ruleContext?.rules ?? {};
-    const sup = toNumber(rules.immediateSupport ?? rules.support15);
-    const res = toNumber(rules.immediateResistance ?? rules.resistance15);
-    return (
-      (signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) ||
-      (sup !== null && Math.abs(liveSpot - sup) > SR_STALE_DISTANCE_PTS) ||
-      (res !== null && Math.abs(liveSpot - res) > SR_STALE_DISTANCE_PTS)
-    );
+    // Only flag stale on large spot drift. S/R distance handled server-side.
+    return signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS;
   };
 
   // True while an order is being attempted (incl. retry backoff window).
@@ -562,20 +564,50 @@ const Index = () => {
       console.log("[SIGNAL LOCK] suppressed AI overwrite — execution active");
       return false;
     }
-    const signalSpot = signalLiveSpot(signal);
-    if (liveSpot !== null && signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS) {
-      clearAiRuntimeState();
-      return false;
-    }
+    // Stale signal: do NOT wipe UI. Keep last valid signal visible; just skip apply.
     if (isSignalStaleVsSpot(signal, liveSpot)) {
-      clearAiRuntimeState();
+      console.log("[SIGNAL STALE] ignored fresh signal — spot drift too large, keeping last valid");
       return false;
     }
-    levelsAnchorLtpRef.current = liveSpot ?? signalSpot;
+    levelsAnchorLtpRef.current = liveSpot ?? signalLiveSpot(signal);
     signalLockRef.current = signal.action !== "WAIT" ? { signal, lockedUntil: Date.now() + SIGNAL_LOCK_MS } : null;
     setLatestSignal(signal);
     setLastAiUpdateAt(Date.now());
     return true;
+  };
+
+  const applySniperSignal = (signal: Signal) => {
+    if (isExecutionActive() && signalLockRef.current) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
+      return;
+    }
+    if (isSignalStaleVsSpot(signal)) {
+      console.log("[SIGNAL STALE] ignored sniper signal — spot drift too large");
+      return;
+    }
+    let locked = signalLockRef.current;
+    const now = Date.now();
+    if (locked && isSignalStaleVsSpot(locked.signal)) {
+      signalLockRef.current = null;
+      locked = null;
+    }
+    if (locked && now < locked.lockedUntil) {
+      const fullReversal = signal.action !== "WAIT" && signal.action !== locked.signal.action;
+      const majorBreak =
+        signal.ruleContext?.rules?.priceAboveEma21 !== locked.signal.ruleContext?.rules?.priceAboveEma21 ||
+        signal.ruleContext?.rules?.priceBelowEma21 !== locked.signal.ruleContext?.rules?.priceBelowEma21;
+      if (signal.action === "WAIT" && !majorBreak) {
+        // WAIT must not overwrite an active directional signal's visuals.
+        return;
+      }
+      if (!fullReversal && signal.action !== locked.signal.action) {
+        return;
+      }
+    }
+    if (signal.action !== "WAIT") signalLockRef.current = { signal, lockedUntil: now + SIGNAL_LOCK_MS };
+    else if (!locked || now >= locked.lockedUntil) signalLockRef.current = null;
+    setLatestSignal(signal);
+    setLastAiUpdateAt(Date.now());
   };
 
   const applySniperSignal = (signal: Signal) => {
