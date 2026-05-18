@@ -284,7 +284,9 @@ serve(async (req) => {
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
     const slippageTolerancePct = parsed.data.maxSlippagePct ?? ENTRY_SLIPPAGE_PCT;
 
-    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike);
+    // v8: explicit optionSide preferred; fallback derives from action (BUY→CE / SELL→PE) for backwards-compat
+    const explicitOptionSide = parsed.data.optionSide;
+    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike, explicitOptionSide);
 
     // ===== v6 LIQUIDITY FILTER =====
     const quote = await getOptionQuote(headers, String(option.instrumentToken));
