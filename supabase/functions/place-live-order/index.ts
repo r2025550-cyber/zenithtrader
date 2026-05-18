@@ -61,8 +61,8 @@ async function getAvailableCash(headers: HeadersInit) {
   return numberFrom(equity?.available_margin, equity?.availableMargin, equity?.cash, equity?.available_cash, equity?.net) ?? 0;
 }
 
-async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number) {
-  const optionType = action === "BUY" ? "CE" : "PE";
+async function resolveOption(headers: HeadersInit, spotPrice: number, action: "BUY" | "SELL", requestedStrike?: number, explicitOptionSide?: "CE" | "PE") {
+  const optionType = explicitOptionSide ?? (action === "BUY" ? "CE" : "PE");
   const atmStrike = Math.round(spotPrice / 50) * 50;
   const targetStrike = requestedStrike ?? atmStrike;
   const encoded = encodeURIComponent(INSTRUMENT_KEY);
