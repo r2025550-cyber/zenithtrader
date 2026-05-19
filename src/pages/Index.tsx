@@ -2327,6 +2327,12 @@ const Index = () => {
         direction: derivedDirection,
         optionSide: derivedOptionSide,
         transactionType: "BUY" as const,
+        instrument_token:
+          derivedOptionSide === "CE"
+            ? liveMarket.ce_instrument_token
+            : liveMarket.pe_instrument_token,
+        ce_instrument_token: liveMarket.ce_instrument_token,
+        pe_instrument_token: liveMarket.pe_instrument_token,
         spotPrice: liveSpot,
         strike: suggestedStrike ?? undefined,
         tradingLotSize: normalizedTradingLotSize,
