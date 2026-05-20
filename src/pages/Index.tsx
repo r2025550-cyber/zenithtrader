@@ -2370,21 +2370,22 @@ const Index = () => {
       const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
       const sigAny = ai.signal as any;
       // v8: prefer explicit optionSide / direction from AI signal; fall back to BUY→CE / SELL→PE.
-      const derivedOptionSide: "CE" | "PE" = sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE");
+      const rawOptionSide = String(sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE")).toUpperCase();
+      const derivedOptionSide: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
       const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
-      const orderPayload = {
+      const vpsEndpointUrl = `${normalizedVpsBaseUrl}/place-live-order`;
+      const buildOrderPayload = (attempt: number) => {
+        const orderPayload: Record<string, unknown> & { instrument_token?: string | null } = {
         action: ai.signal.action,
         direction: derivedDirection,
         optionSide: derivedOptionSide,
         transactionType: "BUY" as const,
-        instrument_token:
-          derivedOptionSide === "CE"
-            ? liveMarket.ce_instrument_token
-            : liveMarket.pe_instrument_token,
+        instrument_token: null,
         ce_instrument_token: liveMarket.ce_instrument_token,
         pe_instrument_token: liveMarket.pe_instrument_token,
         spotPrice: liveSpot,
         strike: suggestedStrike ?? undefined,
+        quantity: suggestedQuantity,
         tradingLotSize: normalizedTradingLotSize,
         effectiveLotSize: ai.signal.effectiveLotSize,
         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
@@ -2393,13 +2394,69 @@ const Index = () => {
         riskPoints: sigAny.riskPoints ?? undefined,
         rrMultiplier: sigAny.rrMultiplier ?? undefined,
         preferredProduct: "I" as const,
+        retryAttempt: attempt,
       };
+        if (derivedOptionSide === "PE") {
+          orderPayload.instrument_token = liveMarket.pe_instrument_token;
+        } else {
+          orderPayload.instrument_token = liveMarket.ce_instrument_token;
+        }
+        return orderPayload;
+      };
+      const validateOrderPayload = (payload: Record<string, unknown>) => {
+        const missing: string[] = [];
+        if (!isPresent(payload.instrument_token)) missing.push("instrument_token");
+        if (!isPositiveNumber(payload.quantity)) missing.push("quantity");
+        if (!isPresent(payload.action)) missing.push("action");
+        if (!isPresent(payload.transactionType)) missing.push("transactionType");
+        if (!isPositiveNumber(payload.strike)) missing.push("strike");
+        if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        return missing;
+      };
+      const updatePayloadInspector = (payload: Record<string, unknown> | null, retryAttempt: number, missingFields: string[] = []) => {
+        setPayloadInspector({
+          signalTimestamp: new Date(sigTs).toISOString(),
+          signalAgeSec: Math.max(0, Math.round((Date.now() - sigTs) / 1000)),
+          liveSpotPrice: liveSpot,
+          suggestedStrike,
+          derivedOptionSide,
+          action: ai.signal.action,
+          transactionType: "BUY",
+          quantity: suggestedQuantity,
+          ce_instrument_token: liveMarket.ce_instrument_token ?? null,
+          pe_instrument_token: liveMarket.pe_instrument_token ?? null,
+          instrument_token: (payload?.instrument_token as string | null | undefined) ?? null,
+          vpsEndpointUrl,
+          retryAttempt,
+          orderPayload: payload,
+          missingFields,
+        });
+      };
+      const preflightPayload = buildOrderPayload(1);
+      const preflightMissing = validateOrderPayload(preflightPayload);
+      updatePayloadInspector(preflightPayload, 1, preflightMissing);
+      console.log("[LIVE MARKET]", liveMarket);
+      console.log("[DERIVED SIDE]", derivedOptionSide);
+      console.log("[FINAL VPS PAYLOAD]", preflightPayload);
+      if (preflightMissing.length > 0) {
+        const reason = preflightMissing[0] === "optionSide" ? "invalid option side" : `${preflightMissing[0]} missing`;
+        setExecutionRootCause(reason);
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: `EXECUTION BLOCKED — ${reason}`,
+          detail: `Missing required payload field(s): ${preflightMissing.join(", ")}`,
+          data: { missingFields: preflightMissing, rejectedPayload: preflightPayload, liveMarket },
+        });
+        toast({ title: "Execution blocked", description: `Missing required field: ${preflightMissing[0]}`, variant: "destructive" });
+        return;
+      }
       pushDebug({
         stage: "ORDER",
         level: "info",
         title: "ORDER PLACING",
         detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
-        data: orderPayload,
+        data: preflightPayload,
       });
 
       // ====== Execution state machine + retry queue (3 attempts, expo backoff) ======
