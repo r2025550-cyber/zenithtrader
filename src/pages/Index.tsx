@@ -3138,6 +3138,8 @@ const Index = () => {
   const emergencyExit = async (lockForDay = false) => {
     setIsBusy(true);
     try {
+      fillPollRef.current.cancelled = true;
+      fillPollRef.current.orderId = null;
       await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
       const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
