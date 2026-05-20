@@ -329,6 +329,13 @@ type ActiveTradePlan = {
   stopLossPremium?: number;
   lastSyncedStopLossPremium?: number;
   exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET";
+  // Locked-contract immutables (set at fill, never mutated)
+  tradingSymbol?: string;
+  optionSide?: "CE" | "PE";
+  signalStrike?: number;
+  executedStrike?: number;
+  entryPremiumSnapshot?: number;
+  spotPriceAtSignal?: number;
 } | null;
 type ExecutionMeta = {
   orderPlaced?: boolean;
@@ -439,6 +446,19 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Frozen option contract resolved at signal generation. Never recomputed during execution.
+  const signalContractRef = useRef<{
+    signalKey: string;
+    strike: number;
+    optionSide: "CE" | "PE";
+    action: "BUY" | "SELL";
+    instrument_token: string;
+    tradingSymbol: string;
+    expiry?: string;
+    premiumAtSignal: number;
+    spotPriceAtSignal: number | null;
+    lockedAt: number;
+  } | null>(null);
   // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
   // even across temporary VPS unreachable errors.
   const executionStateRef = useRef<ExecutionState>("IDLE");
@@ -568,6 +588,14 @@ const Index = () => {
     retryAttempt: number;
     orderPayload: Record<string, unknown> | null;
     missingFields: string[];
+    // Strike-lock forensics
+    signalStrike?: number | null;
+    executedStrike?: number | null;
+    strikeMatch?: boolean | null;
+    premiumAtSignal?: number | null;
+    premiumAtFill?: number | null;
+    lockedTradingSymbol?: string | null;
+    lockedInstrumentToken?: string | null;
   };
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
@@ -1094,11 +1122,29 @@ const Index = () => {
     lastSignalAutofillRef.current = signalKey;
     // New signal → reset manual-edit flag so auto-fill can populate fresh values.
     userEditedExitsRef.current = false;
-    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", {
+    invokeFunction<{ premium: number; instrument?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; optionType?: string } }>("fetch-option-premium", {
       strike,
       action,
     })
       .then(({ premium, instrument }) => {
+        // Freeze the contract at signal-generation time. Execution will NEVER recompute strike/token.
+        const optionSide: "CE" | "PE" = action === "BUY" ? "CE" : "PE";
+        if (instrument?.instrumentToken && (instrument.strike ?? strike) === strike) {
+          signalContractRef.current = {
+            signalKey,
+            strike,
+            optionSide,
+            action,
+            instrument_token: instrument.instrumentToken,
+            tradingSymbol: instrument.tradingSymbol ?? `Nifty ${strike} ${optionSide}`,
+            premiumAtSignal: premium,
+            spotPriceAtSignal: Number.isFinite(Number(latestData?.ltp)) ? Number(latestData?.ltp) : null,
+            lockedAt: Date.now(),
+          };
+          console.log("[CONTRACT LOCKED]", signalContractRef.current);
+        } else {
+          console.warn("[CONTRACT LOCK FAILED]", { strike, resolved: instrument });
+        }
         const rules = latestSignal.ruleContext?.rules as any;
         const ltpNow = Number(latestData?.ltp);
         let slPts: number | undefined;
@@ -2455,36 +2501,97 @@ const Index = () => {
       const sigAny = ai.signal as any;
       // v8: prefer explicit optionSide / direction from AI signal; fall back to BUY→CE / SELL→PE.
       const rawOptionSide = String(sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE")).toUpperCase();
-      const derivedOptionSide: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
+      const derivedOptionSideInit: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
       const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
       const vpsEndpointUrl = `${normalizedVpsBaseUrl}/place-live-order`;
+
+      // ===== STRIKE LOCK: resolve frozen contract; NEVER use liveMarket ATM tokens =====
+      const lockedSignalKey = `${lockedSignal.created_at ?? ""}-${lockedSignal.action}-${lockedSignal.strike}`;
+      let lockedContract = signalContractRef.current;
+      if (!lockedContract || lockedContract.signalKey !== lockedSignalKey) {
+        if (!suggestedStrike || !derivedOptionSideInit) {
+          setExecutionRootCause("strike drift — missing locked strike");
+          pushDebug({
+            stage: "ERROR", level: "error", title: "STRIKE_DRIFT_BLOCKED",
+            detail: `Locked contract missing & signal strike unparseable (${ai.signal.strike})`,
+          });
+          toast({ title: "STRIKE_DRIFT_BLOCKED", description: "No locked contract for this signal.", variant: "destructive" });
+          return;
+        }
+        try {
+          const resp = await invokeFunction<{ premium: number; instrument: { instrumentToken: string; tradingSymbol: string; strike: number; optionType: string } }>(
+            "fetch-option-premium",
+            { strike: suggestedStrike, action: ai.signal.action },
+          );
+          if (!resp.instrument?.instrumentToken || Number(resp.instrument.strike) !== suggestedStrike) {
+            setExecutionRootCause("strike drift");
+            pushDebug({
+              stage: "ERROR", level: "error", title: "STRIKE_DRIFT_BLOCKED",
+              detail: `Signal strike ${suggestedStrike} ≠ resolved ${resp.instrument?.strike ?? "?"}`,
+              data: { signalStrike: suggestedStrike, resolved: resp.instrument },
+            });
+            toast({ title: "STRIKE_DRIFT_BLOCKED", description: `Signal ${suggestedStrike} ≠ resolved ${resp.instrument?.strike}`, variant: "destructive" });
+            return;
+          }
+          lockedContract = {
+            signalKey: lockedSignalKey,
+            strike: suggestedStrike,
+            optionSide: derivedOptionSideInit,
+            action: ai.signal.action as "BUY" | "SELL",
+            instrument_token: resp.instrument.instrumentToken,
+            tradingSymbol: resp.instrument.tradingSymbol,
+            premiumAtSignal: resp.premium,
+            spotPriceAtSignal: liveSpot,
+            lockedAt: Date.now(),
+          };
+          signalContractRef.current = lockedContract;
+          console.log("[CONTRACT LOCKED — exec-time]", lockedContract);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setExecutionRootCause("strike lock failed");
+          pushDebug({ stage: "ERROR", level: "error", title: "STRIKE_DRIFT_BLOCKED", detail: `Contract resolution failed: ${msg}` });
+          toast({ title: "Contract lock failed", description: msg, variant: "destructive" });
+          return;
+        }
+      }
+
+      // Hard strike-drift validation
+      if (suggestedStrike && lockedContract.strike !== suggestedStrike) {
+        setExecutionRootCause("strike drift");
+        pushDebug({
+          stage: "ERROR", level: "error", title: "STRIKE_DRIFT_BLOCKED",
+          detail: `Signal strike ${suggestedStrike} ≠ locked contract strike ${lockedContract.strike}`,
+          data: { signalStrike: suggestedStrike, lockedContract },
+        });
+        toast({ title: "STRIKE_DRIFT_BLOCKED", description: `signal ${suggestedStrike} ≠ locked ${lockedContract.strike}`, variant: "destructive" });
+        return;
+      }
+      const derivedOptionSide: "CE" | "PE" = lockedContract.optionSide;
+
       // VPS expects snake_case; we send BOTH camelCase + snake_case for compatibility.
-      // signal_action = AI market bias (BUY/SELL on NIFTY direction)
-      // execution_side = actual broker leg (always BUY for long-option scalping)
       const buildOrderPayload = (attempt: number) => {
-        // Strict token mapping — never auto-fallback to opposite side
-        const resolvedToken =
-          derivedOptionSide === "PE" ? (liveMarket.pe_instrument_token ?? null)
-          : derivedOptionSide === "CE" ? (liveMarket.ce_instrument_token ?? null)
-          : null;
+        // ALWAYS use locked contract token — never recompute from liveMarket ATM
+        const resolvedToken = lockedContract!.instrument_token;
         const orderPayload: Record<string, unknown> & { instrument_token?: string | null } = {
           // ---- AI / signal context ----
-          action: ai.signal.action,                 // legacy
-          signal_action: ai.signal.action,          // explicit AI bias (BUY/SELL on spot)
+          action: ai.signal.action,
+          signal_action: ai.signal.action,
           direction: derivedDirection,
           optionSide: derivedOptionSide,
-          option_side: derivedOptionSide,           // snake_case mirror
+          option_side: derivedOptionSide,
           // ---- Execution side (broker leg) ----
-          transactionType: "BUY" as const,          // camelCase (legacy)
-          transaction_type: "BUY" as const,         // snake_case (VPS requirement)
-          execution_side: "BUY" as const,           // explicit broker leg
-          // ---- Instrument ----
+          transactionType: "BUY" as const,
+          transaction_type: "BUY" as const,
+          execution_side: "BUY" as const,
+          // ---- Instrument (LOCKED at signal time) ----
           instrument_token: resolvedToken,
+          tradingSymbol: lockedContract!.tradingSymbol,
           ce_instrument_token: liveMarket.ce_instrument_token ?? null,
           pe_instrument_token: liveMarket.pe_instrument_token ?? null,
           // ---- Trade params ----
           spotPrice: liveSpot,
-          strike: suggestedStrike ?? undefined,
+          spotPriceAtSignal: lockedContract!.spotPriceAtSignal,
+          strike: lockedContract!.strike,
           quantity: suggestedQuantity,
           tradingLotSize: normalizedTradingLotSize,
           effectiveLotSize: ai.signal.effectiveLotSize,
@@ -2521,16 +2628,17 @@ const Index = () => {
         if (payload.product !== "I" && payload.product !== "D") missing.push("product_invalid");
         if (payload.order_type !== "MARKET" && payload.order_type !== "LIMIT" && payload.order_type !== "SL" && payload.order_type !== "SL-M") missing.push("order_type_invalid");
         if (payload.validity !== "DAY" && payload.validity !== "IOC") missing.push("validity_invalid");
-        // Strict token-to-side mapping guard
-        if (derivedOptionSide === "PE" && payload.instrument_token !== liveMarket.pe_instrument_token) {
-          missing.push("pe_instrument_token_mismatch");
+        // Strict locked-contract guard: payload MUST carry the frozen instrument_token
+        if (payload.instrument_token !== lockedContract!.instrument_token) {
+          missing.push("locked_token_mismatch");
         }
-        if (derivedOptionSide === "CE" && payload.instrument_token !== liveMarket.ce_instrument_token) {
-          missing.push("ce_instrument_token_mismatch");
+        if (Number(payload.strike) !== lockedContract!.strike) {
+          missing.push("locked_strike_mismatch");
         }
         return missing;
       };
       const updatePayloadInspector = (payload: Record<string, unknown> | null, retryAttempt: number, missingFields: string[] = []) => {
+        const execStrike = payload ? Number(payload.strike) : null;
         setPayloadInspector({
           signalTimestamp: new Date(sigTs).toISOString(),
           signalAgeSec: Math.max(0, Math.round((Date.now() - sigTs) / 1000)),
@@ -2547,6 +2655,13 @@ const Index = () => {
           retryAttempt,
           orderPayload: payload,
           missingFields,
+          signalStrike: suggestedStrike ?? lockedContract?.strike ?? null,
+          executedStrike: execStrike,
+          strikeMatch: execStrike !== null && suggestedStrike !== null ? execStrike === suggestedStrike : null,
+          premiumAtSignal: lockedContract?.premiumAtSignal ?? null,
+          premiumAtFill: null,
+          lockedTradingSymbol: lockedContract?.tradingSymbol ?? null,
+          lockedInstrumentToken: lockedContract?.instrument_token ?? null,
         });
       };
       const preflightPayload = buildOrderPayload(1);
@@ -2773,6 +2888,23 @@ const Index = () => {
         shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
       const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
       const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
+      // Final strike-drift guard: compare what Upstox actually executed vs locked signal contract
+      const executedSymbol = liveOrder.instrument?.tradingSymbol ?? "";
+      const executedStrike = parseSuggestedStrike(executedSymbol) ?? Number(liveOrder.instrument?.strike);
+      if (Number.isFinite(executedStrike) && lockedContract && executedStrike !== lockedContract.strike) {
+        pushDebug({
+          stage: "ERROR", level: "error", title: "STRIKE_DRIFT_DETECTED_POST_FILL",
+          detail: `Locked ${lockedContract.strike} ≠ executed ${executedStrike} (${executedSymbol})`,
+          data: { lockedContract, executed: liveOrder.instrument },
+        });
+        toast({ title: "⚠ Strike drift detected post-fill", description: `Locked ${lockedContract.strike} ≠ executed ${executedStrike}`, variant: "destructive" });
+      }
+      setPayloadInspector((prev) => prev ? {
+        ...prev,
+        executedStrike: Number.isFinite(executedStrike) ? executedStrike : prev.executedStrike,
+        strikeMatch: Number.isFinite(executedStrike) && lockedContract ? executedStrike === lockedContract.strike : prev.strikeMatch,
+        premiumAtFill: liveOrder.entryPremium ?? null,
+      } : prev);
       const plan: NonNullable<ActiveTradePlan> = {
         action: ai.signal.action as "BUY" | "SELL",
         entry: liveSpot,
@@ -2789,6 +2921,13 @@ const Index = () => {
         targetPremium,
         stopLossPremium,
         lastSyncedStopLossPremium: liveOrder.stopLossPremium,
+        // Immutable locked-contract snapshot
+        tradingSymbol: lockedContract?.tradingSymbol ?? liveOrder.instrument.tradingSymbol,
+        optionSide: lockedContract?.optionSide ?? derivedOptionSide,
+        signalStrike: lockedContract?.strike ?? suggestedStrike ?? undefined,
+        executedStrike: Number.isFinite(executedStrike) ? executedStrike : undefined,
+        entryPremiumSnapshot: lockedContract?.premiumAtSignal,
+        spotPriceAtSignal: lockedContract?.spotPriceAtSignal ?? undefined,
       };
       if (!userEditedExitsRef.current) {
         setUserTargetPoints(formatPremiumInput(targetPremium));
@@ -2838,6 +2977,8 @@ const Index = () => {
       const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      signalContractRef.current = null;
+      lastSignalAutofillRef.current = "";
       setCooldownUntil(nextCooldown);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
       localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
@@ -4325,6 +4466,13 @@ const Index = () => {
                         ["instrument_token", payloadInspector.instrument_token],
                         ["VPS endpoint URL", payloadInspector.vpsEndpointUrl],
                         ["retry attempt", payloadInspector.retryAttempt],
+                        ["SIGNAL_STRIKE", payloadInspector.signalStrike],
+                        ["EXECUTED_STRIKE", payloadInspector.executedStrike],
+                        ["STRIKE_MATCH", payloadInspector.strikeMatch === null ? null : (payloadInspector.strikeMatch ? "✓ MATCH" : "✗ DRIFT")],
+                        ["PREMIUM_AT_SIGNAL", payloadInspector.premiumAtSignal],
+                        ["PREMIUM_AT_FILL", payloadInspector.premiumAtFill],
+                        ["LOCKED_SYMBOL", payloadInspector.lockedTradingSymbol],
+                        ["LOCKED_TOKEN", payloadInspector.lockedInstrumentToken],
                       ].map(([label, value]) => {
                         const ok = isPresent(value);
                         return (
