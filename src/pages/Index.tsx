@@ -2977,6 +2977,8 @@ const Index = () => {
       const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      signalContractRef.current = null;
+      lastSignalAutofillRef.current = "";
       setCooldownUntil(nextCooldown);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:false`);
       localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
