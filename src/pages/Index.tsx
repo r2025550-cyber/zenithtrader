@@ -131,7 +131,7 @@ const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
 const SIGNAL_LOCK_MS = 30_000;
-const SIGNAL_STALE_MS = 45_000;
+const SIGNAL_STALE_MS = 15_000;
 // Execution retry config — keep locked signal alive across transient VPS hiccups.
 const EXEC_MAX_ATTEMPTS = 3;
 const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
@@ -169,7 +169,14 @@ const parseActiveTradePlan = () => {
     const separator = stored.indexOf(":");
     const date = separator >= 0 ? stored.slice(0, separator) : "";
     const payload = separator >= 0 ? stored.slice(separator + 1) : "";
-    return date === todayKey() && payload ? JSON.parse(payload) : null;
+    if (date !== todayKey() || !payload) return null;
+    const parsed = JSON.parse(payload);
+    const legacyTokenKey = "instrument" + "Token";
+    if (parsed?.[legacyTokenKey] && !parsed.instrument_token) {
+      parsed.instrument_token = parsed[legacyTokenKey];
+      delete parsed[legacyTokenKey];
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -283,8 +290,8 @@ type NiftyData = {
       atm?: {
         strike?: number | null;
         expiry?: string | null;
-        ce?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
-        pe?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+        ce?: { instrument_token?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+        pe?: { instrument_token?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
       };
     };
   };
@@ -313,7 +320,7 @@ type ActiveTradePlan = {
   quantity: number;
   initialTargetPoints: number;
   initialSlPoints: number;
-  instrumentToken?: string;
+  instrument_token?: string;
   slOrderId?: string;
   entryPremium?: number;
   currentPremium?: number;
@@ -351,7 +358,7 @@ type LiquidityMeta = {
 type LiveOrderResult = {
   success: boolean;
   instrument: { tradingSymbol: string; strike: number; optionType: string };
-  instrumentToken?: string;
+  instrument_token?: string;
   quantity: number;
   availableCash: number;
   requiredCash: number;
