@@ -571,6 +571,7 @@ const Index = () => {
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
   const [executionRootCause, setExecutionRootCause] = useState<string | null>(null);
+  const [vpsForensics, setVpsForensics] = useState<VpsForensics | null>(null);
   const lastDebugSignalKeyRef = useRef<string>("");
   const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
     const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
@@ -585,6 +586,9 @@ const Index = () => {
   const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
   const classifyExecutionRootCause = (message: string) => {
     const lower = message.toLowerCase();
+    if (lower.includes("product")) return lower.includes("invalid") ? "Rejected field: product" : "Missing field: product";
+    if (lower.includes("order_type")) return lower.includes("invalid") ? "Rejected field: order_type" : "Missing field: order_type";
+    if (lower.includes("validity")) return lower.includes("invalid") ? "Rejected field: validity" : "Missing field: validity";
     if (lower.includes("transaction_type") || lower.includes("transactiontype")) return "transaction_type missing";
     if (lower.includes("instrument_token")) return "instrument_token missing";
     if (lower.includes("token_mismatch")) return "option token / side mismatch";
