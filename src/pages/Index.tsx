@@ -684,11 +684,21 @@ const Index = () => {
     return signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS;
   };
 
-  // True while an order is being attempted (incl. retry backoff window).
+  // True while an order is being attempted (incl. retry backoff window and waiting-for-fill).
   const isExecutionActive = () => {
     const s = executionStateRef.current;
-    return s === "PENDING" || s === "SENDING" || s === "VPS_CONNECTED" || s === "EXECUTING";
+    return (
+      s === "PENDING" ||
+      s === "SENDING" ||
+      s === "VPS_CONNECTED" ||
+      s === "EXECUTING" ||
+      s === "ORDER_SENT" ||
+      s === "ORDER_ACCEPTED" ||
+      s === "WAITING_FOR_FILL"
+    );
   };
+  // Polling controller for broker fill confirmation. Single in-flight poll only.
+  const fillPollRef = useRef<{ cancelled: boolean; orderId: string | null }>({ cancelled: false, orderId: null });
 
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
     // SINGLE-POSITION LOCK: ignore any signal while a trade is open.
