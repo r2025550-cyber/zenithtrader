@@ -15,35 +15,44 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } 
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-// v7-aggressive: faster scalping cadence
-const MIN_TRADE_GAP_MIN = 4;      // was 12 — allow more trades
-const MAX_TRADES_PER_DAY = 12;    // was 5 — capture more intraday moves
-const SIDEWAYS_RANGE_PTS = 20;    // was 30 — fewer sideways blocks
-const TRAIL_TRIGGER_PTS = 6;      // was 10 — break-even sooner
-const TRAIL_LOCK_PTS = 6;         // was 10 — lock smaller profit
-const TRAIL_LOCK_AT_PROFIT = 12;  // was 20 — lock earlier
-const NEAR_ZONE_PTS = 12;         // proximity to S/R for bounce/rejection
-const RETEST_TOLERANCE_PTS = 8;   // pullback proximity to broken level
-const RETEST_MAX_AGE_CANDLES = 4; // breakout must be within last N candles
-// v4 constants
-const EARLY_ENTRY_MIN_BODY_PTS = 10;     // strong breakout close min body
-const EARLY_ENTRY_MIN_MOVE_PTS = 10;     // 1-min move threshold
-const FREQUENCY_BOOST_MIN_GAP = 30;      // minutes
-const PULLBACK_TOLERANCE_PTS = 10;       // trend continuation pullback to EMA21
-const PARTIAL_BOOK_PTS = 15;             // book 50% at +15
+// v9-balanced: disciplined aggressive scalper (4–5 quality trades/day)
+const MIN_TRADE_GAP_MIN = 8;      // v9: was 4 — reduce clustering, still active
+const MAX_TRADES_PER_DAY = 5;     // v9: was 12 — quality over quantity (6th allowed conditionally)
+const SIDEWAYS_RANGE_PTS = 20;
+const TRAIL_TRIGGER_PTS = 6;
+const TRAIL_LOCK_PTS = 6;
+const TRAIL_LOCK_AT_PROFIT = 12;
+const NEAR_ZONE_PTS = 12;
+const RETEST_TOLERANCE_PTS = 8;
+const RETEST_MAX_AGE_CANDLES = 4;
+// v9: tighter early-entry filters — kill weak spike entries
+const EARLY_ENTRY_MIN_BODY_PTS = 18;     // v9: was 10
+const EARLY_ENTRY_MIN_MOVE_PTS = 18;     // v9: was 10
+const FREQUENCY_BOOST_MIN_GAP = 30;
+const PULLBACK_TOLERANCE_PTS = 10;
+const PARTIAL_BOOK_PTS = 15;
 const PARTIAL_BOOK_FRACTION = 0.5;
-const MOMENTUM_STREAK = 3;               // N consecutive strong candles
-const CHOPPY_RANGE_PTS = 20;             // very tight = choppy
+const MOMENTUM_STREAK = 3;
+const CHOPPY_RANGE_PTS = 20;
 // v5 constants
-const TRAP_LOOKBACK_CANDLES = 3;         // confirm trap within last N candles
-const LOSS_PAUSE_MIN = 60;               // pause minutes after 2 losses
-const LOSS_STREAK_THRESHOLD = 2;         // consecutive losses
-const SPIKE_RANGE_PTS = 50;              // candle range that flags news/spike
-const SPIKE_COOLDOWN_MIN = 1.5;          // v7: was 5 — short cooldown, then trade spike
-const COMPRESSION_LOOKBACK = 5;          // last N candles for compression
-const COMPRESSION_SHRINK_RATIO = 0.7;    // each candle <=70% of previous (avg)
+const TRAP_LOOKBACK_CANDLES = 3;
+const LOSS_PAUSE_MIN = 60;
+const LOSS_STREAK_THRESHOLD = 2;
+const SPIKE_RANGE_PTS = 50;
+const SPIKE_COOLDOWN_MIN = 1.5;
+const COMPRESSION_LOOKBACK = 5;
+const COMPRESSION_SHRINK_RATIO = 0.7;
 const SR_STALE_DISTANCE_PTS = 200;
 const FALLBACK_SR_DISTANCE_PTS = 35;
+// v9: post-loss re-entry discipline
+const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
+const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
+const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
+// v9: regime-aware confidence gates (HARD execution gating)
+const CONF_GATE_TRENDING = 60;
+const CONF_GATE_SCALPING = 65;
+const CONF_GATE_CHOPPY = 75;
+const CONF_GATE_SNIPER = 85;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
