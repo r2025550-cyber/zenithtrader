@@ -2977,6 +2977,10 @@ const Index = () => {
       console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
+        if (activeTrade || isExecutionActive()) {
+          console.log("[AI_REASONING] tick skipped — position active (monitor-only)");
+          return;
+        }
         runTradingCycleRef.current().catch((error) => {
           // Do NOT show destructive popup if AI reasoning endpoint fails —
           // the dashboard keeps polling Upstox and shows "Waiting for fresh
