@@ -2477,9 +2477,28 @@ const Index = () => {
         if (signalLockRef.current) {
           signalLockRef.current.lockedUntil = Date.now() + SIGNAL_LOCK_MS;
         }
+        const orderPayload = buildOrderPayload(attempt);
+        const attemptMissing = validateOrderPayload(orderPayload);
+        updatePayloadInspector(orderPayload, attempt, attemptMissing);
+        console.log("[LIVE MARKET]", liveMarket);
+        console.log("[DERIVED SIDE]", derivedOptionSide);
+        console.log("[FINAL VPS PAYLOAD]", orderPayload);
+        if (attemptMissing.length > 0) {
+          const reason = attemptMissing[0] === "optionSide" ? "invalid option side" : `${attemptMissing[0]} missing`;
+          setExecutionRootCause(reason);
+          pushDebug({
+            stage: "ERROR",
+            level: "error",
+            title: `EXECUTION BLOCKED — ${reason}`,
+            detail: `Attempt ${attempt}: ${attemptMissing.join(", ")}`,
+            data: { missingFields: attemptMissing, rejectedPayload: orderPayload },
+          });
+          return;
+        }
         console.log(`[ORDER SEND] attempt ${attempt}/${EXEC_MAX_ATTEMPTS}`, {
           action: orderPayload.action,
           strike: suggestedStrike,
+          instrument_token: orderPayload.instrument_token,
         });
         try {
           if (tunnelOnline) setExecState("VPS_CONNECTED");
@@ -2489,6 +2508,7 @@ const Index = () => {
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
+          setExecutionRootCause(classifyExecutionRootCause(msg));
           console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
           if (attempt < EXEC_MAX_ATTEMPTS) {
             setExecState("FAILED", msg);
@@ -2501,6 +2521,9 @@ const Index = () => {
 
       if (!liveOrder) {
         const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+        setExecutionRootCause(classifyExecutionRootCause(msg));
+        setActiveTradePlan(null);
+        localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
         setExecState("FAILED", msg);
         pushDebug({
           stage: "ERROR",
