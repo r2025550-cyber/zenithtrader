@@ -2475,6 +2475,13 @@ const Index = () => {
           riskPoints: sigAny.riskPoints ?? undefined,
           rrMultiplier: sigAny.rrMultiplier ?? undefined,
           preferredProduct: "I" as const,
+          product: "I" as const,
+          order_type: "MARKET" as const,
+          validity: "DAY" as const,
+          price: 0,
+          trigger_price: 0,
+          disclosed_quantity: 0,
+          is_amo: false,
           retryAttempt: attempt,
         };
         return orderPayload;
@@ -2486,8 +2493,15 @@ const Index = () => {
         if (!isPresent(payload.action)) missing.push("action");
         if (!isPresent(payload.transaction_type)) missing.push("transaction_type");
         if (!isPresent(payload.transactionType)) missing.push("transactionType");
+        if (!isPresent(payload.product)) missing.push("product");
+        if (!isPresent(payload.order_type)) missing.push("order_type");
+        if (!isPresent(payload.validity)) missing.push("validity");
         if (!isPositiveNumber(payload.strike)) missing.push("strike");
         if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        if (payload.transaction_type !== "BUY") missing.push("transaction_type_invalid");
+        if (payload.product !== "I" && payload.product !== "D") missing.push("product_invalid");
+        if (payload.order_type !== "MARKET" && payload.order_type !== "LIMIT" && payload.order_type !== "SL" && payload.order_type !== "SL-M") missing.push("order_type_invalid");
+        if (payload.validity !== "DAY" && payload.validity !== "IOC") missing.push("validity_invalid");
         // Strict token-to-side mapping guard
         if (derivedOptionSide === "PE" && payload.instrument_token !== liveMarket.pe_instrument_token) {
           missing.push("pe_instrument_token_mismatch");
