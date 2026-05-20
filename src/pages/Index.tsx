@@ -1235,10 +1235,10 @@ const Index = () => {
   }, [exitFlashUntil]);
 
   useEffect(() => {
-    if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
+    if (!activeTradePlan?.instrument_token || activeTradePlan.exitAlertReason) return;
     const pollPremium = () => {
       if (Date.now() < upstoxBackoffUntilRef.current) return;
-      invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
+      invokeFunction<{ premium: number }>("fetch-option-premium", { instrument_key: activeTradePlan.instrument_token })
         .then(({ premium }) => {
           setActiveTradePlan((current) => {
             if (!current) return current;
@@ -1253,7 +1253,7 @@ const Index = () => {
     const timer = setInterval(pollPremium, UPSTOX_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTradePlan?.instrumentToken, activeTradePlan?.exitAlertReason]);
+  }, [activeTradePlan?.instrument_token, activeTradePlan?.exitAlertReason]);
 
   useEffect(() => {
     if (!activeTrade || getIndiaMarketMinute(marketClock) < AUTO_SQUAREOFF_MINUTE) return;
