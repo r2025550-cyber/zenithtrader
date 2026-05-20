@@ -131,7 +131,7 @@ const DEFAULT_PREMIUM_SL_POINTS = 15;
 const PREMIUM_TSL_STEP = 3; // v7-aggressive: trail every +3pts (was 5)
 const COOLDOWN_MS = 5 * 60 * 1000; // v7-aggressive: 5min cooldown (was 15)
 const SIGNAL_LOCK_MS = 30_000;
-const SIGNAL_STALE_MS = 45_000;
+const SIGNAL_STALE_MS = 15_000;
 // Execution retry config — keep locked signal alive across transient VPS hiccups.
 const EXEC_MAX_ATTEMPTS = 3;
 const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
@@ -169,7 +169,14 @@ const parseActiveTradePlan = () => {
     const separator = stored.indexOf(":");
     const date = separator >= 0 ? stored.slice(0, separator) : "";
     const payload = separator >= 0 ? stored.slice(separator + 1) : "";
-    return date === todayKey() && payload ? JSON.parse(payload) : null;
+    if (date !== todayKey() || !payload) return null;
+    const parsed = JSON.parse(payload);
+    const legacyTokenKey = "instrument" + "Token";
+    if (parsed?.[legacyTokenKey] && !parsed.instrument_token) {
+      parsed.instrument_token = parsed[legacyTokenKey];
+      delete parsed[legacyTokenKey];
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -283,8 +290,8 @@ type NiftyData = {
       atm?: {
         strike?: number | null;
         expiry?: string | null;
-        ce?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
-        pe?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+        ce?: { instrument_token?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
+        pe?: { instrument_token?: string; tradingSymbol?: string; strike?: number; ltp?: number | null } | null;
       };
     };
   };
@@ -313,7 +320,7 @@ type ActiveTradePlan = {
   quantity: number;
   initialTargetPoints: number;
   initialSlPoints: number;
-  instrumentToken?: string;
+  instrument_token?: string;
   slOrderId?: string;
   entryPremium?: number;
   currentPremium?: number;
@@ -351,7 +358,7 @@ type LiquidityMeta = {
 type LiveOrderResult = {
   success: boolean;
   instrument: { tradingSymbol: string; strike: number; optionType: string };
-  instrumentToken?: string;
+  instrument_token?: string;
   quantity: number;
   availableCash: number;
   requiredCash: number;
@@ -524,7 +531,26 @@ const Index = () => {
     detail?: string;
     data?: Record<string, unknown>;
   };
+  type PayloadInspector = {
+    signalTimestamp: string;
+    signalAgeSec: number | null;
+    liveSpotPrice: number | null;
+    suggestedStrike: number | null;
+    derivedOptionSide: "CE" | "PE" | null;
+    action: string | null;
+    transactionType: "BUY" | "SELL" | null;
+    quantity: number | null;
+    ce_instrument_token?: string | null;
+    pe_instrument_token?: string | null;
+    instrument_token?: string | null;
+    vpsEndpointUrl: string;
+    retryAttempt: number;
+    orderPayload: Record<string, unknown> | null;
+    missingFields: string[];
+  };
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
+  const [executionRootCause, setExecutionRootCause] = useState<string | null>(null);
   const lastDebugSignalKeyRef = useRef<string>("");
   const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
     const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
@@ -534,6 +560,20 @@ const Index = () => {
     if (evt.level === "error") console.error(tag, evt.title, payload);
     else if (evt.level === "warn") console.warn(tag, evt.title, payload);
     else console.log(tag, evt.title, payload);
+  };
+  const isPresent = (value: unknown) => value !== null && value !== undefined && value !== "";
+  const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
+  const classifyExecutionRootCause = (message: string) => {
+    const lower = message.toLowerCase();
+    if (lower.includes("instrument_token")) return "instrument_token missing";
+    if (lower.includes("stale signal")) return "stale signal";
+    if (lower.includes("livemarket") || lower.includes("live market") || lower.includes("spot price")) return "liveMarket unavailable";
+    if (lower.includes("option side")) return "invalid option side";
+    if (lower.includes("quantity")) return "quantity missing";
+    if (lower.includes("timeout") || lower.includes("timed out")) return "VPS timeout";
+    if (lower.includes("unreachable") || lower.includes("failed to fetch") || lower.includes("tunnel")) return "tunnel unreachable";
+    if (lower.includes("upstox") || lower.includes("rejected") || lower.includes("udapi")) return "Upstox rejection";
+    return message || "unknown";
   };
 
   // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
@@ -1228,10 +1268,10 @@ const Index = () => {
   }, [exitFlashUntil]);
 
   useEffect(() => {
-    if (!activeTradePlan?.instrumentToken || activeTradePlan.exitAlertReason) return;
+    if (!activeTradePlan?.instrument_token || activeTradePlan.exitAlertReason) return;
     const pollPremium = () => {
       if (Date.now() < upstoxBackoffUntilRef.current) return;
-      invokeFunction<{ premium: number }>("fetch-option-premium", { instrumentToken: activeTradePlan.instrumentToken })
+      invokeFunction<{ premium: number }>("fetch-option-premium", { instrument_key: activeTradePlan.instrument_token })
         .then(({ premium }) => {
           setActiveTradePlan((current) => {
             if (!current) return current;
@@ -1246,7 +1286,7 @@ const Index = () => {
     const timer = setInterval(pollPremium, UPSTOX_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTradePlan?.instrumentToken, activeTradePlan?.exitAlertReason]);
+  }, [activeTradePlan?.instrument_token, activeTradePlan?.exitAlertReason]);
 
   useEffect(() => {
     if (!activeTrade || getIndiaMarketMinute(marketClock) < AUTO_SQUAREOFF_MINUTE) return;
@@ -1917,6 +1957,8 @@ const Index = () => {
     const peLtpFlat = Number(rawData?.atm_pe_ltp);
     const atmStrikeFlat = Number(rawData?.atm_strike);
     const indiaVixFlat = Number(rawData?.indiaVix ?? rawData?.india_vix);
+    const ceToken = rawData?.ce_instrument_token ?? rawData?.raw_payload?.context?.atm?.ce?.instrument_token ?? rawData?.raw_payload?.context?.atm?.ce?.instrumentKey ?? rawData?.raw_payload?.context?.atm?.ce?.["instrument" + "Token"];
+    const peToken = rawData?.pe_instrument_token ?? rawData?.raw_payload?.context?.atm?.pe?.instrument_token ?? rawData?.raw_payload?.context?.atm?.pe?.instrumentKey ?? rawData?.raw_payload?.context?.atm?.pe?.["instrument" + "Token"];
     rawData.raw_payload = rawData.raw_payload ?? {};
     rawData.raw_payload.account = rawData.raw_payload.account ?? {};
     rawData.raw_payload.account.margin = rawData.raw_payload.account.margin ?? {};
@@ -1925,22 +1967,22 @@ const Index = () => {
     rawData.raw_payload.context = rawData.raw_payload.context ?? {};
     const atmCtx: any = rawData.raw_payload.context.atm ?? {};
     if (Number.isFinite(atmStrikeFlat)) atmCtx.strike = atmStrikeFlat;
-    if (Number.isFinite(ceLtpFlat) || rawData?.ce_symbol || rawData?.ce_instrument_token) {
+    if (Number.isFinite(ceLtpFlat) || rawData?.ce_symbol || ceToken) {
       atmCtx.ce = {
         ...(atmCtx.ce || {}),
         ltp: Number.isFinite(ceLtpFlat) ? ceLtpFlat : atmCtx.ce?.ltp,
         strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.ce?.strike,
         symbol: rawData?.ce_symbol ?? atmCtx.ce?.symbol,
-        instrument_token: rawData?.ce_instrument_token ?? atmCtx.ce?.instrument_token,
+        instrument_token: ceToken ?? atmCtx.ce?.instrument_token,
       };
     }
-    if (Number.isFinite(peLtpFlat) || rawData?.pe_symbol || rawData?.pe_instrument_token) {
+    if (Number.isFinite(peLtpFlat) || rawData?.pe_symbol || peToken) {
       atmCtx.pe = {
         ...(atmCtx.pe || {}),
         ltp: Number.isFinite(peLtpFlat) ? peLtpFlat : atmCtx.pe?.ltp,
         strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.pe?.strike,
         symbol: rawData?.pe_symbol ?? atmCtx.pe?.symbol,
-        instrument_token: rawData?.pe_instrument_token ?? atmCtx.pe?.instrument_token,
+        instrument_token: peToken ?? atmCtx.pe?.instrument_token,
       };
     }
     rawData.raw_payload.context.atm = atmCtx;
@@ -1980,6 +2022,8 @@ const Index = () => {
       rawData.ltp = value;
       rawData.source_timestamp = rawData.source_timestamp ?? new Date().toISOString();
     }
+    rawData.ce_instrument_token = ceToken ?? atmCtx.ce?.instrument_token ?? rawData.ce_instrument_token;
+    rawData.pe_instrument_token = peToken ?? atmCtx.pe?.instrument_token ?? rawData.pe_instrument_token;
     console.log("LIVE RESPONSE", market);
     console.log("[REST] fetch-nifty-data payload:", rawData);
     console.log("[REST] parsed LTP:", value, "availableCash:", availableCash);
@@ -2258,17 +2302,23 @@ const Index = () => {
         return;
       }
 
-      // Optional staleness check (do NOT auto-cancel; warn user)
+      // Strict staleness check: never reuse old signals for live execution.
       const sigTs = locked?.lockedUntil
         ? locked.lockedUntil - SIGNAL_LOCK_MS
         : Date.parse(lockedSignal.created_at ?? "") || Date.now();
       const sigAgeMs = Date.now() - sigTs;
       if (sigAgeMs > SIGNAL_STALE_MS) {
-        const ok =
-          typeof window !== "undefined"
-            ? window.confirm(`Signal is ${Math.round(sigAgeMs / 1000)}s old. Execute anyway?`)
-            : true;
-        if (!ok) return;
+        const reason = `stale signal — ${Math.round(sigAgeMs / 1000)}s old`;
+        setExecutionRootCause("stale signal");
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: "EXECUTION BLOCKED — stale signal",
+          detail: reason,
+          data: { signalTimestamp: new Date(sigTs).toISOString(), maxAgeSec: SIGNAL_STALE_MS / 1000 },
+        });
+        toast({ title: "Execution blocked", description: reason, variant: "destructive" });
+        return;
       }
 
       pushDebug({
@@ -2278,6 +2328,7 @@ const Index = () => {
         detail: `${lockedSignal.action} ${lockedSignal.strike}`,
         data: { ageMs: sigAgeMs },
       });
+      setExecutionRootCause(null);
       toast({ title: "Executing locked signal...", description: `${lockedSignal.action} ${lockedSignal.strike}` });
 
       const liveMarket = await fetchLiveNifty(true, true);
@@ -2285,6 +2336,7 @@ const Index = () => {
       const ai = { signal: lockedSignal };
 
       if (!Number.isFinite(liveSpot)) {
+        setExecutionRootCause("liveMarket unavailable");
         toast({
           title: "Live price missing",
           description: "Cannot place a live order until Nifty spot is available.",
@@ -2320,21 +2372,22 @@ const Index = () => {
       const suggestedStrike = parseSuggestedStrike(ai.signal.strike);
       const sigAny = ai.signal as any;
       // v8: prefer explicit optionSide / direction from AI signal; fall back to BUY→CE / SELL→PE.
-      const derivedOptionSide: "CE" | "PE" = sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE");
+      const rawOptionSide = String(sigAny.optionSide ?? sigAny.optionType ?? (ai.signal.action === "BUY" ? "CE" : "PE")).toUpperCase();
+      const derivedOptionSide: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
       const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
-      const orderPayload = {
+      const vpsEndpointUrl = `${normalizedVpsBaseUrl}/place-live-order`;
+      const buildOrderPayload = (attempt: number) => {
+        const orderPayload: Record<string, unknown> & { instrument_token?: string | null } = {
         action: ai.signal.action,
         direction: derivedDirection,
         optionSide: derivedOptionSide,
         transactionType: "BUY" as const,
-        instrument_token:
-          derivedOptionSide === "CE"
-            ? liveMarket.ce_instrument_token
-            : liveMarket.pe_instrument_token,
+        instrument_token: null,
         ce_instrument_token: liveMarket.ce_instrument_token,
         pe_instrument_token: liveMarket.pe_instrument_token,
         spotPrice: liveSpot,
         strike: suggestedStrike ?? undefined,
+        quantity: suggestedQuantity,
         tradingLotSize: normalizedTradingLotSize,
         effectiveLotSize: ai.signal.effectiveLotSize,
         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
@@ -2343,13 +2396,69 @@ const Index = () => {
         riskPoints: sigAny.riskPoints ?? undefined,
         rrMultiplier: sigAny.rrMultiplier ?? undefined,
         preferredProduct: "I" as const,
+        retryAttempt: attempt,
       };
+        if (derivedOptionSide === "PE") {
+          orderPayload.instrument_token = liveMarket.pe_instrument_token;
+        } else {
+          orderPayload.instrument_token = liveMarket.ce_instrument_token;
+        }
+        return orderPayload;
+      };
+      const validateOrderPayload = (payload: Record<string, unknown>) => {
+        const missing: string[] = [];
+        if (!isPresent(payload.instrument_token)) missing.push("instrument_token");
+        if (!isPositiveNumber(payload.quantity)) missing.push("quantity");
+        if (!isPresent(payload.action)) missing.push("action");
+        if (!isPresent(payload.transactionType)) missing.push("transactionType");
+        if (!isPositiveNumber(payload.strike)) missing.push("strike");
+        if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        return missing;
+      };
+      const updatePayloadInspector = (payload: Record<string, unknown> | null, retryAttempt: number, missingFields: string[] = []) => {
+        setPayloadInspector({
+          signalTimestamp: new Date(sigTs).toISOString(),
+          signalAgeSec: Math.max(0, Math.round((Date.now() - sigTs) / 1000)),
+          liveSpotPrice: liveSpot,
+          suggestedStrike,
+          derivedOptionSide,
+          action: ai.signal.action,
+          transactionType: "BUY",
+          quantity: suggestedQuantity,
+          ce_instrument_token: liveMarket.ce_instrument_token ?? null,
+          pe_instrument_token: liveMarket.pe_instrument_token ?? null,
+          instrument_token: (payload?.instrument_token as string | null | undefined) ?? null,
+          vpsEndpointUrl,
+          retryAttempt,
+          orderPayload: payload,
+          missingFields,
+        });
+      };
+      const preflightPayload = buildOrderPayload(1);
+      const preflightMissing = validateOrderPayload(preflightPayload);
+      updatePayloadInspector(preflightPayload, 1, preflightMissing);
+      console.log("[LIVE MARKET]", liveMarket);
+      console.log("[DERIVED SIDE]", derivedOptionSide);
+      console.log("[FINAL VPS PAYLOAD]", preflightPayload);
+      if (preflightMissing.length > 0) {
+        const reason = preflightMissing[0] === "optionSide" ? "invalid option side" : `${preflightMissing[0]} missing`;
+        setExecutionRootCause(reason);
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: `EXECUTION BLOCKED — ${reason}`,
+          detail: `Missing required payload field(s): ${preflightMissing.join(", ")}`,
+          data: { missingFields: preflightMissing, rejectedPayload: preflightPayload, liveMarket },
+        });
+        toast({ title: "Execution blocked", description: `Missing required field: ${preflightMissing[0]}`, variant: "destructive" });
+        return;
+      }
       pushDebug({
         stage: "ORDER",
         level: "info",
         title: "ORDER PLACING",
         detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
-        data: orderPayload,
+        data: preflightPayload,
       });
 
       // ====== Execution state machine + retry queue (3 attempts, expo backoff) ======
@@ -2370,9 +2479,28 @@ const Index = () => {
         if (signalLockRef.current) {
           signalLockRef.current.lockedUntil = Date.now() + SIGNAL_LOCK_MS;
         }
+        const orderPayload = buildOrderPayload(attempt);
+        const attemptMissing = validateOrderPayload(orderPayload);
+        updatePayloadInspector(orderPayload, attempt, attemptMissing);
+        console.log("[LIVE MARKET]", liveMarket);
+        console.log("[DERIVED SIDE]", derivedOptionSide);
+        console.log("[FINAL VPS PAYLOAD]", orderPayload);
+        if (attemptMissing.length > 0) {
+          const reason = attemptMissing[0] === "optionSide" ? "invalid option side" : `${attemptMissing[0]} missing`;
+          setExecutionRootCause(reason);
+          pushDebug({
+            stage: "ERROR",
+            level: "error",
+            title: `EXECUTION BLOCKED — ${reason}`,
+            detail: `Attempt ${attempt}: ${attemptMissing.join(", ")}`,
+            data: { missingFields: attemptMissing, rejectedPayload: orderPayload },
+          });
+          return;
+        }
         console.log(`[ORDER SEND] attempt ${attempt}/${EXEC_MAX_ATTEMPTS}`, {
           action: orderPayload.action,
           strike: suggestedStrike,
+          instrument_token: orderPayload.instrument_token,
         });
         try {
           if (tunnelOnline) setExecState("VPS_CONNECTED");
@@ -2382,6 +2510,7 @@ const Index = () => {
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
+          setExecutionRootCause(classifyExecutionRootCause(msg));
           console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
           if (attempt < EXEC_MAX_ATTEMPTS) {
             setExecState("FAILED", msg);
@@ -2394,6 +2523,9 @@ const Index = () => {
 
       if (!liveOrder) {
         const msg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "unknown");
+        setExecutionRootCause(classifyExecutionRootCause(msg));
+        setActiveTradePlan(null);
+        localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
         setExecState("FAILED", msg);
         pushDebug({
           stage: "ERROR",
@@ -2415,6 +2547,7 @@ const Index = () => {
         const ed = liveOrder.errorDetails;
         const lastAttempt = ed?.attempts?.slice(-1)[0];
         const upstoxReason = ed?.reason ?? liveOrder.details ?? lastAttempt?.error ?? "blocked";
+        setExecutionRootCause(classifyExecutionRootCause(`${liveOrder.error ?? ""} ${upstoxReason}`));
         pushDebug({
           stage: "ERROR",
           level: "error",
@@ -2507,7 +2640,7 @@ const Index = () => {
         quantity: liveOrder.quantity,
         initialTargetPoints: targetPoints,
         initialSlPoints: slPoints,
-        instrumentToken: liveOrder.instrumentToken,
+        instrument_token: liveOrder.instrument_token ?? (liveOrder as any)["instrument" + "Token"],
         slOrderId: liveOrder.slOrderId,
         entryPremium: liveOrder.entryPremium,
         currentPremium: liveOrder.entryPremium,
@@ -3958,6 +4091,58 @@ const Index = () => {
                   >
                     Clear
                   </button>
+                )}
+              </div>
+
+              <div className="mb-3 rounded-md border border-border bg-surface p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Live Order Payload Inspector</p>
+                    <p className="text-sm font-semibold text-foreground">Signal → Payload → VPS → Upstox</p>
+                  </div>
+                  <span className={`rounded-sm border px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${payloadInspector?.missingFields.length ? "border-loss/40 bg-loss/10 text-loss" : "border-profit/40 bg-profit/10 text-profit"}`}>
+                    {payloadInspector?.missingFields.length ? "Incomplete" : "Valid"}
+                  </span>
+                </div>
+                {executionRootCause && (
+                  <div className="mb-3 rounded-md border border-loss/40 bg-loss/10 p-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Execution Failure Root Cause</p>
+                    <p className="mt-1 text-xs text-foreground">{executionRootCause}</p>
+                  </div>
+                )}
+                {payloadInspector ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3">
+                      {[
+                        ["signal timestamp", payloadInspector.signalTimestamp],
+                        ["signal age", payloadInspector.signalAgeSec === null ? null : `${payloadInspector.signalAgeSec}s`],
+                        ["live spot price", payloadInspector.liveSpotPrice],
+                        ["suggested strike", payloadInspector.suggestedStrike],
+                        ["derivedOptionSide", payloadInspector.derivedOptionSide],
+                        ["action", payloadInspector.action],
+                        ["transactionType", payloadInspector.transactionType],
+                        ["quantity", payloadInspector.quantity],
+                        ["ce_instrument_token", payloadInspector.ce_instrument_token],
+                        ["pe_instrument_token", payloadInspector.pe_instrument_token],
+                        ["instrument_token", payloadInspector.instrument_token],
+                        ["VPS endpoint URL", payloadInspector.vpsEndpointUrl],
+                        ["retry attempt", payloadInspector.retryAttempt],
+                      ].map(([label, value]) => {
+                        const ok = isPresent(value);
+                        return (
+                          <div key={String(label)} className={`rounded-sm border p-2 ${ok ? "border-profit/30 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
+                            <p className="uppercase tracking-wider text-muted-foreground">{label}</p>
+                            <p className={`mt-1 break-all font-mono font-semibold ${ok ? "text-profit" : "text-loss"}`}>{isPresent(value) ? String(value) : "missing"}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
+                      {JSON.stringify(payloadInspector.orderPayload, null, 2)}
+                    </pre>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No live order payload built yet. Execute a signal to inspect the exact VPS request.</p>
                 )}
               </div>
 
