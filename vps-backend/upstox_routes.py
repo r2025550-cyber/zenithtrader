@@ -1107,6 +1107,12 @@ async def place_live_order(req: Request):
         return fail_response(400, "Rejected field: order_type", f"Invalid order_type: {upstox_payload['order_type']}", rejected_field="order_type", sent_payload=upstox_payload)
     if upstox_payload["validity"] not in ("DAY", "IOC"):
         return fail_response(400, "Rejected field: validity", f"Invalid validity: {upstox_payload['validity']}", rejected_field="validity", sent_payload=upstox_payload)
+    # Broker formatting: strip frontend/debug-only fields before Upstox.
+    allowed_order_fields = [
+        "quantity", "product", "validity", "price", "tag", "instrument_token",
+        "order_type", "transaction_type", "disclosed_quantity", "trigger_price", "is_amo",
+    ]
+    upstox_payload = {k: upstox_payload[k] for k in allowed_order_fields if k in upstox_payload}
 
     async with _client() as client:
         trace.append("UPSTOX_REQUEST_SENT")
