@@ -4133,6 +4133,31 @@ const Index = () => {
                 )}
                 {payloadInspector ? (
                   <>
+                    {(() => {
+                      const op = payloadInspector.orderPayload ?? {};
+                      const checks: Array<[string, unknown]> = [
+                        ["transaction_type", (op as any).transaction_type],
+                        ["instrument_token", payloadInspector.instrument_token],
+                        ["quantity", payloadInspector.quantity],
+                        ["optionSide", payloadInspector.derivedOptionSide],
+                        ["strike", payloadInspector.suggestedStrike],
+                      ];
+                      const allOk = checks.every(([, v]) => isPresent(v));
+                      return (
+                        <div className={`mb-3 rounded-md border p-2 ${allOk ? "border-profit/40 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
+                          <p className={`text-[11px] font-semibold uppercase tracking-wider ${allOk ? "text-profit" : "text-loss"}`}>
+                            VPS Field Compatibility · {allOk ? "READY" : "BLOCKED"}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {checks.map(([k, v]) => (
+                              <span key={k} className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-mono ${isPresent(v) ? "border-profit/40 bg-profit/10 text-profit" : "border-loss/50 bg-loss/15 text-loss"}`}>
+                                {isPresent(v) ? "✓" : "✗"} {k}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3">
                       {[
                         ["signal timestamp", payloadInspector.signalTimestamp],
@@ -4140,8 +4165,10 @@ const Index = () => {
                         ["live spot price", payloadInspector.liveSpotPrice],
                         ["suggested strike", payloadInspector.suggestedStrike],
                         ["derivedOptionSide", payloadInspector.derivedOptionSide],
-                        ["action", payloadInspector.action],
-                        ["transactionType", payloadInspector.transactionType],
+                        ["signal_action (AI bias)", payloadInspector.action],
+                        ["execution_side (broker)", (payloadInspector.orderPayload as any)?.execution_side ?? "BUY"],
+                        ["transactionType (camel)", payloadInspector.transactionType],
+                        ["transaction_type (snake)", (payloadInspector.orderPayload as any)?.transaction_type],
                         ["quantity", payloadInspector.quantity],
                         ["ce_instrument_token", payloadInspector.ce_instrument_token],
                         ["pe_instrument_token", payloadInspector.pe_instrument_token],
@@ -4161,6 +4188,20 @@ const Index = () => {
                     <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
                       {JSON.stringify(payloadInspector.orderPayload, null, 2)}
                     </pre>
+                    {lastExecution && !lastExecution.success && (
+                      <div className="mt-3 rounded-md border border-loss/40 bg-loss/5 p-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Raw VPS / Upstox Response</p>
+                        <pre className="mt-1 max-h-60 overflow-auto text-[10px] leading-4 text-foreground">
+{JSON.stringify({
+  error: lastExecution.error,
+  details: (lastExecution as any).details,
+  errorDetails: (lastExecution as any).errorDetails,
+  execution: lastExecution.execution,
+  entryAttempts: (lastExecution as any).entryAttempts,
+}, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">No live order payload built yet. Execute a signal to inspect the exact VPS request.</p>
