@@ -670,6 +670,10 @@ const Index = () => {
   };
 
   const applySniperSignal = (signal: Signal) => {
+    if (activeTrade) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — position active");
+      return;
+    }
     if (isExecutionActive() && signalLockRef.current) {
       console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
       return;
