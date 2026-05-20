@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -647,6 +648,11 @@ const Index = () => {
   };
 
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
+    // SINGLE-POSITION LOCK: ignore any signal while a trade is open.
+    if (activeTrade) {
+      console.log("[SIGNAL LOCK] suppressed AI overwrite — position active");
+      return false;
+    }
     // Freeze signal panel while an execution is in-flight.
     if (isExecutionActive() && signalLockRef.current) {
       console.log("[SIGNAL LOCK] suppressed AI overwrite — execution active");
@@ -665,6 +671,10 @@ const Index = () => {
   };
 
   const applySniperSignal = (signal: Signal) => {
+    if (activeTrade) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — position active");
+      return;
+    }
     if (isExecutionActive() && signalLockRef.current) {
       console.log("[SIGNAL LOCK] suppressed sniper overwrite — execution active");
       return;
@@ -2125,6 +2135,7 @@ const Index = () => {
         !tradingBlocked &&
         !aiAnalysisInFlightRef.current &&
         !isExecutionActive() &&
+        !activeTrade &&
         Date.now() - lastForcedAiAtRef.current > 30_000
       ) {
         levelsAnchorLtpRef.current = value;
@@ -2275,6 +2286,14 @@ const Index = () => {
   const runTradingCycle = async () => {
     if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
+    // ===== SINGLE-POSITION SCALPING LOCK =====
+    // While a position is open OR an order is mid-flight, the AI engine must
+    // NOT generate new signals / re-evaluate strikes / refresh conviction.
+    // Only SL / trailing / exit monitors are allowed to run.
+    if (activeTrade || isExecutionActive()) {
+      console.log("[AI_LOOP] skipped — trade active (monitoring-only mode)");
+      return;
+    }
     aiAnalysisInFlightRef.current = true;
     console.log("[AI_LOOP] start", new Date().toISOString());
     try {
@@ -2959,6 +2978,10 @@ const Index = () => {
       console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
+        if (activeTrade || isExecutionActive()) {
+          console.log("[AI_REASONING] tick skipped — position active (monitor-only)");
+          return;
+        }
         runTradingCycleRef.current().catch((error) => {
           // Do NOT show destructive popup if AI reasoning endpoint fails —
           // the dashboard keeps polling Upstox and shows "Waiting for fresh
@@ -3930,6 +3953,20 @@ const Index = () => {
                   <div
                     className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}
                   >
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] tracking-wide">
+                        ● TRADE ACTIVE
+                      </Badge>
+                      <Badge className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] tracking-wide">
+                        🔒 ENTRY LOCKED
+                      </Badge>
+                      <Badge className="bg-primary/20 text-primary border border-primary/40 text-[10px] tracking-wide">
+                        👁 MONITORING POSITION
+                      </Badge>
+                      <Badge className="bg-muted text-muted-foreground border border-border text-[10px] tracking-wide">
+                        AI SIGNALS PAUSED
+                      </Badge>
+                    </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-sm font-semibold">
                         {exitAlertActive
