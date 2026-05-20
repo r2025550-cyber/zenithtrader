@@ -2622,7 +2622,17 @@ const Index = () => {
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
-          setExecutionRootCause(classifyExecutionRootCause(msg));
+          const forensic = (err as any)?.vpsForensics;
+          const failedField = forensic?.body?.missing_field ?? forensic?.body?.missingField ?? forensic?.body?.rejected_field ?? forensic?.body?.rejectedField ?? extractRejectedField(forensic?.body ?? msg);
+          const stage = forensic?.stage ?? (msg.toLowerCase().includes("upstox") ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED");
+          setExecutionRootCause(failedField ? `${failedField.includes("invalid") ? "Rejected" : "Missing"} field: ${failedField}` : classifyExecutionRootCause(msg));
+          pushDebug({
+            stage: "ERROR",
+            level: "error",
+            title: stage,
+            detail: `Frontend → VPS: ${forensic?.status ?? "network"}${forensic?.upstoxStatus ? ` · VPS → Upstox: ${forensic.upstoxStatus}` : " · VPS validation failed before Upstox call"}`,
+            data: { message: msg, failedField, rawVpsResponse: forensic?.body, rejectedPayload: forensic?.requestPayload },
+          });
           console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
           if (attempt < EXEC_MAX_ATTEMPTS) {
             setExecState("FAILED", msg);
