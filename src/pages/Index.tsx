@@ -3068,7 +3068,7 @@ const Index = () => {
               pushDebug({
                 stage: "ERROR", level: "error", title: "ORDER_REJECTED",
                 detail: `Broker rejected order ${brokerOrderId}`,
-                data: statusResp?.raw,
+                data: statusResp?.raw as Record<string, unknown> | undefined,
               });
               setExecState("REJECTED", "Broker rejected order");
               toast({ title: "Order rejected", description: `Broker rejected ${brokerOrderId}.`, variant: "destructive" });
