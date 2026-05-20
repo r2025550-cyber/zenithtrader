@@ -2376,33 +2376,44 @@ const Index = () => {
       const derivedOptionSide: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
       const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
       const vpsEndpointUrl = `${normalizedVpsBaseUrl}/place-live-order`;
+      // VPS expects snake_case; we send BOTH camelCase + snake_case for compatibility.
+      // signal_action = AI market bias (BUY/SELL on NIFTY direction)
+      // execution_side = actual broker leg (always BUY for long-option scalping)
       const buildOrderPayload = (attempt: number) => {
+        // Strict token mapping — never auto-fallback to opposite side
+        const resolvedToken =
+          derivedOptionSide === "PE" ? (liveMarket.pe_instrument_token ?? null)
+          : derivedOptionSide === "CE" ? (liveMarket.ce_instrument_token ?? null)
+          : null;
         const orderPayload: Record<string, unknown> & { instrument_token?: string | null } = {
-        action: ai.signal.action,
-        direction: derivedDirection,
-        optionSide: derivedOptionSide,
-        transactionType: "BUY" as const,
-        instrument_token: null,
-        ce_instrument_token: liveMarket.ce_instrument_token,
-        pe_instrument_token: liveMarket.pe_instrument_token,
-        spotPrice: liveSpot,
-        strike: suggestedStrike ?? undefined,
-        quantity: suggestedQuantity,
-        tradingLotSize: normalizedTradingLotSize,
-        effectiveLotSize: ai.signal.effectiveLotSize,
-        targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
-        stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
-        maxSlippagePct: execSettings.slippagePct,
-        riskPoints: sigAny.riskPoints ?? undefined,
-        rrMultiplier: sigAny.rrMultiplier ?? undefined,
-        preferredProduct: "I" as const,
-        retryAttempt: attempt,
-      };
-        if (derivedOptionSide === "PE") {
-          orderPayload.instrument_token = liveMarket.pe_instrument_token;
-        } else {
-          orderPayload.instrument_token = liveMarket.ce_instrument_token;
-        }
+          // ---- AI / signal context ----
+          action: ai.signal.action,                 // legacy
+          signal_action: ai.signal.action,          // explicit AI bias (BUY/SELL on spot)
+          direction: derivedDirection,
+          optionSide: derivedOptionSide,
+          option_side: derivedOptionSide,           // snake_case mirror
+          // ---- Execution side (broker leg) ----
+          transactionType: "BUY" as const,          // camelCase (legacy)
+          transaction_type: "BUY" as const,         // snake_case (VPS requirement)
+          execution_side: "BUY" as const,           // explicit broker leg
+          // ---- Instrument ----
+          instrument_token: resolvedToken,
+          ce_instrument_token: liveMarket.ce_instrument_token ?? null,
+          pe_instrument_token: liveMarket.pe_instrument_token ?? null,
+          // ---- Trade params ----
+          spotPrice: liveSpot,
+          strike: suggestedStrike ?? undefined,
+          quantity: suggestedQuantity,
+          tradingLotSize: normalizedTradingLotSize,
+          effectiveLotSize: ai.signal.effectiveLotSize,
+          targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
+          stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
+          maxSlippagePct: execSettings.slippagePct,
+          riskPoints: sigAny.riskPoints ?? undefined,
+          rrMultiplier: sigAny.rrMultiplier ?? undefined,
+          preferredProduct: "I" as const,
+          retryAttempt: attempt,
+        };
         return orderPayload;
       };
       const validateOrderPayload = (payload: Record<string, unknown>) => {
@@ -2410,9 +2421,17 @@ const Index = () => {
         if (!isPresent(payload.instrument_token)) missing.push("instrument_token");
         if (!isPositiveNumber(payload.quantity)) missing.push("quantity");
         if (!isPresent(payload.action)) missing.push("action");
+        if (!isPresent(payload.transaction_type)) missing.push("transaction_type");
         if (!isPresent(payload.transactionType)) missing.push("transactionType");
         if (!isPositiveNumber(payload.strike)) missing.push("strike");
         if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        // Strict token-to-side mapping guard
+        if (derivedOptionSide === "PE" && payload.instrument_token !== liveMarket.pe_instrument_token) {
+          missing.push("pe_instrument_token_mismatch");
+        }
+        if (derivedOptionSide === "CE" && payload.instrument_token !== liveMarket.ce_instrument_token) {
+          missing.push("ce_instrument_token_mismatch");
+        }
         return missing;
       };
       const updatePayloadInspector = (payload: Record<string, unknown> | null, retryAttempt: number, missingFields: string[] = []) => {
