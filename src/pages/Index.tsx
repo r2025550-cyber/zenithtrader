@@ -4094,6 +4094,58 @@ const Index = () => {
                 )}
               </div>
 
+              <div className="mb-3 rounded-md border border-border bg-surface p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Live Order Payload Inspector</p>
+                    <p className="text-sm font-semibold text-foreground">Signal → Payload → VPS → Upstox</p>
+                  </div>
+                  <span className={`rounded-sm border px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${payloadInspector?.missingFields.length ? "border-loss/40 bg-loss/10 text-loss" : "border-profit/40 bg-profit/10 text-profit"}`}>
+                    {payloadInspector?.missingFields.length ? "Incomplete" : "Valid"}
+                  </span>
+                </div>
+                {executionRootCause && (
+                  <div className="mb-3 rounded-md border border-loss/40 bg-loss/10 p-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Execution Failure Root Cause</p>
+                    <p className="mt-1 text-xs text-foreground">{executionRootCause}</p>
+                  </div>
+                )}
+                {payloadInspector ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3">
+                      {[
+                        ["signal timestamp", payloadInspector.signalTimestamp],
+                        ["signal age", payloadInspector.signalAgeSec === null ? null : `${payloadInspector.signalAgeSec}s`],
+                        ["live spot price", payloadInspector.liveSpotPrice],
+                        ["suggested strike", payloadInspector.suggestedStrike],
+                        ["derivedOptionSide", payloadInspector.derivedOptionSide],
+                        ["action", payloadInspector.action],
+                        ["transactionType", payloadInspector.transactionType],
+                        ["quantity", payloadInspector.quantity],
+                        ["ce_instrument_token", payloadInspector.ce_instrument_token],
+                        ["pe_instrument_token", payloadInspector.pe_instrument_token],
+                        ["instrument_token", payloadInspector.instrument_token],
+                        ["VPS endpoint URL", payloadInspector.vpsEndpointUrl],
+                        ["retry attempt", payloadInspector.retryAttempt],
+                      ].map(([label, value]) => {
+                        const ok = isPresent(value);
+                        return (
+                          <div key={String(label)} className={`rounded-sm border p-2 ${ok ? "border-profit/30 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
+                            <p className="uppercase tracking-wider text-muted-foreground">{label}</p>
+                            <p className={`mt-1 break-all font-mono font-semibold ${ok ? "text-profit" : "text-loss"}`}>{isPresent(value) ? String(value) : "missing"}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
+                      {JSON.stringify(payloadInspector.orderPayload, null, 2)}
+                    </pre>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No live order payload built yet. Execute a signal to inspect the exact VPS request.</p>
+                )}
+              </div>
+
               {/* Status summary cards */}
               <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(() => {
