@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
