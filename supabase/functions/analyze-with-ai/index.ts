@@ -478,7 +478,10 @@ serve(async (req) => {
     const lastTradeAt = todayTrades[0] ? new Date(todayTrades[0].created_at).getTime() : 0;
     const minutesSinceLastTrade = lastTradeAt ? (Date.now() - lastTradeAt) / 60000 : Infinity;
     const tradeGapOk = minutesSinceLastTrade >= MIN_TRADE_GAP_MIN;
+    // v9: 6th trade only if last trade was a win (caller passes recentTradesPnl[0])
+    // Hard cap default = 5; soft-allow up to 6 if conditions met (checked later with regime+confidence).
     const tradeCapOk = tradesToday < MAX_TRADES_PER_DAY;
+    const sixthTradeWindow = tradesToday === MAX_TRADES_PER_DAY; // exactly at cap
 
     // ===== v5: LOSS PROTECTION & POSITION SIZING =====
     let consecutiveLosses = 0;
