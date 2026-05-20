@@ -379,6 +379,12 @@ type LiveOrderResult = {
   optionLtp?: number;
   productUsed?: "I" | "D";
   orderTypeUsed?: "MARKET" | "LIMIT";
+  sentPayload?: Record<string, unknown>;
+  upstox_response?: unknown;
+  upstox_status?: number | null;
+  httpStatusChain?: Record<string, unknown>;
+  stage?: string;
+  trace?: string[];
   entryAttempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
   errorDetails?: {
     reason?: string;
@@ -386,6 +392,20 @@ type LiveOrderResult = {
     failedField?: string | null;
     rejectedPayload?: Record<string, unknown> | null;
   };
+};
+type VpsForensics = {
+  endpoint: string;
+  method: string;
+  frontendToVpsStatus: number | null;
+  vpsToUpstoxStatus: number | null;
+  stage: string | null;
+  trace: string[];
+  missingField: string | null;
+  rejectedField: string | null;
+  requestPayload: Record<string, unknown> | null;
+  rawResponseBody: unknown;
+  rawResponseText: string;
+  at: number;
 };
 const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
 type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
