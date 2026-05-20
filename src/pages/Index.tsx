@@ -4466,6 +4466,13 @@ const Index = () => {
                         ["instrument_token", payloadInspector.instrument_token],
                         ["VPS endpoint URL", payloadInspector.vpsEndpointUrl],
                         ["retry attempt", payloadInspector.retryAttempt],
+                        ["SIGNAL_STRIKE", payloadInspector.signalStrike],
+                        ["EXECUTED_STRIKE", payloadInspector.executedStrike],
+                        ["STRIKE_MATCH", payloadInspector.strikeMatch === null ? null : (payloadInspector.strikeMatch ? "✓ MATCH" : "✗ DRIFT")],
+                        ["PREMIUM_AT_SIGNAL", payloadInspector.premiumAtSignal],
+                        ["PREMIUM_AT_FILL", payloadInspector.premiumAtFill],
+                        ["LOCKED_SYMBOL", payloadInspector.lockedTradingSymbol],
+                        ["LOCKED_TOKEN", payloadInspector.lockedInstrumentToken],
                       ].map(([label, value]) => {
                         const ok = isPresent(value);
                         return (
