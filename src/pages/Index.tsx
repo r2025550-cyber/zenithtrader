@@ -1957,6 +1957,8 @@ const Index = () => {
     const peLtpFlat = Number(rawData?.atm_pe_ltp);
     const atmStrikeFlat = Number(rawData?.atm_strike);
     const indiaVixFlat = Number(rawData?.indiaVix ?? rawData?.india_vix);
+    const ceToken = rawData?.ce_instrument_token ?? rawData?.raw_payload?.context?.atm?.ce?.instrument_token ?? rawData?.raw_payload?.context?.atm?.ce?.instrumentKey ?? rawData?.raw_payload?.context?.atm?.ce?.["instrument" + "Token"];
+    const peToken = rawData?.pe_instrument_token ?? rawData?.raw_payload?.context?.atm?.pe?.instrument_token ?? rawData?.raw_payload?.context?.atm?.pe?.instrumentKey ?? rawData?.raw_payload?.context?.atm?.pe?.["instrument" + "Token"];
     rawData.raw_payload = rawData.raw_payload ?? {};
     rawData.raw_payload.account = rawData.raw_payload.account ?? {};
     rawData.raw_payload.account.margin = rawData.raw_payload.account.margin ?? {};
@@ -1965,22 +1967,22 @@ const Index = () => {
     rawData.raw_payload.context = rawData.raw_payload.context ?? {};
     const atmCtx: any = rawData.raw_payload.context.atm ?? {};
     if (Number.isFinite(atmStrikeFlat)) atmCtx.strike = atmStrikeFlat;
-    if (Number.isFinite(ceLtpFlat) || rawData?.ce_symbol || rawData?.ce_instrument_token) {
+    if (Number.isFinite(ceLtpFlat) || rawData?.ce_symbol || ceToken) {
       atmCtx.ce = {
         ...(atmCtx.ce || {}),
         ltp: Number.isFinite(ceLtpFlat) ? ceLtpFlat : atmCtx.ce?.ltp,
         strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.ce?.strike,
         symbol: rawData?.ce_symbol ?? atmCtx.ce?.symbol,
-        instrument_token: rawData?.ce_instrument_token ?? atmCtx.ce?.instrument_token,
+        instrument_token: ceToken ?? atmCtx.ce?.instrument_token,
       };
     }
-    if (Number.isFinite(peLtpFlat) || rawData?.pe_symbol || rawData?.pe_instrument_token) {
+    if (Number.isFinite(peLtpFlat) || rawData?.pe_symbol || peToken) {
       atmCtx.pe = {
         ...(atmCtx.pe || {}),
         ltp: Number.isFinite(peLtpFlat) ? peLtpFlat : atmCtx.pe?.ltp,
         strike: Number.isFinite(atmStrikeFlat) ? atmStrikeFlat : atmCtx.pe?.strike,
         symbol: rawData?.pe_symbol ?? atmCtx.pe?.symbol,
-        instrument_token: rawData?.pe_instrument_token ?? atmCtx.pe?.instrument_token,
+        instrument_token: peToken ?? atmCtx.pe?.instrument_token,
       };
     }
     rawData.raw_payload.context.atm = atmCtx;
@@ -2020,6 +2022,8 @@ const Index = () => {
       rawData.ltp = value;
       rawData.source_timestamp = rawData.source_timestamp ?? new Date().toISOString();
     }
+    rawData.ce_instrument_token = ceToken ?? atmCtx.ce?.instrument_token ?? rawData.ce_instrument_token;
+    rawData.pe_instrument_token = peToken ?? atmCtx.pe?.instrument_token ?? rawData.pe_instrument_token;
     console.log("LIVE RESPONSE", market);
     console.log("[REST] fetch-nifty-data payload:", rawData);
     console.log("[REST] parsed LTP:", value, "availableCash:", availableCash);
