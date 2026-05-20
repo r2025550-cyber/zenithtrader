@@ -1140,6 +1140,10 @@ async def place_live_order(req: Request):
             "instrumentToken": upstox_payload.get("instrument_token"),
             "quantity": upstox_payload.get("quantity"),
             "execution": {"orderPlaced": True, "orderFilled": False, "slActive": False, "trailingActive": False},
+            "sentPayload": upstox_payload,
+            "stage": "ORDER_FILLED",
+            "trace": [*trace, "VPS_ACCEPTED", "ORDER_FILLED"],
+            "httpStatusChain": {"frontendToVps": 200, "vpsToUpstox": resp.status_code},
         },
         status_code=200,
     )
