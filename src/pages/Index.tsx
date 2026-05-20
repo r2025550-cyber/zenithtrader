@@ -2888,6 +2888,23 @@ const Index = () => {
         shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
       const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
       const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
+      // Final strike-drift guard: compare what Upstox actually executed vs locked signal contract
+      const executedSymbol = liveOrder.instrument?.tradingSymbol ?? "";
+      const executedStrike = parseSuggestedStrike(executedSymbol) ?? Number(liveOrder.instrument?.strike);
+      if (Number.isFinite(executedStrike) && lockedContract && executedStrike !== lockedContract.strike) {
+        pushDebug({
+          stage: "ERROR", level: "error", title: "STRIKE_DRIFT_DETECTED_POST_FILL",
+          detail: `Locked ${lockedContract.strike} ≠ executed ${executedStrike} (${executedSymbol})`,
+          data: { lockedContract, executed: liveOrder.instrument },
+        });
+        toast({ title: "⚠ Strike drift detected post-fill", description: `Locked ${lockedContract.strike} ≠ executed ${executedStrike}`, variant: "destructive" });
+      }
+      setPayloadInspector((prev) => prev ? {
+        ...prev,
+        executedStrike: Number.isFinite(executedStrike) ? executedStrike : prev.executedStrike,
+        strikeMatch: Number.isFinite(executedStrike) && lockedContract ? executedStrike === lockedContract.strike : prev.strikeMatch,
+        premiumAtFill: liveOrder.entryPremium ?? null,
+      } : prev);
       const plan: NonNullable<ActiveTradePlan> = {
         action: ai.signal.action as "BUY" | "SELL",
         entry: liveSpot,
@@ -2904,6 +2921,13 @@ const Index = () => {
         targetPremium,
         stopLossPremium,
         lastSyncedStopLossPremium: liveOrder.stopLossPremium,
+        // Immutable locked-contract snapshot
+        tradingSymbol: lockedContract?.tradingSymbol ?? liveOrder.instrument.tradingSymbol,
+        optionSide: lockedContract?.optionSide ?? derivedOptionSide,
+        signalStrike: lockedContract?.strike ?? suggestedStrike ?? undefined,
+        executedStrike: Number.isFinite(executedStrike) ? executedStrike : undefined,
+        entryPremiumSnapshot: lockedContract?.premiumAtSignal,
+        spotPriceAtSignal: lockedContract?.spotPriceAtSignal ?? undefined,
       };
       if (!userEditedExitsRef.current) {
         setUserTargetPoints(formatPremiumInput(targetPremium));
