@@ -531,7 +531,26 @@ const Index = () => {
     detail?: string;
     data?: Record<string, unknown>;
   };
+  type PayloadInspector = {
+    signalTimestamp: string;
+    signalAgeSec: number | null;
+    liveSpotPrice: number | null;
+    suggestedStrike: number | null;
+    derivedOptionSide: "CE" | "PE" | null;
+    action: string | null;
+    transactionType: "BUY" | "SELL" | null;
+    quantity: number | null;
+    ce_instrument_token?: string | null;
+    pe_instrument_token?: string | null;
+    instrument_token?: string | null;
+    vpsEndpointUrl: string;
+    retryAttempt: number;
+    orderPayload: Record<string, unknown> | null;
+    missingFields: string[];
+  };
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
+  const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
+  const [executionRootCause, setExecutionRootCause] = useState<string | null>(null);
   const lastDebugSignalKeyRef = useRef<string>("");
   const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
     const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
@@ -541,6 +560,20 @@ const Index = () => {
     if (evt.level === "error") console.error(tag, evt.title, payload);
     else if (evt.level === "warn") console.warn(tag, evt.title, payload);
     else console.log(tag, evt.title, payload);
+  };
+  const isPresent = (value: unknown) => value !== null && value !== undefined && value !== "";
+  const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
+  const classifyExecutionRootCause = (message: string) => {
+    const lower = message.toLowerCase();
+    if (lower.includes("instrument_token")) return "instrument_token missing";
+    if (lower.includes("stale signal")) return "stale signal";
+    if (lower.includes("livemarket") || lower.includes("live market") || lower.includes("spot price")) return "liveMarket unavailable";
+    if (lower.includes("option side")) return "invalid option side";
+    if (lower.includes("quantity")) return "quantity missing";
+    if (lower.includes("timeout") || lower.includes("timed out")) return "VPS timeout";
+    if (lower.includes("unreachable") || lower.includes("failed to fetch") || lower.includes("tunnel")) return "tunnel unreachable";
+    if (lower.includes("upstox") || lower.includes("rejected") || lower.includes("udapi")) return "Upstox rejection";
+    return message || "unknown";
   };
 
   // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
