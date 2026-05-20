@@ -1122,11 +1122,29 @@ const Index = () => {
     lastSignalAutofillRef.current = signalKey;
     // New signal → reset manual-edit flag so auto-fill can populate fresh values.
     userEditedExitsRef.current = false;
-    invokeFunction<{ premium: number; instrument?: { tradingSymbol?: string } }>("fetch-option-premium", {
+    invokeFunction<{ premium: number; instrument?: { instrumentToken?: string; tradingSymbol?: string; strike?: number; optionType?: string } }>("fetch-option-premium", {
       strike,
       action,
     })
       .then(({ premium, instrument }) => {
+        // Freeze the contract at signal-generation time. Execution will NEVER recompute strike/token.
+        const optionSide: "CE" | "PE" = action === "BUY" ? "CE" : "PE";
+        if (instrument?.instrumentToken && (instrument.strike ?? strike) === strike) {
+          signalContractRef.current = {
+            signalKey,
+            strike,
+            optionSide,
+            action,
+            instrument_token: instrument.instrumentToken,
+            tradingSymbol: instrument.tradingSymbol ?? `Nifty ${strike} ${optionSide}`,
+            premiumAtSignal: premium,
+            spotPriceAtSignal: Number.isFinite(Number(latestData?.ltp)) ? Number(latestData?.ltp) : null,
+            lockedAt: Date.now(),
+          };
+          console.log("[CONTRACT LOCKED]", signalContractRef.current);
+        } else {
+          console.warn("[CONTRACT LOCK FAILED]", { strike, resolved: instrument });
+        }
         const rules = latestSignal.ruleContext?.rules as any;
         const ltpNow = Number(latestData?.ltp);
         let slPts: number | undefined;
