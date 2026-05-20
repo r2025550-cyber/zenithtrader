@@ -565,7 +565,9 @@ const Index = () => {
   const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
   const classifyExecutionRootCause = (message: string) => {
     const lower = message.toLowerCase();
+    if (lower.includes("transaction_type") || lower.includes("transactiontype")) return "transaction_type missing";
     if (lower.includes("instrument_token")) return "instrument_token missing";
+    if (lower.includes("token_mismatch")) return "option token / side mismatch";
     if (lower.includes("stale signal")) return "stale signal";
     if (lower.includes("livemarket") || lower.includes("live market") || lower.includes("spot price")) return "liveMarket unavailable";
     if (lower.includes("option side")) return "invalid option side";
@@ -2376,33 +2378,44 @@ const Index = () => {
       const derivedOptionSide: "CE" | "PE" | null = rawOptionSide === "CE" || rawOptionSide === "PE" ? rawOptionSide : null;
       const derivedDirection: "BULLISH" | "BEARISH" = sigAny.direction ?? (ai.signal.action === "BUY" ? "BULLISH" : "BEARISH");
       const vpsEndpointUrl = `${normalizedVpsBaseUrl}/place-live-order`;
+      // VPS expects snake_case; we send BOTH camelCase + snake_case for compatibility.
+      // signal_action = AI market bias (BUY/SELL on NIFTY direction)
+      // execution_side = actual broker leg (always BUY for long-option scalping)
       const buildOrderPayload = (attempt: number) => {
+        // Strict token mapping — never auto-fallback to opposite side
+        const resolvedToken =
+          derivedOptionSide === "PE" ? (liveMarket.pe_instrument_token ?? null)
+          : derivedOptionSide === "CE" ? (liveMarket.ce_instrument_token ?? null)
+          : null;
         const orderPayload: Record<string, unknown> & { instrument_token?: string | null } = {
-        action: ai.signal.action,
-        direction: derivedDirection,
-        optionSide: derivedOptionSide,
-        transactionType: "BUY" as const,
-        instrument_token: null,
-        ce_instrument_token: liveMarket.ce_instrument_token,
-        pe_instrument_token: liveMarket.pe_instrument_token,
-        spotPrice: liveSpot,
-        strike: suggestedStrike ?? undefined,
-        quantity: suggestedQuantity,
-        tradingLotSize: normalizedTradingLotSize,
-        effectiveLotSize: ai.signal.effectiveLotSize,
-        targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
-        stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
-        maxSlippagePct: execSettings.slippagePct,
-        riskPoints: sigAny.riskPoints ?? undefined,
-        rrMultiplier: sigAny.rrMultiplier ?? undefined,
-        preferredProduct: "I" as const,
-        retryAttempt: attempt,
-      };
-        if (derivedOptionSide === "PE") {
-          orderPayload.instrument_token = liveMarket.pe_instrument_token;
-        } else {
-          orderPayload.instrument_token = liveMarket.ce_instrument_token;
-        }
+          // ---- AI / signal context ----
+          action: ai.signal.action,                 // legacy
+          signal_action: ai.signal.action,          // explicit AI bias (BUY/SELL on spot)
+          direction: derivedDirection,
+          optionSide: derivedOptionSide,
+          option_side: derivedOptionSide,           // snake_case mirror
+          // ---- Execution side (broker leg) ----
+          transactionType: "BUY" as const,          // camelCase (legacy)
+          transaction_type: "BUY" as const,         // snake_case (VPS requirement)
+          execution_side: "BUY" as const,           // explicit broker leg
+          // ---- Instrument ----
+          instrument_token: resolvedToken,
+          ce_instrument_token: liveMarket.ce_instrument_token ?? null,
+          pe_instrument_token: liveMarket.pe_instrument_token ?? null,
+          // ---- Trade params ----
+          spotPrice: liveSpot,
+          strike: suggestedStrike ?? undefined,
+          quantity: suggestedQuantity,
+          tradingLotSize: normalizedTradingLotSize,
+          effectiveLotSize: ai.signal.effectiveLotSize,
+          targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
+          stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
+          maxSlippagePct: execSettings.slippagePct,
+          riskPoints: sigAny.riskPoints ?? undefined,
+          rrMultiplier: sigAny.rrMultiplier ?? undefined,
+          preferredProduct: "I" as const,
+          retryAttempt: attempt,
+        };
         return orderPayload;
       };
       const validateOrderPayload = (payload: Record<string, unknown>) => {
@@ -2410,9 +2423,17 @@ const Index = () => {
         if (!isPresent(payload.instrument_token)) missing.push("instrument_token");
         if (!isPositiveNumber(payload.quantity)) missing.push("quantity");
         if (!isPresent(payload.action)) missing.push("action");
+        if (!isPresent(payload.transaction_type)) missing.push("transaction_type");
         if (!isPresent(payload.transactionType)) missing.push("transactionType");
         if (!isPositiveNumber(payload.strike)) missing.push("strike");
         if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        // Strict token-to-side mapping guard
+        if (derivedOptionSide === "PE" && payload.instrument_token !== liveMarket.pe_instrument_token) {
+          missing.push("pe_instrument_token_mismatch");
+        }
+        if (derivedOptionSide === "CE" && payload.instrument_token !== liveMarket.ce_instrument_token) {
+          missing.push("ce_instrument_token_mismatch");
+        }
         return missing;
       };
       const updatePayloadInspector = (payload: Record<string, unknown> | null, retryAttempt: number, missingFields: string[] = []) => {
@@ -4112,6 +4133,31 @@ const Index = () => {
                 )}
                 {payloadInspector ? (
                   <>
+                    {(() => {
+                      const op = payloadInspector.orderPayload ?? {};
+                      const checks: Array<[string, unknown]> = [
+                        ["transaction_type", (op as any).transaction_type],
+                        ["instrument_token", payloadInspector.instrument_token],
+                        ["quantity", payloadInspector.quantity],
+                        ["optionSide", payloadInspector.derivedOptionSide],
+                        ["strike", payloadInspector.suggestedStrike],
+                      ];
+                      const allOk = checks.every(([, v]) => isPresent(v));
+                      return (
+                        <div className={`mb-3 rounded-md border p-2 ${allOk ? "border-profit/40 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
+                          <p className={`text-[11px] font-semibold uppercase tracking-wider ${allOk ? "text-profit" : "text-loss"}`}>
+                            VPS Field Compatibility · {allOk ? "READY" : "BLOCKED"}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {checks.map(([k, v]) => (
+                              <span key={k} className={`rounded-sm border px-1.5 py-0.5 text-[10px] font-mono ${isPresent(v) ? "border-profit/40 bg-profit/10 text-profit" : "border-loss/50 bg-loss/15 text-loss"}`}>
+                                {isPresent(v) ? "✓" : "✗"} {k}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-3">
                       {[
                         ["signal timestamp", payloadInspector.signalTimestamp],
@@ -4119,8 +4165,10 @@ const Index = () => {
                         ["live spot price", payloadInspector.liveSpotPrice],
                         ["suggested strike", payloadInspector.suggestedStrike],
                         ["derivedOptionSide", payloadInspector.derivedOptionSide],
-                        ["action", payloadInspector.action],
-                        ["transactionType", payloadInspector.transactionType],
+                        ["signal_action (AI bias)", payloadInspector.action],
+                        ["execution_side (broker)", (payloadInspector.orderPayload as any)?.execution_side ?? "BUY"],
+                        ["transactionType (camel)", payloadInspector.transactionType],
+                        ["transaction_type (snake)", (payloadInspector.orderPayload as any)?.transaction_type],
                         ["quantity", payloadInspector.quantity],
                         ["ce_instrument_token", payloadInspector.ce_instrument_token],
                         ["pe_instrument_token", payloadInspector.pe_instrument_token],
@@ -4140,6 +4188,20 @@ const Index = () => {
                     <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
                       {JSON.stringify(payloadInspector.orderPayload, null, 2)}
                     </pre>
+                    {lastExecution && !lastExecution.success && (
+                      <div className="mt-3 rounded-md border border-loss/40 bg-loss/5 p-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Raw VPS / Upstox Response</p>
+                        <pre className="mt-1 max-h-60 overflow-auto text-[10px] leading-4 text-foreground">
+{JSON.stringify({
+  error: lastExecution.error,
+  details: (lastExecution as any).details,
+  errorDetails: (lastExecution as any).errorDetails,
+  execution: lastExecution.execution,
+  entryAttempts: (lastExecution as any).entryAttempts,
+}, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">No live order payload built yet. Execute a signal to inspect the exact VPS request.</p>
