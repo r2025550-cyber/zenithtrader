@@ -601,6 +601,16 @@ const Index = () => {
     if (lower.includes("upstox") || lower.includes("rejected") || lower.includes("udapi")) return "Upstox rejection";
     return message || "unknown";
   };
+  const extractRejectedField = (payload: unknown) => {
+    const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? "");
+    return text.match(/(?:missing_field|missing field|rejected field|field)[:\s"']+([a-zA-Z0-9_.-]+)/i)?.[1] ?? null;
+  };
+  const vpsErrorMessage = (payload: any, status: number) => {
+    const parts = [payload?.error, payload?.detail, payload?.details, payload?.missing_field && `missing_field: ${payload.missing_field}`]
+      .filter(Boolean)
+      .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
+    return parts.join(" — ") || `VPS ${status}`;
+  };
 
   // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
   // visible signal so support/resistance, reasoning, and confidence persist.
