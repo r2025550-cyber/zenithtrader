@@ -2134,6 +2134,7 @@ const Index = () => {
         !tradingBlocked &&
         !aiAnalysisInFlightRef.current &&
         !isExecutionActive() &&
+        !activeTrade &&
         Date.now() - lastForcedAiAtRef.current > 30_000
       ) {
         levelsAnchorLtpRef.current = value;
