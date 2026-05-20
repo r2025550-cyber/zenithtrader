@@ -605,8 +605,8 @@ const Index = () => {
     const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? "");
     return text.match(/(?:missing_field|missing field|rejected field|field)[:\s"']+([a-zA-Z0-9_.-]+)/i)?.[1] ?? null;
   };
-  const vpsErrorMessage = (payload: any, status: number) => {
-    const parts = [payload?.error, payload?.detail, payload?.details, payload?.missing_field && `missing_field: ${payload.missing_field}`]
+  const vpsErrorMessage = (payload: Record<string, unknown>, status: number) => {
+    const parts = [payload.error, payload.detail, payload.details, payload.missing_field && `missing_field: ${payload.missing_field}`]
       .filter(Boolean)
       .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
     return parts.join(" — ") || `VPS ${status}`;
