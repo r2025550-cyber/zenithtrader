@@ -565,7 +565,9 @@ const Index = () => {
   const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
   const classifyExecutionRootCause = (message: string) => {
     const lower = message.toLowerCase();
+    if (lower.includes("transaction_type") || lower.includes("transactiontype")) return "transaction_type missing";
     if (lower.includes("instrument_token")) return "instrument_token missing";
+    if (lower.includes("token_mismatch")) return "option token / side mismatch";
     if (lower.includes("stale signal")) return "stale signal";
     if (lower.includes("livemarket") || lower.includes("live market") || lower.includes("spot price")) return "liveMarket unavailable";
     if (lower.includes("option side")) return "invalid option side";
