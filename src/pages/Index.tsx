@@ -3952,6 +3952,20 @@ const Index = () => {
                   <div
                     className={`rounded-md border p-3 ${exitAlertActive ? "border-loss bg-loss text-foreground" : "border-profit/30 bg-profit/10 text-profit"}`}
                   >
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      <Badge className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] tracking-wide">
+                        ● TRADE ACTIVE
+                      </Badge>
+                      <Badge className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] tracking-wide">
+                        🔒 ENTRY LOCKED
+                      </Badge>
+                      <Badge className="bg-primary/20 text-primary border border-primary/40 text-[10px] tracking-wide">
+                        👁 MONITORING POSITION
+                      </Badge>
+                      <Badge className="bg-muted text-muted-foreground border border-border text-[10px] tracking-wide">
+                        AI SIGNALS PAUSED
+                      </Badge>
+                    </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <span className="text-sm font-semibold">
                         {exitAlertActive
