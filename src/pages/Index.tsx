@@ -2622,7 +2622,7 @@ const Index = () => {
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
-          const forensic = (err as any)?.vpsForensics;
+          const forensic = (err as Error & { vpsForensics?: { status?: number; body?: Record<string, unknown>; requestPayload?: Record<string, unknown>; stage?: string; upstoxStatus?: number | null } }).vpsForensics;
           const failedFieldRaw = forensic?.body?.missing_field ?? forensic?.body?.missingField ?? forensic?.body?.rejected_field ?? forensic?.body?.rejectedField ?? extractRejectedField(forensic?.body ?? msg);
           const failedField = failedFieldRaw ? String(failedFieldRaw) : null;
           const stage = forensic?.stage ?? (msg.toLowerCase().includes("upstox") ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED");
@@ -4242,12 +4242,12 @@ const Index = () => {
                     {(() => {
                       const op = payloadInspector.orderPayload ?? {};
                       const checks: Array<[string, unknown]> = [
-                        ["transaction_type", (op as any).transaction_type],
+                        ["transaction_type", op.transaction_type],
                         ["instrument_token", payloadInspector.instrument_token],
                         ["quantity", payloadInspector.quantity],
-                        ["product", (op as any).product],
-                        ["order_type", (op as any).order_type],
-                        ["validity", (op as any).validity],
+                        ["product", op.product],
+                        ["order_type", op.order_type],
+                        ["validity", op.validity],
                         ["optionSide", payloadInspector.derivedOptionSide],
                         ["strike", payloadInspector.suggestedStrike],
                       ];
@@ -4275,13 +4275,13 @@ const Index = () => {
                         ["suggested strike", payloadInspector.suggestedStrike],
                         ["derivedOptionSide", payloadInspector.derivedOptionSide],
                         ["signal_action (AI bias)", payloadInspector.action],
-                        ["execution_side (broker)", (payloadInspector.orderPayload as any)?.execution_side ?? "BUY"],
+                        ["execution_side (broker)", payloadInspector.orderPayload?.execution_side ?? "BUY"],
                         ["transactionType (camel)", payloadInspector.transactionType],
-                        ["transaction_type (snake)", (payloadInspector.orderPayload as any)?.transaction_type],
-                        ["product", (payloadInspector.orderPayload as any)?.product],
-                        ["preferredProduct", (payloadInspector.orderPayload as any)?.preferredProduct],
-                        ["order_type", (payloadInspector.orderPayload as any)?.order_type],
-                        ["validity", (payloadInspector.orderPayload as any)?.validity],
+                        ["transaction_type (snake)", payloadInspector.orderPayload?.transaction_type],
+                        ["product", payloadInspector.orderPayload?.product],
+                        ["preferredProduct", payloadInspector.orderPayload?.preferredProduct],
+                        ["order_type", payloadInspector.orderPayload?.order_type],
+                        ["validity", payloadInspector.orderPayload?.validity],
                         ["quantity", payloadInspector.quantity],
                         ["ce_instrument_token", payloadInspector.ce_instrument_token],
                         ["pe_instrument_token", payloadInspector.pe_instrument_token],
@@ -4346,10 +4346,13 @@ const Index = () => {
                         <pre className="mt-1 max-h-60 overflow-auto text-[10px] leading-4 text-foreground">
 {JSON.stringify({
   error: lastExecution.error,
-  details: (lastExecution as any).details,
-  errorDetails: (lastExecution as any).errorDetails,
+  details: lastExecution.details,
+  errorDetails: lastExecution.errorDetails,
   execution: lastExecution.execution,
-  entryAttempts: (lastExecution as any).entryAttempts,
+  entryAttempts: lastExecution.entryAttempts,
+  sentPayload: lastExecution.sentPayload,
+  upstox_status: lastExecution.upstox_status,
+  upstox_response: lastExecution.upstox_response,
 }, null, 2)}
                         </pre>
                       </div>
