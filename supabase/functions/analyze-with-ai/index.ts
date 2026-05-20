@@ -598,6 +598,8 @@ serve(async (req) => {
       reasonParts.push("Max daily loss reached — kill-switch active.");
     } else if (lossPauseActive) {
       reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
+    } else if (postLossCooldownActive) {
+      reasonParts.push(`Post-loss cooldown: ${consecutiveLosses} SL — wait ~${postLossCooldownRemainingMin}m before re-entry.`);
     } else if (!tradeCapOk) {
       reasonParts.push(`Daily trade cap reached (${MAX_TRADES_PER_DAY}).`);
     } else if (!tradeGapOk && !gapBypassedByReEntry) {
