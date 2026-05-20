@@ -2328,6 +2328,7 @@ const Index = () => {
         detail: `${lockedSignal.action} ${lockedSignal.strike}`,
         data: { ageMs: sigAgeMs },
       });
+      setExecutionRootCause(null);
       toast({ title: "Executing locked signal...", description: `${lockedSignal.action} ${lockedSignal.strike}` });
 
       const liveMarket = await fetchLiveNifty(true, true);
@@ -2335,6 +2336,7 @@ const Index = () => {
       const ai = { signal: lockedSignal };
 
       if (!Number.isFinite(liveSpot)) {
+        setExecutionRootCause("liveMarket unavailable");
         toast({
           title: "Live price missing",
           description: "Cannot place a live order until Nifty spot is available.",
@@ -2545,6 +2547,7 @@ const Index = () => {
         const ed = liveOrder.errorDetails;
         const lastAttempt = ed?.attempts?.slice(-1)[0];
         const upstoxReason = ed?.reason ?? liveOrder.details ?? lastAttempt?.error ?? "blocked";
+        setExecutionRootCause(classifyExecutionRootCause(`${liveOrder.error ?? ""} ${upstoxReason}`));
         pushDebug({
           stage: "ERROR",
           level: "error",
