@@ -588,6 +588,14 @@ const Index = () => {
     retryAttempt: number;
     orderPayload: Record<string, unknown> | null;
     missingFields: string[];
+    // Strike-lock forensics
+    signalStrike?: number | null;
+    executedStrike?: number | null;
+    strikeMatch?: boolean | null;
+    premiumAtSignal?: number | null;
+    premiumAtFill?: number | null;
+    lockedTradingSymbol?: string | null;
+    lockedInstrumentToken?: string | null;
   };
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
