@@ -3899,6 +3899,10 @@ const Index = () => {
                         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
                         stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
                         maxSlippagePct: execSettings.slippagePct,
+                        preferredProduct: "I",
+                        product: "I",
+                        order_type: "MARKET",
+                        validity: "DAY",
                         forceManual: true,
                       });
                       if (!forced.success) throw new Error(forced.error || "Force trade rejected");
