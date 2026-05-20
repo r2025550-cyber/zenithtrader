@@ -3420,11 +3420,13 @@ const Index = () => {
                 {executionState !== "IDLE" && (
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase ${
-                      executionState === "FAILED"
+                      executionState === "FAILED" || executionState === "REJECTED" || executionState === "CANCELLED"
                         ? "border-loss/40 bg-loss/10 text-loss"
                         : executionState === "FILLED"
                           ? "border-profit/40 bg-profit/10 text-profit"
-                          : "border-warning/40 bg-warning/10 text-warning animate-pulse"
+                          : executionState === "WAITING_FOR_FILL" || executionState === "ORDER_ACCEPTED" || executionState === "ORDER_SENT"
+                            ? "border-primary/40 bg-primary/10 text-primary animate-pulse"
+                            : "border-warning/40 bg-warning/10 text-warning animate-pulse"
                     }`}
                     title={executionError ?? undefined}
                   >
