@@ -2547,7 +2547,7 @@ const Index = () => {
         quantity: liveOrder.quantity,
         initialTargetPoints: targetPoints,
         initialSlPoints: slPoints,
-        instrumentToken: liveOrder.instrumentToken,
+        instrument_token: liveOrder.instrument_token ?? (liveOrder as any).instrumentToken,
         slOrderId: liveOrder.slOrderId,
         entryPremium: liveOrder.entryPremium,
         currentPremium: liveOrder.entryPremium,
