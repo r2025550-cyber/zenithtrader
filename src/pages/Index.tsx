@@ -329,6 +329,13 @@ type ActiveTradePlan = {
   stopLossPremium?: number;
   lastSyncedStopLossPremium?: number;
   exitAlertReason?: "TRAILING_SL" | "FINAL_TARGET";
+  // Locked-contract immutables (set at fill, never mutated)
+  tradingSymbol?: string;
+  optionSide?: "CE" | "PE";
+  signalStrike?: number;
+  executedStrike?: number;
+  entryPremiumSnapshot?: number;
+  spotPriceAtSignal?: number;
 } | null;
 type ExecutionMeta = {
   orderPlaced?: boolean;
