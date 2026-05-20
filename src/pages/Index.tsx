@@ -3126,7 +3126,8 @@ const Index = () => {
       // Reset transient execution state after a short delay so the UI shows
       // FILLED/FAILED briefly before returning to IDLE.
       window.setTimeout(() => {
-        if (executionStateRef.current === "FILLED" || executionStateRef.current === "FAILED") {
+        const s = executionStateRef.current;
+        if (s === "FILLED" || s === "FAILED" || s === "REJECTED" || s === "CANCELLED") {
           executionStateRef.current = "IDLE";
           setExecutionState("IDLE");
         }
