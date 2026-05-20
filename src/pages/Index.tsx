@@ -2623,7 +2623,8 @@ const Index = () => {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
           const forensic = (err as any)?.vpsForensics;
-          const failedField = forensic?.body?.missing_field ?? forensic?.body?.missingField ?? forensic?.body?.rejected_field ?? forensic?.body?.rejectedField ?? extractRejectedField(forensic?.body ?? msg);
+          const failedFieldRaw = forensic?.body?.missing_field ?? forensic?.body?.missingField ?? forensic?.body?.rejected_field ?? forensic?.body?.rejectedField ?? extractRejectedField(forensic?.body ?? msg);
+          const failedField = failedFieldRaw ? String(failedFieldRaw) : null;
           const stage = forensic?.stage ?? (msg.toLowerCase().includes("upstox") ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED");
           setExecutionRootCause(failedField ? `${failedField.includes("invalid") ? "Rejected" : "Missing"} field: ${failedField}` : classifyExecutionRootCause(msg));
           pushDebug({
