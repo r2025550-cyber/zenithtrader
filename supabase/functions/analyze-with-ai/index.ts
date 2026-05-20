@@ -712,26 +712,67 @@ serve(async (req) => {
       pa.compression ? "COMPRESSION" :
       (pa.trendUp || pa.trendDown) ? "TRENDING" : "CHOPPY";
 
-    const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
+    const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || postLossCooldownActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
+
+    // v9: regime-aware HARD confidence gate
+    const baseGate =
+      tradingMode === "sniper" ? CONF_GATE_SNIPER :
+      regime === "TRENDING" ? CONF_GATE_TRENDING :
+      regime === "CHOPPY" ? CONF_GATE_CHOPPY :
+      CONF_GATE_SCALPING;
+    // Post-loss tighten: bump required confidence by +5
+    const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
+    const requiredConfidence = baseGate + lossBump;
+
+    // v9: CHOPPY regime requires extra confirmation (momentum + breakout candle aligned with bias)
+    const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
+      ? (pa.momentumBull || pa.bullStreak >= 2) && (pa.strongGreen || pa.bullishEngulfing)
+      : biasDir === "SELL"
+        ? (pa.momentumBear || pa.bearStreak >= 2) && (pa.strongRed || pa.bearishEngulfing)
+        : false);
 
     let aiMode: "HIGH_CONVICTION" | "FAST_SCALP" | "WAIT" = "WAIT";
+    let gateRejection: string | null = null;
+
+    // Apply confidence gate to ANY non-WAIT action
+    if (action !== "WAIT") {
+      if (confidenceScore < requiredConfidence) {
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""})`;
+        reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
+        action = "WAIT";
+      } else if (regime === "CHOPPY" && !choppyConfirmed) {
+        gateRejection = `CHOPPY regime requires momentum + breakout-candle confirmation`;
+        reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
+        action = "WAIT";
+      }
+    }
+
     if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
-    else if (action !== "WAIT" && confidenceScore >= 65) aiMode = "FAST_SCALP";
-    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= 65) {
-      // Promote missed setup — fixes over-filtering.
+    else if (action !== "WAIT" && confidenceScore >= requiredConfidence) aiMode = "FAST_SCALP";
+    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed)) {
+      // Promote missed setup only when it ALSO clears the regime gate.
       action = biasDir;
       aiMode = "FAST_SCALP";
-      reasonParts.unshift(`FAST SCALP (${confidenceScore}/100): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
+      reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${requiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
+    }
+
+    // v9: 6th-trade override — allow exactly one extra trade if HIGH_CONVICTION + TRENDING + last win
+    if (action === "WAIT" && sixthTradeWindow && biasDir && confidenceScore >= 80 && regime === "TRENDING" && lastTradeWasWin && !hardBlocked) {
+      action = biasDir;
+      aiMode = "HIGH_CONVICTION";
+      reasonParts.unshift(`6TH-TRADE OVERRIDE: HIGH conviction (${confidenceScore}/100) in TRENDING regime after a win.`);
     }
 
     const rejectionReason = action === "WAIT"
       ? (cooldownActive ? `Signal cooldown ${Math.round(SIGNAL_COOLDOWN_SEC - secsSinceLastSignal)}s`
         : !tradeGapOk && !gapBypassedByReEntry ? `Min trade gap ${MIN_TRADE_GAP_MIN}m`
-        : !tradeCapOk ? `Daily cap reached`
+        : !tradeCapOk ? `Daily cap reached (${MAX_TRADES_PER_DAY})`
+        : postLossCooldownActive ? `Post-loss cooldown ${postLossCooldownRemainingMin}m`
         : lossPauseActive ? `Loss-pause ${lossPauseRemainingMin}m`
         : dailyTargetHit ? `Daily target hit`
         : maxDailyLossHit ? `Kill-switch active`
-        : confidenceScore < 65 ? `Conviction ${confidenceScore}/100 below 65`
+        : gateRejection ? gateRejection
+        : confidenceScore < requiredConfidence ? `Conviction ${confidenceScore}/100 < gate ${requiredConfidence}`
         : `No directional bias (bull ${bullScore} / bear ${bearScore})`)
       : null;
 
