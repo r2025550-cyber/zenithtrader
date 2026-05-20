@@ -1549,8 +1549,26 @@ const Index = () => {
               }
             })()
           : {};
+        const upstoxStatus = Number(payload?.upstox_status ?? payload?.upstoxStatus ?? payload?.httpStatusChain?.vpsToUpstox);
+        const stage = payload?.stage ?? (!res.ok ? (Number.isFinite(upstoxStatus) ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED") : "VPS_ACCEPTED");
+        if (name === "place-live-order") {
+          setVpsForensics({
+            endpoint: `${normalizedVpsBaseUrl}${path}`,
+            method,
+            frontendToVpsStatus: res.status,
+            vpsToUpstoxStatus: Number.isFinite(upstoxStatus) ? upstoxStatus : null,
+            stage,
+            trace: Array.isArray(payload?.trace) ? payload.trace : ["PAYLOAD_READY", res.ok ? "VPS_ACCEPTED" : stage].filter(Boolean),
+            missingField: payload?.missing_field ?? payload?.missingField ?? null,
+            rejectedField: payload?.rejected_field ?? payload?.rejectedField ?? extractRejectedField(payload),
+            requestPayload: (body as Record<string, unknown>) ?? null,
+            rawResponseBody: payload,
+            rawResponseText: text,
+            at: Date.now(),
+          });
+        }
         if (!res.ok) {
-          const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
+          const serverMessage = vpsErrorMessage(payload, res.status);
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
             : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
@@ -1560,7 +1578,16 @@ const Index = () => {
               : serverMessage;
           recordVpsError(`${method} ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
-          throw new Error(message);
+          throw Object.assign(new Error(message), {
+            vpsForensics: {
+              status: res.status,
+              body: payload,
+              text,
+              requestPayload: body,
+              stage,
+              upstoxStatus: Number.isFinite(upstoxStatus) ? upstoxStatus : null,
+            },
+          });
         }
         if (name === "system-status" && method === "GET") {
           return {
