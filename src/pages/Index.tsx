@@ -2552,8 +2552,8 @@ const Index = () => {
       pushDebug({
         stage: "ORDER",
         level: "info",
-        title: "ORDER PLACING",
-        detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
+        title: "PAYLOAD_READY",
+        detail: `VPS payload ready · ${derivedOptionSide} ${suggestedStrike ?? "ATM"} · product ${preflightPayload.product}`,
         data: preflightPayload,
       });
 
@@ -2597,11 +2597,27 @@ const Index = () => {
           action: orderPayload.action,
           strike: suggestedStrike,
           instrument_token: orderPayload.instrument_token,
+          product: orderPayload.product,
+          order_type: orderPayload.order_type,
+          validity: orderPayload.validity,
         });
         try {
           if (tunnelOnline) setExecState("VPS_CONNECTED");
           setExecState("EXECUTING");
+          pushDebug({
+            stage: "ORDER",
+            level: "info",
+            title: "UPSTOX_REQUEST_SENT",
+            detail: `Attempt ${attempt}/${EXEC_MAX_ATTEMPTS} sent to VPS`,
+            data: orderPayload,
+          });
           liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+          pushDebug({
+            stage: "ORDER",
+            level: "success",
+            title: liveOrder?.success ? "ORDER_FILLED" : "VPS_ACCEPTED",
+            detail: `Frontend → VPS: ${vpsForensics?.frontendToVpsStatus ?? 200}${vpsForensics?.vpsToUpstoxStatus ? ` · VPS → Upstox: ${vpsForensics.vpsToUpstoxStatus}` : ""}`,
+          });
           break;
         } catch (err) {
           lastErr = err;
