@@ -494,6 +494,13 @@ serve(async (req) => {
     const lossPauseRemainingMin = lossPauseActive ? Math.max(0, Math.ceil(LOSS_PAUSE_MIN - minutesSinceLastClosed)) : 0;
     // Position-sizing multiplier: halve after a loss, restore after a win, default 1.
     const positionSizeMultiplier = lastTradeWasLoss ? 0.5 : (lastTradeWasWin ? 1 : 1);
+    // v9: post-loss re-entry cooldown (1 SL = 10m, 2 SL = 20m). Separate from 60m loss-pause.
+    const postLossCooldownMin = consecutiveLosses >= 2 ? POST_DOUBLE_LOSS_COOLDOWN_MIN
+      : consecutiveLosses === 1 ? POST_LOSS_COOLDOWN_MIN
+      : 0;
+    const postLossCooldownActive = postLossCooldownMin > 0 && minutesSinceLastClosed < postLossCooldownMin;
+    const postLossCooldownRemainingMin = postLossCooldownActive
+      ? Math.max(0, Math.ceil(postLossCooldownMin - minutesSinceLastClosed)) : 0;
 
     // ===== v5: NEWS/SPIKE & COMPRESSION FLAGS =====
     const spikeBlock = pa.spikeDetected;
