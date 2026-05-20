@@ -2275,6 +2275,14 @@ const Index = () => {
   const runTradingCycle = async () => {
     if (aiAnalysisInFlightRef.current) return;
     if (tradingBlocked) return;
+    // ===== SINGLE-POSITION SCALPING LOCK =====
+    // While a position is open OR an order is mid-flight, the AI engine must
+    // NOT generate new signals / re-evaluate strikes / refresh conviction.
+    // Only SL / trailing / exit monitors are allowed to run.
+    if (activeTrade || isExecutionActive()) {
+      console.log("[AI_LOOP] skipped — trade active (monitoring-only mode)");
+      return;
+    }
     aiAnalysisInFlightRef.current = true;
     console.log("[AI_LOOP] start", new Date().toISOString());
     try {
