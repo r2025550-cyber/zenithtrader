@@ -4292,7 +4292,7 @@ const Index = () => {
                         const ok = isPresent(value);
                         return (
                           <div key={String(label)} className={`rounded-sm border p-2 ${ok ? "border-profit/30 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
-                            <p className="uppercase tracking-wider text-muted-foreground">{label}</p>
+                            <p className="uppercase tracking-wider text-muted-foreground">{String(label)}</p>
                             <p className={`mt-1 break-all font-mono font-semibold ${ok ? "text-profit" : "text-loss"}`}>{isPresent(value) ? String(value) : "missing"}</p>
                           </div>
                         );
