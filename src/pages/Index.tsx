@@ -4296,6 +4296,45 @@ const Index = () => {
                     <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
                       {JSON.stringify(payloadInspector.orderPayload, null, 2)}
                     </pre>
+                    {vpsForensics && (
+                      <div className="mt-3 rounded-md border border-border bg-panel p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">VPS 400 Forensics</p>
+                        <div className="mt-2 grid gap-2 text-[11px] sm:grid-cols-2">
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">HTTP Status Chain</p>
+                            <p className={`mt-1 font-mono font-semibold ${vpsForensics.frontendToVpsStatus && vpsForensics.frontendToVpsStatus >= 400 ? "text-loss" : "text-profit"}`}>
+                              Frontend → VPS: {vpsForensics.frontendToVpsStatus ?? "network"}
+                            </p>
+                            <p className={`font-mono font-semibold ${vpsForensics.vpsToUpstoxStatus && vpsForensics.vpsToUpstoxStatus >= 400 ? "text-loss" : "text-muted-foreground"}`}>
+                              {vpsForensics.vpsToUpstoxStatus ? `VPS → Upstox: ${vpsForensics.vpsToUpstoxStatus}` : "VPS validation failed before Upstox call"}
+                            </p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">Execution Stage</p>
+                            <p className="mt-1 font-mono font-semibold text-foreground">{vpsForensics.stage ?? "—"}</p>
+                            <p className="mt-1 break-all text-[10px] text-muted-foreground">{vpsForensics.trace.join(" → ")}</p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">Rejected / Missing Field</p>
+                            <p className={`mt-1 font-mono font-semibold ${vpsForensics.missingField || vpsForensics.rejectedField ? "text-loss" : "text-muted-foreground"}`}>
+                              {vpsForensics.missingField ? `Missing field: ${vpsForensics.missingField}` : vpsForensics.rejectedField ? `Rejected field: ${vpsForensics.rejectedField}` : "Not reported"}
+                            </p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">VPS Endpoint</p>
+                            <p className="mt-1 break-all font-mono text-foreground">{vpsForensics.method} {vpsForensics.endpoint}</p>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Final VPS-Bound Payload</p>
+                        <pre className="mt-1 max-h-56 overflow-auto rounded-sm border border-border bg-surface p-2 text-[10px] leading-4 text-foreground">
+                          {JSON.stringify(vpsForensics.requestPayload, null, 2)}
+                        </pre>
+                        <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Raw VPS Response Body</p>
+                        <pre className="mt-1 max-h-64 overflow-auto rounded-sm border border-border bg-surface p-2 text-[10px] leading-4 text-foreground">
+                          {JSON.stringify(vpsForensics.rawResponseBody ?? vpsForensics.rawResponseText, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                     {lastExecution && !lastExecution.success && (
                       <div className="mt-3 rounded-md border border-loss/40 bg-loss/5 p-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Raw VPS / Upstox Response</p>
