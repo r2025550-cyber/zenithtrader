@@ -2302,17 +2302,23 @@ const Index = () => {
         return;
       }
 
-      // Optional staleness check (do NOT auto-cancel; warn user)
+      // Strict staleness check: never reuse old signals for live execution.
       const sigTs = locked?.lockedUntil
         ? locked.lockedUntil - SIGNAL_LOCK_MS
         : Date.parse(lockedSignal.created_at ?? "") || Date.now();
       const sigAgeMs = Date.now() - sigTs;
       if (sigAgeMs > SIGNAL_STALE_MS) {
-        const ok =
-          typeof window !== "undefined"
-            ? window.confirm(`Signal is ${Math.round(sigAgeMs / 1000)}s old. Execute anyway?`)
-            : true;
-        if (!ok) return;
+        const reason = `stale signal — ${Math.round(sigAgeMs / 1000)}s old`;
+        setExecutionRootCause("stale signal");
+        pushDebug({
+          stage: "ERROR",
+          level: "error",
+          title: "EXECUTION BLOCKED — stale signal",
+          detail: reason,
+          data: { signalTimestamp: new Date(sigTs).toISOString(), maxAgeSec: SIGNAL_STALE_MS / 1000 },
+        });
+        toast({ title: "Execution blocked", description: reason, variant: "destructive" });
+        return;
       }
 
       pushDebug({
