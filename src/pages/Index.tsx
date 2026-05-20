@@ -137,7 +137,22 @@ const SIGNAL_STALE_MS = 15_000;
 const EXEC_MAX_ATTEMPTS = 3;
 const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
 const VPS_OFFLINE_AUTODISABLE_MS = 60_000;
-type ExecutionState = "IDLE" | "PENDING" | "SENDING" | "VPS_CONNECTED" | "EXECUTING" | "FILLED" | "FAILED";
+type ExecutionState =
+  | "IDLE"
+  | "PENDING"
+  | "SENDING"
+  | "VPS_CONNECTED"
+  | "EXECUTING"
+  | "ORDER_SENT"
+  | "ORDER_ACCEPTED"
+  | "WAITING_FOR_FILL"
+  | "FILLED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "FAILED";
+// Fill-confirmation polling tuning
+const FILL_POLL_INTERVAL_MS = 2_000;
+const FILL_POLL_MAX_ATTEMPTS = 30; // ~60s total before [FILL_TIMEOUT]
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
