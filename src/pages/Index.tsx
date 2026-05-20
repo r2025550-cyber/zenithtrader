@@ -379,6 +379,12 @@ type LiveOrderResult = {
   optionLtp?: number;
   productUsed?: "I" | "D";
   orderTypeUsed?: "MARKET" | "LIMIT";
+  sentPayload?: Record<string, unknown>;
+  upstox_response?: unknown;
+  upstox_status?: number | null;
+  httpStatusChain?: Record<string, unknown>;
+  stage?: string;
+  trace?: string[];
   entryAttempts?: Array<{ product: string; order_type: string; ok: boolean; error?: string; payload?: Record<string, unknown> }>;
   errorDetails?: {
     reason?: string;
@@ -386,6 +392,20 @@ type LiveOrderResult = {
     failedField?: string | null;
     rejectedPayload?: Record<string, unknown> | null;
   };
+};
+type VpsForensics = {
+  endpoint: string;
+  method: string;
+  frontendToVpsStatus: number | null;
+  vpsToUpstoxStatus: number | null;
+  stage: string | null;
+  trace: string[];
+  missingField: string | null;
+  rejectedField: string | null;
+  requestPayload: Record<string, unknown> | null;
+  rawResponseBody: unknown;
+  rawResponseText: string;
+  at: number;
 };
 const EXEC_SETTINGS_KEY = "zenith-exec-settings-v1";
 type ExecSettings = { slippagePct: number; maxSpreadPct: number; retries: number; liquidityFilter: boolean };
@@ -551,6 +571,7 @@ const Index = () => {
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [payloadInspector, setPayloadInspector] = useState<PayloadInspector | null>(null);
   const [executionRootCause, setExecutionRootCause] = useState<string | null>(null);
+  const [vpsForensics, setVpsForensics] = useState<VpsForensics | null>(null);
   const lastDebugSignalKeyRef = useRef<string>("");
   const pushDebug = (e: Omit<DebugEvent, "id" | "ts">) => {
     const evt: DebugEvent = { ...e, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ts: Date.now() };
@@ -565,6 +586,9 @@ const Index = () => {
   const isPositiveNumber = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0;
   const classifyExecutionRootCause = (message: string) => {
     const lower = message.toLowerCase();
+    if (lower.includes("product")) return lower.includes("invalid") ? "Rejected field: product" : "Missing field: product";
+    if (lower.includes("order_type")) return lower.includes("invalid") ? "Rejected field: order_type" : "Missing field: order_type";
+    if (lower.includes("validity")) return lower.includes("invalid") ? "Rejected field: validity" : "Missing field: validity";
     if (lower.includes("transaction_type") || lower.includes("transactiontype")) return "transaction_type missing";
     if (lower.includes("instrument_token")) return "instrument_token missing";
     if (lower.includes("token_mismatch")) return "option token / side mismatch";
@@ -576,6 +600,16 @@ const Index = () => {
     if (lower.includes("unreachable") || lower.includes("failed to fetch") || lower.includes("tunnel")) return "tunnel unreachable";
     if (lower.includes("upstox") || lower.includes("rejected") || lower.includes("udapi")) return "Upstox rejection";
     return message || "unknown";
+  };
+  const extractRejectedField = (payload: unknown) => {
+    const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? "");
+    return text.match(/(?:missing_field|missing field|rejected field|field)[:\s"']+([a-zA-Z0-9_.-]+)/i)?.[1] ?? null;
+  };
+  const vpsErrorMessage = (payload: Record<string, unknown>, status: number) => {
+    const parts = [payload.error, payload.detail, payload.details, payload.missing_field && `missing_field: ${payload.missing_field}`]
+      .filter(Boolean)
+      .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
+    return parts.join(" — ") || `VPS ${status}`;
   };
 
   // PRO+++ stability: never blank the UI. Reset internal locks but keep the last
@@ -1515,8 +1549,26 @@ const Index = () => {
               }
             })()
           : {};
+        const upstoxStatus = Number(payload?.upstox_status ?? payload?.upstoxStatus ?? payload?.httpStatusChain?.vpsToUpstox);
+        const stage = payload?.stage ?? (!res.ok ? (Number.isFinite(upstoxStatus) ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED") : "VPS_ACCEPTED");
+        if (name === "place-live-order") {
+          setVpsForensics({
+            endpoint: `${normalizedVpsBaseUrl}${path}`,
+            method,
+            frontendToVpsStatus: res.status,
+            vpsToUpstoxStatus: Number.isFinite(upstoxStatus) ? upstoxStatus : null,
+            stage,
+            trace: Array.isArray(payload?.trace) ? payload.trace : ["PAYLOAD_READY", res.ok ? "VPS_ACCEPTED" : stage].filter(Boolean),
+            missingField: payload?.missing_field ?? payload?.missingField ?? null,
+            rejectedField: payload?.rejected_field ?? payload?.rejectedField ?? extractRejectedField(payload),
+            requestPayload: (body as Record<string, unknown>) ?? null,
+            rawResponseBody: payload,
+            rawResponseText: text,
+            at: Date.now(),
+          });
+        }
         if (!res.ok) {
-          const serverMessage = (payload?.error || payload?.detail || `VPS ${res.status}`) as string;
+          const serverMessage = vpsErrorMessage(payload, res.status);
           const message = serverMessage.includes(UPSTOX_INVALID_CODE_ERROR)
             ? "Invalid Auth code. Upstox authorization codes are single-use; tap Get Code and paste a brand-new code."
             : serverMessage.includes(UPSTOX_INVALID_TOKEN_ERROR) ||
@@ -1526,7 +1578,16 @@ const Index = () => {
               : serverMessage;
           recordVpsError(`${method} ${path}`, `${res.status} ${message}`);
           markUpstoxRateLimited(message);
-          throw new Error(message);
+          throw Object.assign(new Error(message), {
+            vpsForensics: {
+              status: res.status,
+              body: payload,
+              text,
+              requestPayload: body,
+              stage,
+              upstoxStatus: Number.isFinite(upstoxStatus) ? upstoxStatus : null,
+            },
+          });
         }
         if (name === "system-status" && method === "GET") {
           return {
@@ -2414,6 +2475,13 @@ const Index = () => {
           riskPoints: sigAny.riskPoints ?? undefined,
           rrMultiplier: sigAny.rrMultiplier ?? undefined,
           preferredProduct: "I" as const,
+          product: "I" as const,
+          order_type: "MARKET" as const,
+          validity: "DAY" as const,
+          price: 0,
+          trigger_price: 0,
+          disclosed_quantity: 0,
+          is_amo: false,
           retryAttempt: attempt,
         };
         return orderPayload;
@@ -2425,8 +2493,15 @@ const Index = () => {
         if (!isPresent(payload.action)) missing.push("action");
         if (!isPresent(payload.transaction_type)) missing.push("transaction_type");
         if (!isPresent(payload.transactionType)) missing.push("transactionType");
+        if (!isPresent(payload.product)) missing.push("product");
+        if (!isPresent(payload.order_type)) missing.push("order_type");
+        if (!isPresent(payload.validity)) missing.push("validity");
         if (!isPositiveNumber(payload.strike)) missing.push("strike");
         if (payload.optionSide !== "CE" && payload.optionSide !== "PE") missing.push("optionSide");
+        if (payload.transaction_type !== "BUY") missing.push("transaction_type_invalid");
+        if (payload.product !== "I" && payload.product !== "D") missing.push("product_invalid");
+        if (payload.order_type !== "MARKET" && payload.order_type !== "LIMIT" && payload.order_type !== "SL" && payload.order_type !== "SL-M") missing.push("order_type_invalid");
+        if (payload.validity !== "DAY" && payload.validity !== "IOC") missing.push("validity_invalid");
         // Strict token-to-side mapping guard
         if (derivedOptionSide === "PE" && payload.instrument_token !== liveMarket.pe_instrument_token) {
           missing.push("pe_instrument_token_mismatch");
@@ -2477,8 +2552,8 @@ const Index = () => {
       pushDebug({
         stage: "ORDER",
         level: "info",
-        title: "ORDER PLACING",
-        detail: `${ai.signal.action} ${suggestedStrike ?? "ATM"} · spot ${liveSpot.toFixed(2)}`,
+        title: "PAYLOAD_READY",
+        detail: `VPS payload ready · ${derivedOptionSide} ${suggestedStrike ?? "ATM"} · product ${preflightPayload.product}`,
         data: preflightPayload,
       });
 
@@ -2522,16 +2597,43 @@ const Index = () => {
           action: orderPayload.action,
           strike: suggestedStrike,
           instrument_token: orderPayload.instrument_token,
+          product: orderPayload.product,
+          order_type: orderPayload.order_type,
+          validity: orderPayload.validity,
         });
         try {
           if (tunnelOnline) setExecState("VPS_CONNECTED");
           setExecState("EXECUTING");
+          pushDebug({
+            stage: "ORDER",
+            level: "info",
+            title: "UPSTOX_REQUEST_SENT",
+            detail: `Attempt ${attempt}/${EXEC_MAX_ATTEMPTS} sent to VPS`,
+            data: orderPayload,
+          });
           liveOrder = await invokeFunction<LiveOrderResult>("place-live-order", orderPayload);
+          pushDebug({
+            stage: "ORDER",
+            level: "success",
+            title: liveOrder?.success ? "ORDER_FILLED" : "VPS_ACCEPTED",
+            detail: `Frontend → VPS: ${vpsForensics?.frontendToVpsStatus ?? 200}${vpsForensics?.vpsToUpstoxStatus ? ` · VPS → Upstox: ${vpsForensics.vpsToUpstoxStatus}` : ""}`,
+          });
           break;
         } catch (err) {
           lastErr = err;
           const msg = err instanceof Error ? err.message : String(err);
-          setExecutionRootCause(classifyExecutionRootCause(msg));
+          const forensic = (err as Error & { vpsForensics?: { status?: number; body?: Record<string, unknown>; requestPayload?: Record<string, unknown>; stage?: string; upstoxStatus?: number | null } }).vpsForensics;
+          const failedFieldRaw = forensic?.body?.missing_field ?? forensic?.body?.missingField ?? forensic?.body?.rejected_field ?? forensic?.body?.rejectedField ?? extractRejectedField(forensic?.body ?? msg);
+          const failedField = failedFieldRaw ? String(failedFieldRaw) : null;
+          const stage = forensic?.stage ?? (msg.toLowerCase().includes("upstox") ? "UPSTOX_REJECTED" : "VPS_VALIDATION_FAILED");
+          setExecutionRootCause(failedField ? `${failedField.includes("invalid") ? "Rejected" : "Missing"} field: ${failedField}` : classifyExecutionRootCause(msg));
+          pushDebug({
+            stage: "ERROR",
+            level: "error",
+            title: stage,
+            detail: `Frontend → VPS: ${forensic?.status ?? "network"}${forensic?.upstoxStatus ? ` · VPS → Upstox: ${forensic.upstoxStatus}` : " · VPS validation failed before Upstox call"}`,
+            data: { message: msg, failedField, rawVpsResponse: forensic?.body, rejectedPayload: forensic?.requestPayload },
+          });
           console.warn(`[ORDER RETRY] attempt ${attempt} failed:`, msg);
           if (attempt < EXEC_MAX_ATTEMPTS) {
             setExecState("FAILED", msg);
@@ -3798,6 +3900,10 @@ const Index = () => {
                         targetPremiumPoints: DEFAULT_PREMIUM_TARGET_POINTS,
                         stopLossPremiumPoints: DEFAULT_PREMIUM_SL_POINTS,
                         maxSlippagePct: execSettings.slippagePct,
+                        preferredProduct: "I",
+                        product: "I",
+                        order_type: "MARKET",
+                        validity: "DAY",
                         forceManual: true,
                       });
                       if (!forced.success) throw new Error(forced.error || "Force trade rejected");
@@ -4136,9 +4242,12 @@ const Index = () => {
                     {(() => {
                       const op = payloadInspector.orderPayload ?? {};
                       const checks: Array<[string, unknown]> = [
-                        ["transaction_type", (op as any).transaction_type],
+                        ["transaction_type", op.transaction_type],
                         ["instrument_token", payloadInspector.instrument_token],
                         ["quantity", payloadInspector.quantity],
+                        ["product", op.product],
+                        ["order_type", op.order_type],
+                        ["validity", op.validity],
                         ["optionSide", payloadInspector.derivedOptionSide],
                         ["strike", payloadInspector.suggestedStrike],
                       ];
@@ -4166,9 +4275,13 @@ const Index = () => {
                         ["suggested strike", payloadInspector.suggestedStrike],
                         ["derivedOptionSide", payloadInspector.derivedOptionSide],
                         ["signal_action (AI bias)", payloadInspector.action],
-                        ["execution_side (broker)", (payloadInspector.orderPayload as any)?.execution_side ?? "BUY"],
+                        ["execution_side (broker)", payloadInspector.orderPayload?.execution_side ?? "BUY"],
                         ["transactionType (camel)", payloadInspector.transactionType],
-                        ["transaction_type (snake)", (payloadInspector.orderPayload as any)?.transaction_type],
+                        ["transaction_type (snake)", payloadInspector.orderPayload?.transaction_type],
+                        ["product", payloadInspector.orderPayload?.product],
+                        ["preferredProduct", payloadInspector.orderPayload?.preferredProduct],
+                        ["order_type", payloadInspector.orderPayload?.order_type],
+                        ["validity", payloadInspector.orderPayload?.validity],
                         ["quantity", payloadInspector.quantity],
                         ["ce_instrument_token", payloadInspector.ce_instrument_token],
                         ["pe_instrument_token", payloadInspector.pe_instrument_token],
@@ -4179,7 +4292,7 @@ const Index = () => {
                         const ok = isPresent(value);
                         return (
                           <div key={String(label)} className={`rounded-sm border p-2 ${ok ? "border-profit/30 bg-profit/5" : "border-loss/40 bg-loss/10"}`}>
-                            <p className="uppercase tracking-wider text-muted-foreground">{label}</p>
+                            <p className="uppercase tracking-wider text-muted-foreground">{String(label)}</p>
                             <p className={`mt-1 break-all font-mono font-semibold ${ok ? "text-profit" : "text-loss"}`}>{isPresent(value) ? String(value) : "missing"}</p>
                           </div>
                         );
@@ -4188,16 +4301,58 @@ const Index = () => {
                     <pre className="mt-3 max-h-72 overflow-auto rounded-md border border-border bg-panel p-3 text-[11px] leading-5 text-foreground">
                       {JSON.stringify(payloadInspector.orderPayload, null, 2)}
                     </pre>
+                    {vpsForensics && (
+                      <div className="mt-3 rounded-md border border-border bg-panel p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">VPS 400 Forensics</p>
+                        <div className="mt-2 grid gap-2 text-[11px] sm:grid-cols-2">
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">HTTP Status Chain</p>
+                            <p className={`mt-1 font-mono font-semibold ${vpsForensics.frontendToVpsStatus && vpsForensics.frontendToVpsStatus >= 400 ? "text-loss" : "text-profit"}`}>
+                              Frontend → VPS: {vpsForensics.frontendToVpsStatus ?? "network"}
+                            </p>
+                            <p className={`font-mono font-semibold ${vpsForensics.vpsToUpstoxStatus && vpsForensics.vpsToUpstoxStatus >= 400 ? "text-loss" : "text-muted-foreground"}`}>
+                              {vpsForensics.vpsToUpstoxStatus ? `VPS → Upstox: ${vpsForensics.vpsToUpstoxStatus}` : "VPS validation failed before Upstox call"}
+                            </p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">Execution Stage</p>
+                            <p className="mt-1 font-mono font-semibold text-foreground">{vpsForensics.stage ?? "—"}</p>
+                            <p className="mt-1 break-all text-[10px] text-muted-foreground">{vpsForensics.trace.join(" → ")}</p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">Rejected / Missing Field</p>
+                            <p className={`mt-1 font-mono font-semibold ${vpsForensics.missingField || vpsForensics.rejectedField ? "text-loss" : "text-muted-foreground"}`}>
+                              {vpsForensics.missingField ? `Missing field: ${vpsForensics.missingField}` : vpsForensics.rejectedField ? `Rejected field: ${vpsForensics.rejectedField}` : "Not reported"}
+                            </p>
+                          </div>
+                          <div className="rounded-sm border border-border bg-surface p-2">
+                            <p className="uppercase tracking-wider text-muted-foreground">VPS Endpoint</p>
+                            <p className="mt-1 break-all font-mono text-foreground">{vpsForensics.method} {vpsForensics.endpoint}</p>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Final VPS-Bound Payload</p>
+                        <pre className="mt-1 max-h-56 overflow-auto rounded-sm border border-border bg-surface p-2 text-[10px] leading-4 text-foreground">
+                          {JSON.stringify(vpsForensics.requestPayload, null, 2)}
+                        </pre>
+                        <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Raw VPS Response Body</p>
+                        <pre className="mt-1 max-h-64 overflow-auto rounded-sm border border-border bg-surface p-2 text-[10px] leading-4 text-foreground">
+                          {JSON.stringify(vpsForensics.rawResponseBody ?? vpsForensics.rawResponseText, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                     {lastExecution && !lastExecution.success && (
                       <div className="mt-3 rounded-md border border-loss/40 bg-loss/5 p-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-loss">Raw VPS / Upstox Response</p>
                         <pre className="mt-1 max-h-60 overflow-auto text-[10px] leading-4 text-foreground">
 {JSON.stringify({
   error: lastExecution.error,
-  details: (lastExecution as any).details,
-  errorDetails: (lastExecution as any).errorDetails,
+  details: lastExecution.details,
+  errorDetails: lastExecution.errorDetails,
   execution: lastExecution.execution,
-  entryAttempts: (lastExecution as any).entryAttempts,
+  entryAttempts: lastExecution.entryAttempts,
+  sentPayload: lastExecution.sentPayload,
+  upstox_status: lastExecution.upstox_status,
+  upstox_response: lastExecution.upstox_response,
 }, null, 2)}
                         </pre>
                       </div>

@@ -1016,13 +1016,33 @@ async def place_live_order(req: Request):
     """
     body = await _read_json(req)
     headers = {**_auth_headers(), "Content-Type": "application/json"}
+    trace: List[str] = ["PAYLOAD_READY"]
+
+    def fail_response(status_code: int, error: str, detail: Any, *, missing_field: Optional[str] = None, rejected_field: Optional[str] = None, sent_payload: Optional[Dict[str, Any]] = None, upstox_status: Optional[int] = None, upstox_response: Any = None, stage: str = "VPS_VALIDATION_FAILED"):
+        return JSONResponse(
+            {
+                "success": False,
+                "error": error,
+                "detail": detail,
+                "details": detail,
+                "missing_field": missing_field,
+                "rejected_field": rejected_field,
+                "upstox_status": upstox_status,
+                "upstox_response": upstox_response,
+                "sentPayload": sent_payload,
+                "stage": stage,
+                "trace": [*trace, stage],
+                "httpStatusChain": {"frontendToVps": status_code, "vpsToUpstox": upstox_status},
+            },
+            status_code=status_code,
+        )
 
     upstox_payload: Dict[str, Any]
     resolved_meta: Optional[Dict[str, Any]] = None
 
     # --- Mode A: raw Upstox payload pass-through ---
     if body.get("instrument_token") and body.get("transaction_type"):
-        upstox_payload = body
+        upstox_payload = dict(body)
     else:
         # --- Mode B: Supabase-style payload — translate ---
         action = str(body.get("action") or "").upper()
@@ -1051,7 +1071,7 @@ async def place_live_order(req: Request):
 
         upstox_payload = {
             "quantity": quantity,
-            "product": "D",
+            "product": body.get("product") or body.get("preferredProduct") or "I",
             "validity": "DAY",
             "price": 0,
             "tag": body.get("tag") or "zenith-vps-live",
@@ -1063,7 +1083,39 @@ async def place_live_order(req: Request):
             "is_amo": False,
         }
 
+    # Normalize final Upstox-bound format. Keep client-provided fields, fill only missing broker-required fields.
+    upstox_payload["transaction_type"] = str(upstox_payload.get("transaction_type") or upstox_payload.get("transactionType") or "BUY").upper()
+    upstox_payload["order_type"] = str(upstox_payload.get("order_type") or "MARKET").upper()
+    upstox_payload["validity"] = str(upstox_payload.get("validity") or "DAY").upper()
+    upstox_payload["product"] = str(upstox_payload.get("product") or upstox_payload.get("preferredProduct") or "I").upper()
+    upstox_payload["price"] = _num(upstox_payload.get("price")) or 0
+    upstox_payload["trigger_price"] = _num(upstox_payload.get("trigger_price")) or 0
+    upstox_payload["disclosed_quantity"] = int(_num(upstox_payload.get("disclosed_quantity")) or 0)
+    upstox_payload["is_amo"] = bool(upstox_payload.get("is_amo", False))
+
+    required_fields = ["transaction_type", "instrument_token", "quantity", "product", "order_type", "validity"]
+    for field in required_fields:
+        value = upstox_payload.get(field)
+        if value is None or value == "" or (field == "quantity" and (_num(value) or 0) <= 0):
+            return fail_response(400, f"Missing field: {field}", f"VPS validation failed before Upstox call: {field} is required", missing_field=field, sent_payload=upstox_payload)
+    upstox_payload["quantity"] = int(_num(upstox_payload.get("quantity")) or 0)
+    if upstox_payload["transaction_type"] not in ("BUY", "SELL"):
+        return fail_response(400, "Rejected field: transaction_type", f"Invalid transaction_type: {upstox_payload['transaction_type']}", rejected_field="transaction_type", sent_payload=upstox_payload)
+    if upstox_payload["product"] not in ("I", "D"):
+        return fail_response(400, "Rejected field: product", f"Invalid product: {upstox_payload['product']}", rejected_field="product", sent_payload=upstox_payload)
+    if upstox_payload["order_type"] not in ("MARKET", "LIMIT", "SL", "SL-M"):
+        return fail_response(400, "Rejected field: order_type", f"Invalid order_type: {upstox_payload['order_type']}", rejected_field="order_type", sent_payload=upstox_payload)
+    if upstox_payload["validity"] not in ("DAY", "IOC"):
+        return fail_response(400, "Rejected field: validity", f"Invalid validity: {upstox_payload['validity']}", rejected_field="validity", sent_payload=upstox_payload)
+    # Broker formatting: strip frontend/debug-only fields before Upstox.
+    allowed_order_fields = [
+        "quantity", "product", "validity", "price", "tag", "instrument_token",
+        "order_type", "transaction_type", "disclosed_quantity", "trigger_price", "is_amo",
+    ]
+    upstox_payload = {k: upstox_payload[k] for k in allowed_order_fields if k in upstox_payload}
+
     async with _client() as client:
+        trace.append("UPSTOX_REQUEST_SENT")
         resp = await client.post("https://api.upstox.com/v2/order/place", json=upstox_payload, headers=headers)
     try:
         payload = resp.json()
@@ -1074,9 +1126,15 @@ async def place_live_order(req: Request):
             {
                 "success": False,
                 "error": payload.get("errors") or payload.get("error") or f"Upstox HTTP {resp.status_code}",
+                "detail": payload,
                 "details": payload,
+                "upstox_status": resp.status_code,
+                "upstox_response": payload,
                 "instrument": resolved_meta,
                 "sentPayload": upstox_payload,
+                "stage": "UPSTOX_REJECTED",
+                "trace": [*trace, "UPSTOX_REJECTED"],
+                "httpStatusChain": {"frontendToVps": resp.status_code, "vpsToUpstox": resp.status_code},
             },
             status_code=resp.status_code,
         )
@@ -1088,6 +1146,10 @@ async def place_live_order(req: Request):
             "instrumentToken": upstox_payload.get("instrument_token"),
             "quantity": upstox_payload.get("quantity"),
             "execution": {"orderPlaced": True, "orderFilled": False, "slActive": False, "trailingActive": False},
+            "sentPayload": upstox_payload,
+            "stage": "ORDER_FILLED",
+            "trace": [*trace, "VPS_ACCEPTED", "ORDER_FILLED"],
+            "httpStatusChain": {"frontendToVps": 200, "vpsToUpstox": resp.status_code},
         },
         status_code=200,
     )
