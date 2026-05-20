@@ -446,6 +446,19 @@ const Index = () => {
   const userEditedExitsRef = useRef(false);
   const previousSignalActionRef = useRef<string>("WAIT");
   const signalLockRef = useRef<{ signal: Signal; lockedUntil: number } | null>(null);
+  // Frozen option contract resolved at signal generation. Never recomputed during execution.
+  const signalContractRef = useRef<{
+    signalKey: string;
+    strike: number;
+    optionSide: "CE" | "PE";
+    action: "BUY" | "SELL";
+    instrument_token: string;
+    tradingSymbol: string;
+    expiry?: string;
+    premiumAtSignal: number;
+    spotPriceAtSignal: number | null;
+    lockedAt: number;
+  } | null>(null);
   // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
   // even across temporary VPS unreachable errors.
   const executionStateRef = useRef<ExecutionState>("IDLE");
