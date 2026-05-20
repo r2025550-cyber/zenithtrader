@@ -137,7 +137,22 @@ const SIGNAL_STALE_MS = 15_000;
 const EXEC_MAX_ATTEMPTS = 3;
 const EXEC_BACKOFF_MS = [1_000, 2_000, 4_000];
 const VPS_OFFLINE_AUTODISABLE_MS = 60_000;
-type ExecutionState = "IDLE" | "PENDING" | "SENDING" | "VPS_CONNECTED" | "EXECUTING" | "FILLED" | "FAILED";
+type ExecutionState =
+  | "IDLE"
+  | "PENDING"
+  | "SENDING"
+  | "VPS_CONNECTED"
+  | "EXECUTING"
+  | "ORDER_SENT"
+  | "ORDER_ACCEPTED"
+  | "WAITING_FOR_FILL"
+  | "FILLED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "FAILED";
+// Fill-confirmation polling tuning
+const FILL_POLL_INTERVAL_MS = 2_000;
+const FILL_POLL_MAX_ATTEMPTS = 30; // ~60s total before [FILL_TIMEOUT]
 
 const getIndiaMarketMinute = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -669,11 +684,21 @@ const Index = () => {
     return signalSpot !== null && Math.abs(liveSpot - signalSpot) > AI_SPOT_DRIFT_TRIGGER_PTS;
   };
 
-  // True while an order is being attempted (incl. retry backoff window).
+  // True while an order is being attempted (incl. retry backoff window and waiting-for-fill).
   const isExecutionActive = () => {
     const s = executionStateRef.current;
-    return s === "PENDING" || s === "SENDING" || s === "VPS_CONNECTED" || s === "EXECUTING";
+    return (
+      s === "PENDING" ||
+      s === "SENDING" ||
+      s === "VPS_CONNECTED" ||
+      s === "EXECUTING" ||
+      s === "ORDER_SENT" ||
+      s === "ORDER_ACCEPTED" ||
+      s === "WAITING_FOR_FILL"
+    );
   };
+  // Polling controller for broker fill confirmation. Single in-flight poll only.
+  const fillPollRef = useRef<{ cancelled: boolean; orderId: string | null }>({ cancelled: false, orderId: null });
 
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
     // SINGLE-POSITION LOCK: ignore any signal while a trade is open.
@@ -2826,7 +2851,13 @@ const Index = () => {
         });
         return;
       }
-      setExecState("FILLED");
+      // ===== Order accepted by VPS/Upstox — DO NOT mark as FILLED until broker confirms =====
+      setExecState("ORDER_SENT");
+      const brokerOrderId: string | null =
+        (liveOrder as any).order?.data?.order_id ??
+        (liveOrder as any).order?.order_id ??
+        (liveOrder as any).order_id ??
+        null;
       // v8: entryPremium fallback chain (some failure-paths only return fillPrice/optionLtp)
       const resolvedEntryPremium =
         (liveOrder as any).entryPremium ?? liveOrder.fillPrice ?? liveOrder.slippage?.fillPrice ?? liveOrder.optionLtp ?? 0;
@@ -2834,61 +2865,30 @@ const Index = () => {
       pushDebug({
         stage: "ORDER",
         level: "success",
-        title: "ORDER PLACED",
-        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity} · ${liveOrder.productUsed ?? "I"}/${liveOrder.orderTypeUsed ?? "MARKET"}`,
+        title: "ORDER_ACCEPTED",
+        detail: `${liveOrder.instrument.tradingSymbol} · qty ${liveOrder.quantity} · ${liveOrder.productUsed ?? "I"}/${liveOrder.orderTypeUsed ?? "MARKET"} · order_id=${brokerOrderId ?? "—"}`,
         data: {
-          orderId: (liveOrder as any).order?.data?.order_id ?? (liveOrder as any).order?.order_id,
+          orderId: brokerOrderId,
           instrument: liveOrder.instrument,
           productUsed: liveOrder.productUsed,
           orderTypeUsed: liveOrder.orderTypeUsed,
         },
       });
-      if (liveOrder.execution?.orderFilled) {
-        pushDebug({
-          stage: "FILL",
-          level: "success",
-          title: "ORDER FILLED",
-          detail: `Fill ₹${liveOrder.entryPremium?.toFixed(2)} · slippage ${liveOrder.slippage?.slippagePct?.toFixed(2) ?? "—"}%`,
-          data: {
-            fillPrice: liveOrder.entryPremium,
-            quotedLtp: liveOrder.slippage?.quotedLtp,
-            quantity: liveOrder.quantity,
-            status: liveOrder.execution?.orderStatus,
-          },
-        });
-      } else {
-        pushDebug({
-          stage: "FILL",
-          level: "warn",
-          title: "ORDER PENDING",
-          detail: `Status ${liveOrder.execution?.orderStatus ?? "unknown"}`,
-        });
-      }
-      if (liveOrder.execution?.slActive) {
-        pushDebug({
-          stage: "SL",
-          level: "success",
-          title: "SL ACTIVE",
-          detail: `Trigger ₹${liveOrder.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder.slLimitPrice?.toFixed(2) ?? "—"}`,
-          data: { slType: liveOrder.slType, slOrderId: liveOrder.slOrderId },
-        });
-      } else {
-        pushDebug({
-          stage: "ERROR",
-          level: "warn",
-          title: "SL FAILED",
-          detail: "Server SL was not registered. Manual exit required if filled.",
-        });
-      }
-      const shouldUseManualExitPrices =
-        suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - liveOrder.entryPremium) <= 1;
-      const targetPremium =
-        shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder.targetPremium;
-      const stopLossPremium =
-        shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder.stopLossPremium;
-      const targetPoints = Math.abs(targetPremium - liveOrder.entryPremium);
-      const slPoints = Math.abs(liveOrder.entryPremium - stopLossPremium);
-      // Final strike-drift guard: compare what Upstox actually executed vs locked signal contract
+      console.log("[POSITION] ORDER_ACCEPTED — awaiting broker fill confirmation", {
+        order_id: brokerOrderId,
+        orderPlaced: liveOrder.execution?.orderPlaced,
+        orderFilled: liveOrder.execution?.orderFilled,
+        orderStatus: liveOrder.execution?.orderStatus,
+      });
+      setExecState("ORDER_ACCEPTED");
+
+      // Lock lifecycle so AI loop cannot generate new signals while we wait for fill.
+      // IMPORTANT: activeTradePlan stays NULL until broker reports COMPLETE so SL/trailing
+      // effects (which guard on activeTradePlan) cannot fire on a non-existent position.
+      setActiveTrade(true);
+      localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+
+      // Strike-drift forensic snapshot (uses what Upstox reports back, even before fill)
       const executedSymbol = liveOrder.instrument?.tradingSymbol ?? "";
       const executedStrike = parseSuggestedStrike(executedSymbol) ?? Number(liveOrder.instrument?.strike);
       if (Number.isFinite(executedStrike) && lockedContract && executedStrike !== lockedContract.strike) {
@@ -2905,45 +2905,209 @@ const Index = () => {
         strikeMatch: Number.isFinite(executedStrike) && lockedContract ? executedStrike === lockedContract.strike : prev.strikeMatch,
         premiumAtFill: liveOrder.entryPremium ?? null,
       } : prev);
-      const plan: NonNullable<ActiveTradePlan> = {
-        action: ai.signal.action as "BUY" | "SELL",
-        entry: liveSpot,
-        target: targetPremium,
-        stopLoss: stopLossPremium,
-        strike: liveOrder.instrument.tradingSymbol,
-        quantity: liveOrder.quantity,
-        initialTargetPoints: targetPoints,
-        initialSlPoints: slPoints,
-        instrument_token: liveOrder.instrument_token ?? (liveOrder as any)["instrument" + "Token"],
-        slOrderId: liveOrder.slOrderId,
-        entryPremium: liveOrder.entryPremium,
-        currentPremium: liveOrder.entryPremium,
-        targetPremium,
-        stopLossPremium,
-        lastSyncedStopLossPremium: liveOrder.stopLossPremium,
-        // Immutable locked-contract snapshot
-        tradingSymbol: lockedContract?.tradingSymbol ?? liveOrder.instrument.tradingSymbol,
-        optionSide: lockedContract?.optionSide ?? derivedOptionSide,
-        signalStrike: lockedContract?.strike ?? suggestedStrike ?? undefined,
-        executedStrike: Number.isFinite(executedStrike) ? executedStrike : undefined,
-        entryPremiumSnapshot: lockedContract?.premiumAtSignal,
-        spotPriceAtSignal: lockedContract?.spotPriceAtSignal ?? undefined,
+
+      const finalizeFilledTrade = (confirmedFillPx: number, confirmedQty: number, source: "vps" | "poll") => {
+        const fillPx = Number.isFinite(confirmedFillPx) && confirmedFillPx > 0 ? confirmedFillPx : resolvedEntryPremium;
+        const qty = Number.isFinite(confirmedQty) && confirmedQty > 0 ? confirmedQty : liveOrder!.quantity;
+        const tSymbol = liveOrder!.instrument?.tradingSymbol ?? lockedContract?.tradingSymbol ?? "UNKNOWN_SYMBOL";
+        if (!tSymbol || tSymbol === "UNKNOWN_SYMBOL") {
+          console.warn("[POSITION] finalize blocked — missing tradingSymbol on broker fill");
+        }
+        const shouldUseManualExitPrices =
+          suggestedEntryPremium !== null && Math.abs(suggestedEntryPremium - fillPx) <= 1;
+        const targetPremium =
+          shouldUseManualExitPrices && Number(userTargetPoints) ? Number(userTargetPoints) : liveOrder!.targetPremium;
+        const stopLossPremium =
+          shouldUseManualExitPrices && Number(userSlPoints) ? Number(userSlPoints) : liveOrder!.stopLossPremium;
+        const targetPoints = Math.abs(targetPremium - fillPx);
+        const slPoints = Math.abs(fillPx - stopLossPremium);
+
+        pushDebug({
+          stage: "FILL",
+          level: "success",
+          title: "ORDER_FILLED",
+          detail: `${source === "poll" ? "(broker COMPLETE) " : ""}Fill ₹${fillPx.toFixed(2)} · qty ${qty} · slippage ${liveOrder!.slippage?.slippagePct?.toFixed(2) ?? "—"}%`,
+          data: { fillPrice: fillPx, qty, source, orderId: brokerOrderId },
+        });
+        if (liveOrder!.execution?.slActive) {
+          pushDebug({
+            stage: "SL", level: "success", title: "SL ACTIVE",
+            detail: `Trigger ₹${liveOrder!.slTriggerPrice?.toFixed(2) ?? "—"} · Limit ₹${liveOrder!.slLimitPrice?.toFixed(2) ?? "—"}`,
+            data: { slType: liveOrder!.slType, slOrderId: liveOrder!.slOrderId },
+          });
+        } else {
+          pushDebug({
+            stage: "ERROR", level: "warn", title: "SL NOT REGISTERED",
+            detail: "Server SL not registered. Manual exit may be required.",
+          });
+        }
+
+        const plan: NonNullable<ActiveTradePlan> = {
+          action: ai.signal.action as "BUY" | "SELL",
+          entry: liveSpot,
+          target: targetPremium,
+          stopLoss: stopLossPremium,
+          strike: tSymbol,
+          quantity: qty,
+          initialTargetPoints: targetPoints,
+          initialSlPoints: slPoints,
+          instrument_token: liveOrder!.instrument_token ?? (liveOrder as any)["instrument" + "Token"],
+          slOrderId: liveOrder!.slOrderId,
+          entryPremium: fillPx,
+          currentPremium: fillPx,
+          targetPremium,
+          stopLossPremium,
+          lastSyncedStopLossPremium: liveOrder!.stopLossPremium,
+          tradingSymbol: lockedContract?.tradingSymbol ?? tSymbol,
+          optionSide: lockedContract?.optionSide ?? derivedOptionSide,
+          signalStrike: lockedContract?.strike ?? suggestedStrike ?? undefined,
+          executedStrike: Number.isFinite(executedStrike) ? executedStrike : undefined,
+          entryPremiumSnapshot: lockedContract?.premiumAtSignal,
+          spotPriceAtSignal: lockedContract?.spotPriceAtSignal ?? undefined,
+        };
+        if (!userEditedExitsRef.current) {
+          setUserTargetPoints(formatPremiumInput(targetPremium));
+          setUserSlPoints(formatPremiumInput(stopLossPremium));
+        }
+        const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
+        setExecutedTrades(nextCount);
+        setActiveTradePlan(plan);
+        localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
+        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
+        setExecState("FILLED");
+        toast({
+          title: "ORDER FILLED",
+          description: `${tSymbol} · Entry ₹${fillPx.toFixed(2)} · SL ₹${stopLossPremium.toFixed(2)}.`,
+        });
       };
-      if (!userEditedExitsRef.current) {
-        setUserTargetPoints(formatPremiumInput(targetPremium));
-        setUserSlPoints(formatPremiumInput(stopLossPremium));
+
+      const unlockLifecycle = (reason: string) => {
+        fillPollRef.current.cancelled = true;
+        fillPollRef.current.orderId = null;
+        setActiveTrade(false);
+        setActiveTradePlan(null);
+        localStorage.removeItem(ACTIVE_TRADE_STORAGE_KEY);
+        localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
+        signalContractRef.current = null;
+        console.log("[POSITION] lifecycle unlocked —", reason);
+      };
+
+      // Fast-path: VPS already confirmed broker fill in the initial response.
+      const vpsConfirmedFill =
+        liveOrder.execution?.orderFilled === true &&
+        Number(resolvedEntryPremium) > 0 &&
+        Number(liveOrder.quantity) > 0 &&
+        Boolean(liveOrder.instrument?.tradingSymbol);
+
+      if (vpsConfirmedFill) {
+        finalizeFilledTrade(resolvedEntryPremium, liveOrder.quantity, "vps");
+        return;
       }
-      const nextCount = Math.min(MAX_TRADES_PER_DAY, executedTrades + 1);
-      setExecutedTrades(nextCount);
-      setActiveTrade(true);
-      setActiveTradePlan(plan);
-      localStorage.setItem(TRADE_COUNT_STORAGE_KEY, `${todayKey()}:${nextCount}`);
-      localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
-      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(plan)}`);
-      toast({
-        title: "LIVE ORDER + SERVER SL PLACED",
-        description: `${liveOrder.instrument.tradingSymbol} · Entry ₹${liveOrder.entryPremium.toFixed(2)} · SL ₹${liveOrder.stopLossPremium.toFixed(2)}.`,
+
+      // ===== WAITING_FOR_FILL — poll broker until COMPLETE / REJECTED / CANCELLED / timeout =====
+      setExecState("WAITING_FOR_FILL");
+      pushDebug({
+        stage: "FILL", level: "warn", title: "WAITING_FOR_FILL",
+        detail: `Broker has not confirmed fill yet · status=${liveOrder.execution?.orderStatus ?? "unknown"} · order_id=${brokerOrderId ?? "—"}`,
       });
+
+      if (!brokerOrderId) {
+        // No order id to poll — treat as fill-timeout and abort cleanly.
+        pushDebug({
+          stage: "ERROR", level: "error", title: "FILL_TIMEOUT",
+          detail: "Broker did not return an order_id; cannot poll for fill. Lifecycle unlocked.",
+        });
+        toast({ title: "Fill timeout", description: "No broker order_id returned; cancelling lifecycle.", variant: "destructive" });
+        unlockLifecycle("missing order_id");
+        return;
+      }
+
+      // Cancel any prior poll, start a fresh one
+      fillPollRef.current = { cancelled: false, orderId: brokerOrderId };
+      const pollCtx = fillPollRef.current;
+
+      (async () => {
+        for (let attempt = 1; attempt <= FILL_POLL_MAX_ATTEMPTS; attempt++) {
+          if (pollCtx.cancelled || pollCtx.orderId !== brokerOrderId) {
+            console.log("[POSITION] poll cancelled", { attempt });
+            return;
+          }
+          await new Promise((r) => setTimeout(r, FILL_POLL_INTERVAL_MS));
+          if (pollCtx.cancelled || pollCtx.orderId !== brokerOrderId) return;
+          try {
+            const statusResp = await invokeFunction<{
+              success: boolean;
+              status?: string;
+              isFilled?: boolean;
+              isRejected?: boolean;
+              isCancelled?: boolean;
+              isPending?: boolean;
+              average_price?: number;
+              filled_quantity?: number;
+              trading_symbol?: string | null;
+              raw?: unknown;
+              error?: string;
+            }>("check-order-status", { order_id: brokerOrderId });
+
+            if (pollCtx.cancelled || pollCtx.orderId !== brokerOrderId) return;
+
+            console.log("[POSITION] poll", attempt, statusResp?.status, {
+              avg: statusResp?.average_price,
+              filled: statusResp?.filled_quantity,
+            });
+
+            if (statusResp?.isFilled) {
+              finalizeFilledTrade(
+                Number(statusResp.average_price ?? resolvedEntryPremium),
+                Number(statusResp.filled_quantity ?? liveOrder!.quantity),
+                "poll",
+              );
+              return;
+            }
+            if (statusResp?.isRejected) {
+              pushDebug({
+                stage: "ERROR", level: "error", title: "ORDER_REJECTED",
+                detail: `Broker rejected order ${brokerOrderId}`,
+                data: statusResp?.raw as Record<string, unknown> | undefined,
+              });
+              setExecState("REJECTED", "Broker rejected order");
+              toast({ title: "Order rejected", description: `Broker rejected ${brokerOrderId}.`, variant: "destructive" });
+              unlockLifecycle("REJECTED");
+              return;
+            }
+            if (statusResp?.isCancelled) {
+              pushDebug({
+                stage: "ERROR", level: "warn", title: "ORDER_CANCELLED",
+                detail: `Broker cancelled order ${brokerOrderId}`,
+                data: statusResp?.raw as Record<string, unknown> | undefined,
+              });
+              setExecState("CANCELLED", "Broker cancelled order");
+              toast({ title: "Order cancelled", description: `Broker cancelled ${brokerOrderId}.`, variant: "destructive" });
+              unlockLifecycle("CANCELLED");
+              return;
+            }
+            // still pending → loop
+          } catch (err) {
+            console.warn("[POSITION] poll error attempt", attempt, err);
+            // Soft-fail and retry on transient errors
+          }
+        }
+        // Timed out waiting for fill — auto-cancel the order and unlock lifecycle
+        if (pollCtx.cancelled || pollCtx.orderId !== brokerOrderId) return;
+        pushDebug({
+          stage: "ERROR", level: "error", title: "FILL_TIMEOUT",
+          detail: `Broker did not confirm fill within ${(FILL_POLL_INTERVAL_MS * FILL_POLL_MAX_ATTEMPTS) / 1000}s · order_id=${brokerOrderId}`,
+        });
+        toast({ title: "Fill timeout", description: "Auto-cancelling stale order and unlocking lifecycle.", variant: "destructive" });
+        try {
+          await invokeFunction("emergency-exit", { lockForDay: false, slOrderId: liveOrder!.slOrderId });
+        } catch (err) {
+          console.warn("[POSITION] emergency-exit on timeout failed", err);
+        }
+        setExecState("CANCELLED", "Fill timeout");
+        unlockLifecycle("FILL_TIMEOUT");
+      })();
+
       return;
     } catch (error) {
       pushDebug({
@@ -2962,7 +3126,8 @@ const Index = () => {
       // Reset transient execution state after a short delay so the UI shows
       // FILLED/FAILED briefly before returning to IDLE.
       window.setTimeout(() => {
-        if (executionStateRef.current === "FILLED" || executionStateRef.current === "FAILED") {
+        const s = executionStateRef.current;
+        if (s === "FILLED" || s === "FAILED" || s === "REJECTED" || s === "CANCELLED") {
           executionStateRef.current = "IDLE";
           setExecutionState("IDLE");
         }
@@ -2973,6 +3138,8 @@ const Index = () => {
   const emergencyExit = async (lockForDay = false) => {
     setIsBusy(true);
     try {
+      fillPollRef.current.cancelled = true;
+      fillPollRef.current.orderId = null;
       await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
       const nextCooldown = Date.now() + COOLDOWN_MS;
       setActiveTrade(false);
@@ -3255,11 +3422,13 @@ const Index = () => {
                 {executionState !== "IDLE" && (
                   <span
                     className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase ${
-                      executionState === "FAILED"
+                      executionState === "FAILED" || executionState === "REJECTED" || executionState === "CANCELLED"
                         ? "border-loss/40 bg-loss/10 text-loss"
                         : executionState === "FILLED"
                           ? "border-profit/40 bg-profit/10 text-profit"
-                          : "border-warning/40 bg-warning/10 text-warning animate-pulse"
+                          : executionState === "WAITING_FOR_FILL" || executionState === "ORDER_ACCEPTED" || executionState === "ORDER_SENT"
+                            ? "border-primary/40 bg-primary/10 text-primary animate-pulse"
+                            : "border-warning/40 bg-warning/10 text-warning animate-pulse"
                     }`}
                     title={executionError ?? undefined}
                   >
