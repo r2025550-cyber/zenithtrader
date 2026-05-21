@@ -15,9 +15,9 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } 
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-// v9-balanced: disciplined aggressive scalper (4–5 quality trades/day)
-const MIN_TRADE_GAP_MIN = 8;      // v9: was 4 — reduce clustering, still active
-const MAX_TRADES_PER_DAY = 5;     // v9: was 12 — quality over quantity (6th allowed conditionally)
+// v10-balanced: disciplined aggressive scalper (4–5 quality trades/day)
+const MIN_TRADE_GAP_MIN = 6;      // v10: was 8 — slightly more active, still paced
+const MAX_TRADES_PER_DAY = 5;     // v10: hard cap 5 quality trades
 const SIDEWAYS_RANGE_PTS = 20;
 const TRAIL_TRIGGER_PTS = 6;
 const TRAIL_LOCK_PTS = 6;
@@ -48,11 +48,11 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v9: regime-aware confidence gates (HARD execution gating)
-const CONF_GATE_TRENDING = 60;
-const CONF_GATE_SCALPING = 65;
-const CONF_GATE_CHOPPY = 75;
-const CONF_GATE_SNIPER = 85;
+// v10: regime-aware confidence gates (balanced — active but disciplined)
+const CONF_GATE_TRENDING = 56;
+const CONF_GATE_SCALPING = 58;
+const CONF_GATE_CHOPPY = 66;
+const CONF_GATE_SNIPER = 72;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -793,7 +793,7 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason });
+    console.log("[PRO+++ ENGINE v10]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -980,7 +980,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       premiumContract,
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
-      engineVersion: "price-action-scalper-v9-balanced",
+      engineVersion: "price-action-scalper-v10-balanced",
       liveSpot: pa.ltp,
       analysisTimestamp,
       payloadTimestamp,
