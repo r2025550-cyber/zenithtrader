@@ -4820,6 +4820,10 @@ const Index = () => {
               tradesToday={(latestSignal?.ruleContext as any)?.tradesToday ?? 0}
             />
 
+            <EngineDebugPanel signal={latestSignal as any} />
+
+
+
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}>
 
               <div className="mb-3 flex items-center gap-2 text-primary">
