@@ -3200,8 +3200,11 @@ const Index = () => {
       fillPollRef.current.orderId = null;
       await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
       const nextCooldown = Date.now() + COOLDOWN_MS;
+      activeTradeRef.current = false;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      lockedTradeContextRef.current = null;
+      setLockedTradeContext(null);
       signalContractRef.current = null;
       lastSignalAutofillRef.current = "";
       setCooldownUntil(nextCooldown);
