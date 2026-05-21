@@ -26,8 +26,8 @@ const NEAR_ZONE_PTS = 12;
 const RETEST_TOLERANCE_PTS = 8;
 const RETEST_MAX_AGE_CANDLES = 4;
 // v9: tighter early-entry filters — kill weak spike entries
-const EARLY_ENTRY_MIN_BODY_PTS = 18;     // v9: was 10
-const EARLY_ENTRY_MIN_MOVE_PTS = 18;     // v9: was 10
+const EARLY_ENTRY_MIN_BODY_PTS = 12;     // v12: restored fast-scalp responsiveness
+const EARLY_ENTRY_MIN_MOVE_PTS = 12;     // v12: restored fast-scalp responsiveness
 const FREQUENCY_BOOST_MIN_GAP = 30;
 const PULLBACK_TOLERANCE_PTS = 10;
 const PARTIAL_BOOK_PTS = 15;
@@ -48,15 +48,15 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v11: regime-aware confidence gates (active scalping — anti-starvation)
-const CONF_GATE_TRENDING = 54;
-const CONF_GATE_SCALPING = 55;
-const CONF_GATE_CHOPPY = 58;
+// v12: aggressive-protected scalper — restored entry responsiveness, EMA assists not blocks
+const CONF_GATE_TRENDING = 48;
+const CONF_GATE_SCALPING = 50;
+const CONF_GATE_CHOPPY = 54;
 const CONF_GATE_SNIPER = 68;
 // v11: open-session adaptive — reduce gate during opening drive (9:15–10:30 IST)
 const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
 const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
-const OPEN_SESSION_GATE_RELIEF   = 8;
+const OPEN_SESSION_GATE_RELIEF   = 10;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -306,13 +306,13 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const pullbackSell = trendDown && ema21 !== null && ltp !== null &&
     Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongRed || bearishEngulfing) && ema21Slope < 0;
 
-  // ===== v4: EARLY ENTRY (strong breakout close, skip retest) =====
+  // ===== v12: EARLY ENTRY — EMA assists, not blocks. Allow strong breakouts regardless of EMA alignment. =====
   const earlyBuy = ltp !== null && resistance !== null && close !== null &&
     close > resistance && strongGreen && body >= EARLY_ENTRY_MIN_BODY_PTS &&
-    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick && (emaBullish || ema21Slope > 0);
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick;
   const earlySell = ltp !== null && support !== null && close !== null &&
     close < support && strongRed && body >= EARLY_ENTRY_MIN_BODY_PTS &&
-    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick && (emaBearish || ema21Slope < 0);
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick;
 
   // ===== v4: CHOPPY market (very tight range = downsize) =====
   const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
@@ -680,24 +680,28 @@ serve(async (req) => {
     // Replaces hard-filter bias with scoring; promotes missed FAST_SCALPs.
     // ============================================================
     const bullScoring = [
-      { w: 20, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },
-      { w: 20, ok: !!pa.trendUp, label: "5m trend up aligned" },
-      { w: 15, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },
-      { w: 15, ok: !!pa.momentumBull, label: "Momentum confirmed" },
+      { w: 12, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },              // v12: EMA assists (was 20)
+      { w: 18, ok: !!pa.trendUp, label: "5m trend up aligned" },
+      { w: 22, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },  // v12: +7
+      { w: 20, ok: !!pa.momentumBull, label: "Momentum confirmed" },             // v12: +5
       { w: 10, ok: !!pa.nearSupport, label: "Support bounce zone" },
-      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
-      { w: 5,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },
+      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
+      { w: 8,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },         // v12: +3
+      { w: 10, ok: !!pa.liveBullBreakout || !!pa.earlyBuy, label: "Live bull breakout" }, // v12: new
+      { w: 6,  ok: !!pa.retestBullOk, label: "Bull retest confirmed" },          // v12: new
       { w: -10, ok: !!pa.longUpperWick, label: "Upper wick rejection" },
       { w: -15, ok: !!pa.bullTrap, label: "Bull-trap risk" },
     ];
     const bearScoring = [
-      { w: 20, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },
-      { w: 20, ok: !!pa.trendDown, label: "5m trend down aligned" },
-      { w: 15, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
-      { w: 15, ok: !!pa.momentumBear, label: "Momentum confirmed" },
+      { w: 12, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },               // v12: EMA assists
+      { w: 18, ok: !!pa.trendDown, label: "5m trend down aligned" },
+      { w: 22, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
+      { w: 20, ok: !!pa.momentumBear, label: "Momentum confirmed" },
       { w: 10, ok: !!pa.nearResistance, label: "Resistance rejection zone" },
-      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
-      { w: 5,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
+      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
+      { w: 8,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
+      { w: 10, ok: !!pa.liveBearBreakout || !!pa.earlySell, label: "Live bear breakdown" },
+      { w: 6,  ok: !!pa.retestBearOk, label: "Bear retest confirmed" },
       { w: -10, ok: !!pa.longLowerWick, label: "Lower wick rejection" },
       { w: -15, ok: !!pa.bearTrap, label: "Bear-trap risk" },
     ];
@@ -731,7 +735,7 @@ serve(async (req) => {
     const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
     // Post-loss tighten: bump required confidence by +5
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = Math.max(45, baseGate + lossBump - openSessionRelief);
+    const requiredConfidence = Math.max(40, baseGate + lossBump - openSessionRelief);
 
     // v11: CHOPPY regime — relaxed; require only ONE of breakout / momentum / engulfing aligned with bias
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
@@ -802,7 +806,7 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE v11]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v12]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -989,7 +993,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       premiumContract,
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
-      engineVersion: "price-action-scalper-v11-active",
+      engineVersion: "price-action-scalper-v12-aggressive-protected",
       liveSpot: pa.ltp,
       analysisTimestamp,
       payloadTimestamp,
