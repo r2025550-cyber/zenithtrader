@@ -764,9 +764,19 @@ serve(async (req) => {
     const _now = new Date();
     const istMinutes = (_now.getUTCHours() * 60 + _now.getUTCMinutes() + 330) % 1440;
     const openSessionActive = istMinutes >= OPEN_SESSION_START_IST_MIN && istMinutes <= OPEN_SESSION_END_IST_MIN;
+    // v14: session-phase classification (additive, does not change exec flow)
+    const preMarketActive = istMinutes >= PREMARKET_START_IST_MIN && istMinutes <= PREMARKET_END_IST_MIN;
+    const openingDriveActive = istMinutes >= OPENING_DRIVE_START_IST_MIN && istMinutes <= OPENING_DRIVE_END_IST_MIN;
+    const sessionPhase: "PRE_MARKET" | "OPENING_DRIVE" | "OPEN_SESSION" | "REGULAR" =
+      preMarketActive ? "PRE_MARKET"
+      : openingDriveActive ? "OPENING_DRIVE"
+      : openSessionActive ? "OPEN_SESSION"
+      : "REGULAR";
     const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
+    const openingDriveRelief = openingDriveActive && tradingMode !== "sniper" ? OPENING_DRIVE_EXTRA_RELIEF : 0;
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = Math.max(CONF_GATE_FLOOR, baseGate + lossBump - openSessionRelief);
+    const effectiveFloor = openingDriveActive ? OPENING_DRIVE_FLOOR : CONF_GATE_FLOOR;
+    const requiredConfidence = Math.max(effectiveFloor, baseGate + lossBump - openSessionRelief - openingDriveRelief);
 
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
