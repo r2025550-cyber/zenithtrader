@@ -1115,10 +1115,12 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     };
 
     const highProbability = action !== "WAIT";
-    // v5: position sizing — halve lots after a loss; restore on win.
-    const sizedLots = Math.max(1, Math.floor(tradingLotSize * positionSizeMultiplier));
+    // v14.1: 1-lot integrity — options lots are indivisible. NEVER size below the user's base lot when
+    // base is already 1 (65 qty). Post-loss halving only applies when base ≥ 2 lots.
+    const halvedLots = Math.floor(tradingLotSize * positionSizeMultiplier);
+    const sizedLots = Math.max(1, tradingLotSize === 1 ? tradingLotSize : halvedLots);
     const effectiveLotSize = sizedLots;
-    const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE;
+    const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE; // floor: 65 qty
 
     const ruleContext = {
       atmStrike: atmStrike(pa.ltp),
