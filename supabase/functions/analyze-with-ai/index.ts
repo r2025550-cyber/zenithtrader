@@ -59,6 +59,13 @@ const CONF_GATE_FLOOR = 36;
 const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
 const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
 const OPEN_SESSION_GATE_RELIEF   = 10;
+// v14: Pre-Market (9:00–9:14) + Opening Drive (9:15–9:30) additive layer
+const PREMARKET_START_IST_MIN    = 9 * 60;        // 540
+const PREMARKET_END_IST_MIN      = 9 * 60 + 14;   // 554
+const OPENING_DRIVE_START_IST_MIN = 9 * 60 + 15;  // 555
+const OPENING_DRIVE_END_IST_MIN   = 9 * 60 + 30;  // 570
+const OPENING_DRIVE_EXTRA_RELIEF  = 6;            // stacks on OPEN_SESSION_GATE_RELIEF
+const OPENING_DRIVE_FLOOR         = 30;           // lower hard floor only during 9:15–9:30
 // v13: EMA slope + body thresholds for "trend-equivalent" promotion
 const STRONG_SLOPE_PTS = 15;
 const BIG_BODY_PTS = 12;
@@ -757,9 +764,19 @@ serve(async (req) => {
     const _now = new Date();
     const istMinutes = (_now.getUTCHours() * 60 + _now.getUTCMinutes() + 330) % 1440;
     const openSessionActive = istMinutes >= OPEN_SESSION_START_IST_MIN && istMinutes <= OPEN_SESSION_END_IST_MIN;
+    // v14: session-phase classification (additive, does not change exec flow)
+    const preMarketActive = istMinutes >= PREMARKET_START_IST_MIN && istMinutes <= PREMARKET_END_IST_MIN;
+    const openingDriveActive = istMinutes >= OPENING_DRIVE_START_IST_MIN && istMinutes <= OPENING_DRIVE_END_IST_MIN;
+    const sessionPhase: "PRE_MARKET" | "OPENING_DRIVE" | "OPEN_SESSION" | "REGULAR" =
+      preMarketActive ? "PRE_MARKET"
+      : openingDriveActive ? "OPENING_DRIVE"
+      : openSessionActive ? "OPEN_SESSION"
+      : "REGULAR";
     const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
+    const openingDriveRelief = openingDriveActive && tradingMode !== "sniper" ? OPENING_DRIVE_EXTRA_RELIEF : 0;
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = Math.max(CONF_GATE_FLOOR, baseGate + lossBump - openSessionRelief);
+    const effectiveFloor = openingDriveActive ? OPENING_DRIVE_FLOOR : CONF_GATE_FLOOR;
+    const requiredConfidence = Math.max(effectiveFloor, baseGate + lossBump - openSessionRelief - openingDriveRelief);
 
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
@@ -772,14 +789,27 @@ serve(async (req) => {
     let gateRejection: string | null = null;
     const gateBlockedReasons: string[] = [];
 
+    // v14: Pre-Market (9:00–9:14) — preload analysis only, never execute.
+    // Bias direction + confidence are still computed so the dashboard shows
+    // the opening lean before the bell rings.
+    if (preMarketActive && action !== "WAIT") {
+      gateRejection = `PRE_MARKET preload — analysis only until 9:15 IST`;
+      gateBlockedReasons.push("pre-market preload");
+      reasonParts.unshift(`PRE-MARKET (${biasDir ?? "neutral"} lean @ ${confidenceScore}/100) — armed for 9:15 open.`);
+      action = "WAIT";
+    }
+
     // Apply confidence gate to ANY non-WAIT action
     if (action !== "WAIT") {
       if (confidenceScore < requiredConfidence) {
-        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""})`;
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""})`;
         gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
-      } else if (regime === "CHOPPY" && !choppyConfirmed) {
+      } else if (regime === "CHOPPY" && !choppyConfirmed && !openingDriveActive) {
+        // v14: during 9:15–9:30 opening drive, skip the CHOPPY price-action
+        // confirmation requirement — first 15 min are inherently choppy but
+        // carry the day's directional intent.
         gateRejection = `CHOPPY regime requires at least one price-action confirmation`;
         gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
@@ -872,12 +902,14 @@ serve(async (req) => {
       { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
     ];
     const gateInfo = {
-      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief, lossBump,
+      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief,
+      openingDriveActive, openingDriveRelief, preMarketActive, sessionPhase, effectiveFloor,
+      lossBump,
       passedGate: confidenceScore >= requiredConfidence,
       gateBlockedReasons,
     };
 
-    console.log("[PRO+++ ENGINE v13]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v14]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), sessionPhase, openSessionActive, openSessionRelief, openingDriveActive, openingDriveRelief, preMarketActive, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -1324,6 +1356,14 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         bullScore,
         bearScore,
         biasDir,
+        // v14: session-phase + opening-drive metadata for dashboard
+        sessionPhase,
+        preMarketActive,
+        openingDriveActive,
+        openSessionActive,
+        openingDriveRelief,
+        openSessionRelief,
+        effectiveFloor,
       },
     });
   } catch (error) {
