@@ -59,6 +59,13 @@ const CONF_GATE_FLOOR = 36;
 const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
 const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
 const OPEN_SESSION_GATE_RELIEF   = 10;
+// v14: Pre-Market (9:00–9:14) + Opening Drive (9:15–9:30) additive layer
+const PREMARKET_START_IST_MIN    = 9 * 60;        // 540
+const PREMARKET_END_IST_MIN      = 9 * 60 + 14;   // 554
+const OPENING_DRIVE_START_IST_MIN = 9 * 60 + 15;  // 555
+const OPENING_DRIVE_END_IST_MIN   = 9 * 60 + 30;  // 570
+const OPENING_DRIVE_EXTRA_RELIEF  = 6;            // stacks on OPEN_SESSION_GATE_RELIEF
+const OPENING_DRIVE_FLOOR         = 30;           // lower hard floor only during 9:15–9:30
 // v13: EMA slope + body thresholds for "trend-equivalent" promotion
 const STRONG_SLOPE_PTS = 15;
 const BIG_BODY_PTS = 12;
