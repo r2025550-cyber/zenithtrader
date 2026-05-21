@@ -833,7 +833,51 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE v12]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    // v13: LIVE DEBUG PAYLOAD — real backend values for the UI debug panel.
+    const liveFactors = {
+      emaBullish: !!pa.emaBullish,
+      emaBearish: !!pa.emaBearish,
+      emaSlope: Number((pa.ema21Slope ?? 0).toFixed(2)),
+      strongSlopeUp,
+      strongSlopeDown,
+      momentumBull: !!pa.momentumBull,
+      momentumBear: !!pa.momentumBear,
+      breakoutDetected: !!(pa.liveBullBreakout || pa.earlyBuy || pa.recentBullBreakout),
+      breakdownDetected: !!(pa.liveBearBreakout || pa.earlySell || pa.recentBearBreakout),
+      retestBullOk: !!pa.retestBullOk,
+      retestBearOk: !!pa.retestBearOk,
+      retestConfirmed: !!(pa.retestBullOk || pa.retestBearOk),
+      compressionActive: !!pa.compression,
+      bullTrap: !!pa.bullTrap,
+      bearTrap: !!pa.bearTrap,
+      trapDetected: !!(pa.bullTrap || pa.bearTrap),
+      strongCandle: !!(pa.strongGreen || pa.strongRed),
+      bigBody,
+      bodyPts: Number(bodyPts.toFixed(2)),
+      sidewaysFilter: !!pa.sidewaysMarket,
+      choppyMarket: !!pa.choppyMarket,
+      nearSupport: !!pa.nearSupport,
+      nearResistance: !!pa.nearResistance,
+      volumeValid: null as null | boolean,
+      pcrState: "Disabled (price-action mode)",
+      vixState: "n/a",
+      spikeDetected: !!pa.spikeDetected,
+    };
+    const pipeline = [
+      { stage: "MARKET DATA", passed: pa.ltp !== null, note: pa.ltp !== null ? `LTP ${pa.ltp}` : "no data" },
+      { stage: "PRICE ACTION", passed: !!(pa.support && pa.resistance), note: `S=${pa.support?.toFixed(0) ?? "—"} R=${pa.resistance?.toFixed(0) ?? "—"}` },
+      { stage: "SCORE AGGREGATION", passed: confidenceScore > 0, note: `${confidenceScore}/100 bull=${bullScore} bear=${bearScore}` },
+      { stage: "REGIME FILTER", passed: confidenceScore >= requiredConfidence, note: `${regime} gate=${requiredConfidence}` },
+      { stage: "SIGNAL DECISION", passed: action !== "WAIT", note: action },
+      { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
+    ];
+    const gateInfo = {
+      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief, lossBump,
+      passedGate: confidenceScore >= requiredConfidence,
+      gateBlockedReasons,
+    };
+
+    console.log("[PRO+++ ENGINE v13]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
