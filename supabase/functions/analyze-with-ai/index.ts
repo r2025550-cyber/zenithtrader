@@ -989,7 +989,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       premiumContract,
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
-      engineVersion: "price-action-scalper-v10-balanced",
+      engineVersion: "price-action-scalper-v11-active",
       liveSpot: pa.ltp,
       analysisTimestamp,
       payloadTimestamp,
