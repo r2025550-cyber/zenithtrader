@@ -2911,8 +2911,37 @@ const Index = () => {
       // Lock lifecycle so AI loop cannot generate new signals while we wait for fill.
       // IMPORTANT: activeTradePlan stays NULL until broker reports COMPLETE so SL/trailing
       // effects (which guard on activeTradePlan) cannot fire on a non-existent position.
+      activeTradeRef.current = true; // synchronous race-safe flip
       setActiveTrade(true);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+
+      // ===== CAPTURE IMMUTABLE LOCKED TRADE CONTEXT =====
+      // Frozen snapshot of the entire decision so UI panels stop mutating until exit.
+      const lockedRulesSnap = (lockedSignal?.ruleContext?.rules ?? {}) as any;
+      const lockedSnapshot: LockedTradeContext = {
+        action: lockedSignal!.action as "BUY" | "SELL",
+        strike: lockedContract!.strike,
+        optionSide: lockedContract!.optionSide,
+        tradingSymbol: lockedContract!.tradingSymbol,
+        instrument_token: lockedContract!.instrument_token,
+        confidenceSnapshot: Number(lockedRulesSnap?.confidenceScore ?? 0),
+        reasoningSnapshot: String(lockedSignal?.reason ?? ""),
+        supportSnapshot: Number.isFinite(lockedRulesSnap?.immediateSupport)
+          ? Number(lockedRulesSnap.immediateSupport)
+          : Number.isFinite(lockedRulesSnap?.support15) ? Number(lockedRulesSnap.support15) : null,
+        resistanceSnapshot: Number.isFinite(lockedRulesSnap?.immediateResistance)
+          ? Number(lockedRulesSnap.immediateResistance)
+          : Number.isFinite(lockedRulesSnap?.resistance15) ? Number(lockedRulesSnap.resistance15) : null,
+        stopLossPremium: Number(liveOrder.stopLossPremium ?? 0),
+        targetPremium: Number(liveOrder.targetPremium ?? 0),
+        entryPremium: Number(resolvedEntryPremium ?? 0),
+        signalCreatedAt: lockedSignal?.created_at ?? null,
+        lockedAt: Date.now(),
+      };
+      lockedTradeContextRef.current = lockedSnapshot;
+      setLockedTradeContext(lockedSnapshot);
+      console.log("[LOCKED_TRADE_CONTEXT] captured", lockedSnapshot);
+
 
       // Strike-drift forensic snapshot (uses what Upstox reports back, even before fill)
       const executedSymbol = liveOrder.instrument?.tradingSymbol ?? "";
