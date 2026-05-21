@@ -619,7 +619,11 @@ serve(async (req) => {
     if (dailyTargetHit) {
       reasonParts.push("Daily profit target hit — trading paused.");
     } else if (maxDailyLossHit) {
-      reasonParts.push("Max daily loss reached — kill-switch active.");
+      reasonParts.push(
+        forceCloseOpenTrade
+          ? `SAFE_MODE: wallet protection ₹${MAX_DAILY_LOSS_HARD_CAP} breached (realized ${dailyPnl.toFixed(0)} + floating ${floatingPnl.toFixed(0)}) — flatten open position & halt trading.`
+          : `SAFE_MODE: wallet protection ₹${MAX_DAILY_LOSS_HARD_CAP} reached — trading halted.`
+      );
     } else if (lossPauseActive) {
       reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
     } else if (postLossCooldownActive) {
