@@ -1210,6 +1210,15 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         postLossCooldownActive,
         postLossCooldownRemainingMin,
         sixthTradeWindow,
+        // v14.1: wallet-protection + 1-lot integrity surface
+        safeMode,
+        forceCloseOpenTrade,
+        maxDailyLossCap: MAX_DAILY_LOSS_HARD_CAP,
+        floatingPnl,
+        projectedDailyPnl,
+        baseLotSize: tradingLotSize,
+        minLotSize: 1,
+        minQuantity: NIFTY_LOT_SIZE,
         // v13: debug payload (real backend values)
         scoringBreakdown,
         bullScoringFull: bullScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
