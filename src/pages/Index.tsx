@@ -452,6 +452,8 @@ const Index = () => {
   const retryToastRef = useRef(0);
   const marketPollInFlightRef = useRef(false);
   const aiAnalysisInFlightRef = useRef(false);
+  // Race-safe sync mirror of `activeTrade` state so async loops never see stale closures.
+  const activeTradeRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -478,6 +480,27 @@ const Index = () => {
   // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
   // even across temporary VPS unreachable errors.
   const executionStateRef = useRef<ExecutionState>("IDLE");
+  // IMMUTABLE locked trade snapshot — captured at ORDER_ACCEPTED, cleared only on exit.
+  // While set, the UI must FREEZE signal/confidence/reasoning panels and the AI loop
+  // must NOT generate or apply new signals (TRADE MANAGEMENT MODE).
+  type LockedTradeContext = {
+    action: "BUY" | "SELL";
+    strike: number;
+    optionSide: "CE" | "PE";
+    tradingSymbol: string;
+    instrument_token: string;
+    confidenceSnapshot: number;
+    reasoningSnapshot: string;
+    supportSnapshot: number | null;
+    resistanceSnapshot: number | null;
+    stopLossPremium: number;
+    targetPremium: number;
+    entryPremium: number;
+    signalCreatedAt: string | null;
+    lockedAt: number;
+  };
+  const lockedTradeContextRef = useRef<LockedTradeContext | null>(null);
+  const [lockedTradeContext, setLockedTradeContext] = useState<LockedTradeContext | null>(null);
   const vpsOfflineSinceRef = useRef<number | null>(null);
   // Session-restore guards: prevent the "Saved Upstox access token found…" flow
   // from spamming /system-status calls and re-triggering the AI loop on every render.
@@ -501,6 +524,8 @@ const Index = () => {
     () => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0,
   );
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
+  // Keep the ref in lock-step with state so async closures see the latest value synchronously.
+  useEffect(() => { activeTradeRef.current = activeTrade; }, [activeTrade]);
   const [activeTradePlan, setActiveTradePlan] = useState<ActiveTradePlan>(() => parseActiveTradePlan());
   const [userTargetPoints, setUserTargetPoints] = useState("");
   const [userSlPoints, setUserSlPoints] = useState("");
@@ -702,9 +727,9 @@ const Index = () => {
   const fillPollRef = useRef<{ cancelled: boolean; orderId: string | null }>({ cancelled: false, orderId: null });
 
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
-    // SINGLE-POSITION LOCK: ignore any signal while a trade is open.
-    if (activeTrade) {
-      console.log("[SIGNAL LOCK] suppressed AI overwrite — position active");
+    // SINGLE-POSITION LOCK: ignore any signal while a trade is open (race-safe via ref).
+    if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current) {
+      console.log("[SIGNAL LOCK] suppressed AI overwrite — position active (locked)");
       return false;
     }
     // Freeze signal panel while an execution is in-flight.
@@ -725,8 +750,8 @@ const Index = () => {
   };
 
   const applySniperSignal = (signal: Signal) => {
-    if (activeTrade) {
-      console.log("[SIGNAL LOCK] suppressed sniper overwrite — position active");
+    if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current) {
+      console.log("[SIGNAL LOCK] suppressed sniper overwrite — position active (locked)");
       return;
     }
     if (isExecutionActive() && signalLockRef.current) {
@@ -2362,7 +2387,7 @@ const Index = () => {
     // While a position is open OR an order is mid-flight, the AI engine must
     // NOT generate new signals / re-evaluate strikes / refresh conviction.
     // Only SL / trailing / exit monitors are allowed to run.
-    if (activeTrade || isExecutionActive()) {
+    if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
       console.log("[AI_LOOP] skipped — trade active (monitoring-only mode)");
       return;
     }
@@ -2409,7 +2434,7 @@ const Index = () => {
       // ===== ACTIVE POSITION LOCK =====
       // Block new entries (AUTO or manual force-trade) while a trade is open
       // or while an order is mid-flight. Unlock only on SL/target/manual exit.
-      if (activeTrade || isExecutionActive()) {
+      if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
         toast({
           title: "Trade already active",
           description: "Wait for SL hit, target hit, or manual exit before a new entry.",
@@ -2886,8 +2911,37 @@ const Index = () => {
       // Lock lifecycle so AI loop cannot generate new signals while we wait for fill.
       // IMPORTANT: activeTradePlan stays NULL until broker reports COMPLETE so SL/trailing
       // effects (which guard on activeTradePlan) cannot fire on a non-existent position.
+      activeTradeRef.current = true; // synchronous race-safe flip
       setActiveTrade(true);
       localStorage.setItem(ACTIVE_TRADE_STORAGE_KEY, `${todayKey()}:true`);
+
+      // ===== CAPTURE IMMUTABLE LOCKED TRADE CONTEXT =====
+      // Frozen snapshot of the entire decision so UI panels stop mutating until exit.
+      const lockedRulesSnap = (lockedSignal?.ruleContext?.rules ?? {}) as any;
+      const lockedSnapshot: LockedTradeContext = {
+        action: lockedSignal!.action as "BUY" | "SELL",
+        strike: lockedContract!.strike,
+        optionSide: lockedContract!.optionSide,
+        tradingSymbol: lockedContract!.tradingSymbol,
+        instrument_token: lockedContract!.instrument_token,
+        confidenceSnapshot: Number(lockedRulesSnap?.confidenceScore ?? 0),
+        reasoningSnapshot: String(lockedSignal?.reason ?? ""),
+        supportSnapshot: Number.isFinite(lockedRulesSnap?.immediateSupport)
+          ? Number(lockedRulesSnap.immediateSupport)
+          : Number.isFinite(lockedRulesSnap?.support15) ? Number(lockedRulesSnap.support15) : null,
+        resistanceSnapshot: Number.isFinite(lockedRulesSnap?.immediateResistance)
+          ? Number(lockedRulesSnap.immediateResistance)
+          : Number.isFinite(lockedRulesSnap?.resistance15) ? Number(lockedRulesSnap.resistance15) : null,
+        stopLossPremium: Number(liveOrder.stopLossPremium ?? 0),
+        targetPremium: Number(liveOrder.targetPremium ?? 0),
+        entryPremium: Number(resolvedEntryPremium ?? 0),
+        signalCreatedAt: lockedSignal?.created_at ?? null,
+        lockedAt: Date.now(),
+      };
+      lockedTradeContextRef.current = lockedSnapshot;
+      setLockedTradeContext(lockedSnapshot);
+      console.log("[LOCKED_TRADE_CONTEXT] captured", lockedSnapshot);
+
 
       // Strike-drift forensic snapshot (uses what Upstox reports back, even before fill)
       const executedSymbol = liveOrder.instrument?.tradingSymbol ?? "";
@@ -2985,8 +3039,11 @@ const Index = () => {
       const unlockLifecycle = (reason: string) => {
         fillPollRef.current.cancelled = true;
         fillPollRef.current.orderId = null;
+        activeTradeRef.current = false;
         setActiveTrade(false);
         setActiveTradePlan(null);
+        lockedTradeContextRef.current = null;
+        setLockedTradeContext(null);
         localStorage.removeItem(ACTIVE_TRADE_STORAGE_KEY);
         localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
         signalContractRef.current = null;
@@ -3143,8 +3200,11 @@ const Index = () => {
       fillPollRef.current.orderId = null;
       await invokeFunction("emergency-exit", { lockForDay, slOrderId: activeTradePlan?.slOrderId });
       const nextCooldown = Date.now() + COOLDOWN_MS;
+      activeTradeRef.current = false;
       setActiveTrade(false);
       setActiveTradePlan(null);
+      lockedTradeContextRef.current = null;
+      setLockedTradeContext(null);
       signalContractRef.current = null;
       lastSignalAutofillRef.current = "";
       setCooldownUntil(nextCooldown);
@@ -3287,7 +3347,7 @@ const Index = () => {
       console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        if (activeTrade || isExecutionActive()) {
+        if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
           console.log("[AI_REASONING] tick skipped — position active (monitor-only)");
           return;
         }
@@ -3458,6 +3518,72 @@ const Index = () => {
             </Button>
           )}
         </header>
+
+        {lockedTradeContext && (
+          <section className="rounded-lg border-2 border-primary/60 bg-primary/10 p-4 shadow-market animate-pulse-glow">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Radio className="h-4 w-4 text-primary" />
+                <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-primary">
+                  Active Locked Trade
+                </h2>
+                <span className="rounded-sm border border-primary/50 bg-primary/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                  TRADE MANAGEMENT MODE
+                </span>
+              </div>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                signal locked · new signals blocked
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-6">
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Direction</p>
+                <p className={`font-bold ${lockedTradeContext.action === "BUY" ? "text-profit" : "text-loss"}`}>
+                  {lockedTradeContext.action === "BUY" ? "BULLISH" : "BEARISH"} · {lockedTradeContext.optionSide}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Contract</p>
+                <p className="font-mono font-bold text-foreground">{lockedTradeContext.tradingSymbol}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Entry</p>
+                <p className="font-mono font-bold text-foreground">₹{lockedTradeContext.entryPremium.toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Current</p>
+                <p className="font-mono font-bold text-foreground">
+                  ₹{(activeTradePlan?.currentPremium ?? lockedTradeContext.entryPremium).toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">SL · Target</p>
+                <p className="font-mono text-[11px] text-foreground">
+                  <span className="text-loss">₹{(activeTradePlan?.stopLossPremium ?? lockedTradeContext.stopLossPremium).toFixed(2)}</span>
+                  {" · "}
+                  <span className="text-profit">₹{(activeTradePlan?.targetPremium ?? lockedTradeContext.targetPremium).toFixed(2)}</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Trailing · Conf</p>
+                <p className="font-mono text-[11px] text-foreground">
+                  <span className={activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0) ? "text-profit" : "text-muted-foreground"}>
+                    {activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0) ? "ACTIVE" : "IDLE"}
+                  </span>
+                  {" · "}
+                  <span className="text-primary">{lockedTradeContext.confidenceSnapshot}</span>
+                </p>
+              </div>
+            </div>
+            {lockedTradeContext.reasoningSnapshot && (
+              <p className="mt-3 line-clamp-2 rounded border border-primary/20 bg-surface/60 px-2 py-1.5 text-[10px] italic text-muted-foreground">
+                "{lockedTradeContext.reasoningSnapshot}"
+              </p>
+            )}
+          </section>
+        )}
+
+
 
         {!session && (
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
@@ -4245,6 +4371,7 @@ const Index = () => {
                         title: "FORCE TRADE PLACED",
                         description: `${forced.instrument.tradingSymbol} · Entry ₹${forced.entryPremium?.toFixed(2)}`,
                       });
+                      activeTradeRef.current = true;
                       setActiveTrade(true);
                       setLastExecution(forced);
                     } catch (e) {
