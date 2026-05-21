@@ -482,7 +482,11 @@ serve(async (req) => {
     const pa = buildPriceAction(latest, history as MarketRow[]);
 
     const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
-    const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
+    // v14.1: include live floating PnL — circuit-breaker fires BEFORE a 12pt SL can blow past the cap.
+    const projectedDailyPnl = dailyPnl + floatingPnl;
+    const maxDailyLossHit = maxDailyLoss > 0 && projectedDailyPnl <= -maxDailyLoss;
+    const safeMode = maxDailyLossHit; // SAFE_MODE engaged once wallet cap breached
+    const forceCloseOpenTrade = safeMode && floatingPnl < 0; // signal UI/exec to flatten now
 
     const since = new Date();
     since.setHours(0, 0, 0, 0);
