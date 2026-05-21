@@ -447,7 +447,11 @@ serve(async (req) => {
     const executionIntent = body?.executionIntent === true;
     const dailyPnl = num(body?.dailyPnl) ?? 0;
     const dailyProfitTarget = num(body?.dailyProfitTarget) ?? 0;
-    const maxDailyLoss = 2000;
+    // v14.1: hard wallet-protection cap (₹1,500). Section-9 override of prior 2000 default.
+    const MAX_DAILY_LOSS_HARD_CAP = 1500;
+    const maxDailyLoss = MAX_DAILY_LOSS_HARD_CAP;
+    // Live floating PnL of any open position (₹). Optional — frontend supplies when a trade is active.
+    const floatingPnl = num(body?.floatingPnl) ?? 0;
     const userTargetPoints = num(body?.userTargetPoints);
     const userSlPoints = num(body?.userSlPoints);
     // v5: optional recent trade outcomes from frontend (most-recent first), e.g. [-12, +25, -8]
@@ -478,7 +482,11 @@ serve(async (req) => {
     const pa = buildPriceAction(latest, history as MarketRow[]);
 
     const dailyTargetHit = dailyProfitTarget > 0 && dailyPnl >= dailyProfitTarget;
-    const maxDailyLossHit = maxDailyLoss > 0 && dailyPnl <= -maxDailyLoss;
+    // v14.1: include live floating PnL — circuit-breaker fires BEFORE a 12pt SL can blow past the cap.
+    const projectedDailyPnl = dailyPnl + floatingPnl;
+    const maxDailyLossHit = maxDailyLoss > 0 && projectedDailyPnl <= -maxDailyLoss;
+    const safeMode = maxDailyLossHit; // SAFE_MODE engaged once wallet cap breached
+    const forceCloseOpenTrade = safeMode && floatingPnl < 0; // signal UI/exec to flatten now
 
     const since = new Date();
     since.setHours(0, 0, 0, 0);
@@ -611,7 +619,11 @@ serve(async (req) => {
     if (dailyTargetHit) {
       reasonParts.push("Daily profit target hit — trading paused.");
     } else if (maxDailyLossHit) {
-      reasonParts.push("Max daily loss reached — kill-switch active.");
+      reasonParts.push(
+        forceCloseOpenTrade
+          ? `SAFE_MODE: wallet protection ₹${MAX_DAILY_LOSS_HARD_CAP} breached (realized ${dailyPnl.toFixed(0)} + floating ${floatingPnl.toFixed(0)}) — flatten open position & halt trading.`
+          : `SAFE_MODE: wallet protection ₹${MAX_DAILY_LOSS_HARD_CAP} reached — trading halted.`
+      );
     } else if (lossPauseActive) {
       reasonParts.push(`Loss-protection pause: ${consecutiveLosses} consecutive losses — trading paused for ~${lossPauseRemainingMin}m more.`);
     } else if (postLossCooldownActive) {
@@ -1103,10 +1115,12 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
     };
 
     const highProbability = action !== "WAIT";
-    // v5: position sizing — halve lots after a loss; restore on win.
-    const sizedLots = Math.max(1, Math.floor(tradingLotSize * positionSizeMultiplier));
+    // v14.1: 1-lot integrity — options lots are indivisible. NEVER size below the user's base lot when
+    // base is already 1 (65 qty). Post-loss halving only applies when base ≥ 2 lots.
+    const halvedLots = Math.floor(tradingLotSize * positionSizeMultiplier);
+    const sizedLots = Math.max(1, tradingLotSize === 1 ? tradingLotSize : halvedLots);
     const effectiveLotSize = sizedLots;
-    const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE;
+    const effectiveTradingQuantity = effectiveLotSize * NIFTY_LOT_SIZE; // floor: 65 qty
 
     const ruleContext = {
       atmStrike: atmStrike(pa.ltp),
@@ -1196,6 +1210,15 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         postLossCooldownActive,
         postLossCooldownRemainingMin,
         sixthTradeWindow,
+        // v14.1: wallet-protection + 1-lot integrity surface
+        safeMode,
+        forceCloseOpenTrade,
+        maxDailyLossCap: MAX_DAILY_LOSS_HARD_CAP,
+        floatingPnl,
+        projectedDailyPnl,
+        baseLotSize: tradingLotSize,
+        minLotSize: 1,
+        minQuantity: NIFTY_LOT_SIZE,
         // v13: debug payload (real backend values)
         scoringBreakdown,
         bullScoringFull: bullScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
