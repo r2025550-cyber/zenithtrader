@@ -3039,8 +3039,11 @@ const Index = () => {
       const unlockLifecycle = (reason: string) => {
         fillPollRef.current.cancelled = true;
         fillPollRef.current.orderId = null;
+        activeTradeRef.current = false;
         setActiveTrade(false);
         setActiveTradePlan(null);
+        lockedTradeContextRef.current = null;
+        setLockedTradeContext(null);
         localStorage.removeItem(ACTIVE_TRADE_STORAGE_KEY);
         localStorage.removeItem(ACTIVE_TRADE_PLAN_STORAGE_KEY);
         signalContractRef.current = null;
