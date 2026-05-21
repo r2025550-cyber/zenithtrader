@@ -524,6 +524,8 @@ const Index = () => {
     () => Number.parseInt(datedStorageValue(TRADE_COUNT_STORAGE_KEY), 10) || 0,
   );
   const [activeTrade, setActiveTrade] = useState(() => datedStorageValue(ACTIVE_TRADE_STORAGE_KEY) === "true");
+  // Keep the ref in lock-step with state so async closures see the latest value synchronously.
+  useEffect(() => { activeTradeRef.current = activeTrade; }, [activeTrade]);
   const [activeTradePlan, setActiveTradePlan] = useState<ActiveTradePlan>(() => parseActiveTradePlan());
   const [userTargetPoints, setUserTargetPoints] = useState("");
   const [userSlPoints, setUserSlPoints] = useState("");
