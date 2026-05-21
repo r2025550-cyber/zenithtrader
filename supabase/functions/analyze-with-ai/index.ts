@@ -26,8 +26,8 @@ const NEAR_ZONE_PTS = 12;
 const RETEST_TOLERANCE_PTS = 8;
 const RETEST_MAX_AGE_CANDLES = 4;
 // v9: tighter early-entry filters — kill weak spike entries
-const EARLY_ENTRY_MIN_BODY_PTS = 18;     // v9: was 10
-const EARLY_ENTRY_MIN_MOVE_PTS = 18;     // v9: was 10
+const EARLY_ENTRY_MIN_BODY_PTS = 12;     // v12: restored fast-scalp responsiveness
+const EARLY_ENTRY_MIN_MOVE_PTS = 12;     // v12: restored fast-scalp responsiveness
 const FREQUENCY_BOOST_MIN_GAP = 30;
 const PULLBACK_TOLERANCE_PTS = 10;
 const PARTIAL_BOOK_PTS = 15;
