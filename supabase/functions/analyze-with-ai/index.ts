@@ -447,7 +447,11 @@ serve(async (req) => {
     const executionIntent = body?.executionIntent === true;
     const dailyPnl = num(body?.dailyPnl) ?? 0;
     const dailyProfitTarget = num(body?.dailyProfitTarget) ?? 0;
-    const maxDailyLoss = 2000;
+    // v14.1: hard wallet-protection cap (₹1,500). Section-9 override of prior 2000 default.
+    const MAX_DAILY_LOSS_HARD_CAP = 1500;
+    const maxDailyLoss = MAX_DAILY_LOSS_HARD_CAP;
+    // Live floating PnL of any open position (₹). Optional — frontend supplies when a trade is active.
+    const floatingPnl = num(body?.floatingPnl) ?? 0;
     const userTargetPoints = num(body?.userTargetPoints);
     const userSlPoints = num(body?.userSlPoints);
     // v5: optional recent trade outcomes from frontend (most-recent first), e.g. [-12, +25, -8]
