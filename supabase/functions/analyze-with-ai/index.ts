@@ -718,21 +718,26 @@ serve(async (req) => {
 
     const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || postLossCooldownActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
 
-    // v9: regime-aware HARD confidence gate
+    // v11: regime-aware HARD confidence gate + open-session adaptive relief
     const baseGate =
       tradingMode === "sniper" ? CONF_GATE_SNIPER :
       regime === "TRENDING" ? CONF_GATE_TRENDING :
       regime === "CHOPPY" ? CONF_GATE_CHOPPY :
       CONF_GATE_SCALPING;
+    // Open-session window (9:15–10:30 IST): subtract OPEN_SESSION_GATE_RELIEF
+    const _now = new Date();
+    const istMinutes = (_now.getUTCHours() * 60 + _now.getUTCMinutes() + 330) % 1440;
+    const openSessionActive = istMinutes >= OPEN_SESSION_START_IST_MIN && istMinutes <= OPEN_SESSION_END_IST_MIN;
+    const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
     // Post-loss tighten: bump required confidence by +5
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = baseGate + lossBump;
+    const requiredConfidence = Math.max(45, baseGate + lossBump - openSessionRelief);
 
-    // v9: CHOPPY regime requires extra confirmation (momentum + breakout candle aligned with bias)
+    // v11: CHOPPY regime — relaxed; require only ONE of breakout / momentum / engulfing aligned with bias
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
-      ? (pa.momentumBull || pa.bullStreak >= 2) && (pa.strongGreen || pa.bullishEngulfing)
+      ? (pa.liveBullBreakout || pa.retestBullOk || pa.earlyBuy || pa.momentumBull || pa.bullStreak >= 2 || pa.bullishEngulfing || pa.strongGreen)
       : biasDir === "SELL"
-        ? (pa.momentumBear || pa.bearStreak >= 2) && (pa.strongRed || pa.bearishEngulfing)
+        ? (pa.liveBearBreakout || pa.retestBearOk || pa.earlySell || pa.momentumBear || pa.bearStreak >= 2 || pa.bearishEngulfing || pa.strongRed)
         : false);
 
     let aiMode: "HIGH_CONVICTION" | "FAST_SCALP" | "WAIT" = "WAIT";
