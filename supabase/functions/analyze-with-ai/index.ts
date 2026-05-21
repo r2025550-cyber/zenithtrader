@@ -15,9 +15,9 @@ import { corsHeaders, getAuthenticatedClients, getSettings, json, parseSignal } 
 // =====================================================================
 
 const NIFTY_LOT_SIZE = 65;
-// v9-balanced: disciplined aggressive scalper (4–5 quality trades/day)
-const MIN_TRADE_GAP_MIN = 8;      // v9: was 4 — reduce clustering, still active
-const MAX_TRADES_PER_DAY = 5;     // v9: was 12 — quality over quantity (6th allowed conditionally)
+// v10-balanced: disciplined aggressive scalper (4–5 quality trades/day)
+const MIN_TRADE_GAP_MIN = 6;      // v10: was 8 — slightly more active, still paced
+const MAX_TRADES_PER_DAY = 5;     // v10: hard cap 5 quality trades
 const SIDEWAYS_RANGE_PTS = 20;
 const TRAIL_TRIGGER_PTS = 6;
 const TRAIL_LOCK_PTS = 6;
