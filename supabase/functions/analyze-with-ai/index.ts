@@ -48,11 +48,11 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v9: regime-aware confidence gates (HARD execution gating)
-const CONF_GATE_TRENDING = 60;
-const CONF_GATE_SCALPING = 65;
-const CONF_GATE_CHOPPY = 75;
-const CONF_GATE_SNIPER = 85;
+// v10: regime-aware confidence gates (balanced — active but disciplined)
+const CONF_GATE_TRENDING = 56;
+const CONF_GATE_SCALPING = 58;
+const CONF_GATE_CHOPPY = 66;
+const CONF_GATE_SNIPER = 72;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
