@@ -48,15 +48,20 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v12: aggressive-protected scalper — restored entry responsiveness, EMA assists not blocks
-const CONF_GATE_TRENDING = 48;
-const CONF_GATE_SCALPING = 50;
-const CONF_GATE_CHOPPY = 54;
-const CONF_GATE_SNIPER = 68;
+// v13: starvation-fix — gates lowered, EMA-slope + body-size scoring added,
+// regime promoted to TRENDING when EMA slope is strongly directional.
+const CONF_GATE_TRENDING = 42;
+const CONF_GATE_SCALPING = 46;
+const CONF_GATE_CHOPPY = 50;
+const CONF_GATE_SNIPER = 66;
+const CONF_GATE_FLOOR = 36;
 // v11: open-session adaptive — reduce gate during opening drive (9:15–10:30 IST)
 const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
 const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
 const OPEN_SESSION_GATE_RELIEF   = 10;
+// v13: EMA slope + body thresholds for "trend-equivalent" promotion
+const STRONG_SLOPE_PTS = 15;
+const BIG_BODY_PTS = 12;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -679,26 +684,39 @@ serve(async (req) => {
     // PRO+++ WEIGHTED CONFIDENCE ENGINE (additive, evolution patch)
     // Replaces hard-filter bias with scoring; promotes missed FAST_SCALPs.
     // ============================================================
+    // v13: starvation-fix scoring — adds EMA slope strength + body magnitude
+    // so real momentum candles score high even when HH/HL trend is absent.
+    const slopeAbs = Math.abs(pa.ema21Slope ?? 0);
+    const strongSlopeUp = (pa.ema21Slope ?? 0) >= STRONG_SLOPE_PTS;
+    const strongSlopeDown = (pa.ema21Slope ?? 0) <= -STRONG_SLOPE_PTS;
+    const bodyPts = (pa.high !== null && pa.low !== null && pa.open !== null && pa.close !== null)
+      ? Math.abs((pa.close as number) - (pa.open as number)) : 0;
+    const bigBody = bodyPts >= BIG_BODY_PTS;
+
     const bullScoring = [
-      { w: 12, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },              // v12: EMA assists (was 20)
+      { w: 12, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },
+      { w: 10, ok: strongSlopeUp, label: "EMA slope strong up" },                     // v13
       { w: 18, ok: !!pa.trendUp, label: "5m trend up aligned" },
-      { w: 22, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },  // v12: +7
-      { w: 20, ok: !!pa.momentumBull, label: "Momentum confirmed" },             // v12: +5
+      { w: 22, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },
+      { w: 8,  ok: bigBody && (pa.close ?? 0) > (pa.open ?? 0), label: "Big bull body (≥12pts)" }, // v13
+      { w: 20, ok: !!pa.momentumBull, label: "Momentum confirmed" },
       { w: 10, ok: !!pa.nearSupport, label: "Support bounce zone" },
-      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
-      { w: 8,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },         // v12: +3
-      { w: 10, ok: !!pa.liveBullBreakout || !!pa.earlyBuy, label: "Live bull breakout" }, // v12: new
-      { w: 6,  ok: !!pa.retestBullOk, label: "Bull retest confirmed" },          // v12: new
+      { w: 12, ok: !!(pa.compressionBreakout === "BULL"), label: "Compression breakout" },
+      { w: 8,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },
+      { w: 10, ok: !!pa.liveBullBreakout || !!pa.earlyBuy, label: "Live bull breakout" },
+      { w: 6,  ok: !!pa.retestBullOk, label: "Bull retest confirmed" },
       { w: -10, ok: !!pa.longUpperWick, label: "Upper wick rejection" },
       { w: -15, ok: !!pa.bullTrap, label: "Bull-trap risk" },
     ];
     const bearScoring = [
-      { w: 12, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },               // v12: EMA assists
+      { w: 12, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },
+      { w: 10, ok: strongSlopeDown, label: "EMA slope strong down" },                 // v13
       { w: 18, ok: !!pa.trendDown, label: "5m trend down aligned" },
       { w: 22, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
+      { w: 8,  ok: bigBody && (pa.close ?? 0) < (pa.open ?? 0), label: "Big bear body (≥12pts)" }, // v13
       { w: 20, ok: !!pa.momentumBear, label: "Momentum confirmed" },
       { w: 10, ok: !!pa.nearResistance, label: "Resistance rejection zone" },
-      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
+      { w: 12, ok: !!(pa.compressionBreakout === "BEAR"), label: "Compression breakdown" },
       { w: 8,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
       { w: 10, ok: !!pa.liveBearBreakout || !!pa.earlySell, label: "Live bear breakdown" },
       { w: 6,  ok: !!pa.retestBearOk, label: "Bear retest confirmed" },
@@ -716,45 +734,54 @@ serve(async (req) => {
       .filter((x) => x.ok && x.w > 0)
       .map((x) => x.label);
 
+    // v13: full scoring breakdown for live debug panel (real backend values)
+    const scoringBreakdown = (biasDir === "SELL" ? bearScoring : bullScoring).map((x) => ({
+      label: x.label, weight: x.w, applied: x.ok, contribution: x.ok ? x.w : 0,
+    }));
+
+    // v13: regime promotion — treat strong EMA slope as TRENDING-equivalent even
+    // without confirmed HH/HL pattern. This was the core CHOPPY-starvation bug.
+    const slopeTrending = slopeAbs >= STRONG_SLOPE_PTS;
     const regime: "TRENDING" | "CHOPPY" | "COMPRESSION" =
       pa.compression ? "COMPRESSION" :
-      (pa.trendUp || pa.trendDown) ? "TRENDING" : "CHOPPY";
+      (pa.trendUp || pa.trendDown || slopeTrending) ? "TRENDING" : "CHOPPY";
 
     const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || postLossCooldownActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
 
-    // v11: regime-aware HARD confidence gate + open-session adaptive relief
+    // v13: regime-aware HARD confidence gate + open-session adaptive relief
     const baseGate =
       tradingMode === "sniper" ? CONF_GATE_SNIPER :
       regime === "TRENDING" ? CONF_GATE_TRENDING :
       regime === "CHOPPY" ? CONF_GATE_CHOPPY :
       CONF_GATE_SCALPING;
-    // Open-session window (9:15–10:30 IST): subtract OPEN_SESSION_GATE_RELIEF
     const _now = new Date();
     const istMinutes = (_now.getUTCHours() * 60 + _now.getUTCMinutes() + 330) % 1440;
     const openSessionActive = istMinutes >= OPEN_SESSION_START_IST_MIN && istMinutes <= OPEN_SESSION_END_IST_MIN;
     const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
-    // Post-loss tighten: bump required confidence by +5
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = Math.max(40, baseGate + lossBump - openSessionRelief);
+    const requiredConfidence = Math.max(CONF_GATE_FLOOR, baseGate + lossBump - openSessionRelief);
 
-    // v11: CHOPPY regime — relaxed; require only ONE of breakout / momentum / engulfing aligned with bias
+    // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
-      ? (pa.liveBullBreakout || pa.retestBullOk || pa.earlyBuy || pa.momentumBull || pa.bullStreak >= 2 || pa.bullishEngulfing || pa.strongGreen)
+      ? (pa.liveBullBreakout || pa.retestBullOk || pa.earlyBuy || pa.momentumBull || pa.bullStreak >= 2 || pa.bullishEngulfing || pa.strongGreen || bigBody)
       : biasDir === "SELL"
-        ? (pa.liveBearBreakout || pa.retestBearOk || pa.earlySell || pa.momentumBear || pa.bearStreak >= 2 || pa.bearishEngulfing || pa.strongRed)
+        ? (pa.liveBearBreakout || pa.retestBearOk || pa.earlySell || pa.momentumBear || pa.bearStreak >= 2 || pa.bearishEngulfing || pa.strongRed || bigBody)
         : false);
 
     let aiMode: "HIGH_CONVICTION" | "FAST_SCALP" | "WAIT" = "WAIT";
     let gateRejection: string | null = null;
+    const gateBlockedReasons: string[] = [];
 
     // Apply confidence gate to ANY non-WAIT action
     if (action !== "WAIT") {
       if (confidenceScore < requiredConfidence) {
         gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""})`;
+        gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
       } else if (regime === "CHOPPY" && !choppyConfirmed) {
-        gateRejection = `CHOPPY regime requires momentum + breakout-candle confirmation`;
+        gateRejection = `CHOPPY regime requires at least one price-action confirmation`;
+        gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
       }
@@ -763,11 +790,11 @@ serve(async (req) => {
     if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
     else if (action !== "WAIT" && confidenceScore >= requiredConfidence) aiMode = "FAST_SCALP";
     else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed)) {
-      // Promote missed setup only when it ALSO clears the regime gate.
       action = biasDir;
       aiMode = "FAST_SCALP";
       reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${requiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
     }
+
 
     // v9: 6th-trade override — allow exactly one extra trade if HIGH_CONVICTION + TRENDING + last win
     if (action === "WAIT" && sixthTradeWindow && biasDir && confidenceScore >= 80 && regime === "TRENDING" && lastTradeWasWin && !hardBlocked) {
@@ -806,7 +833,51 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE v12]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    // v13: LIVE DEBUG PAYLOAD — real backend values for the UI debug panel.
+    const liveFactors = {
+      emaBullish: !!pa.emaBullish,
+      emaBearish: !!pa.emaBearish,
+      emaSlope: Number((pa.ema21Slope ?? 0).toFixed(2)),
+      strongSlopeUp,
+      strongSlopeDown,
+      momentumBull: !!pa.momentumBull,
+      momentumBear: !!pa.momentumBear,
+      breakoutDetected: !!(pa.liveBullBreakout || pa.earlyBuy || pa.recentBullBreakout),
+      breakdownDetected: !!(pa.liveBearBreakout || pa.earlySell || pa.recentBearBreakout),
+      retestBullOk: !!pa.retestBullOk,
+      retestBearOk: !!pa.retestBearOk,
+      retestConfirmed: !!(pa.retestBullOk || pa.retestBearOk),
+      compressionActive: !!pa.compression,
+      bullTrap: !!pa.bullTrap,
+      bearTrap: !!pa.bearTrap,
+      trapDetected: !!(pa.bullTrap || pa.bearTrap),
+      strongCandle: !!(pa.strongGreen || pa.strongRed),
+      bigBody,
+      bodyPts: Number(bodyPts.toFixed(2)),
+      sidewaysFilter: !!pa.sidewaysMarket,
+      choppyMarket: !!pa.choppyMarket,
+      nearSupport: !!pa.nearSupport,
+      nearResistance: !!pa.nearResistance,
+      volumeValid: null as null | boolean,
+      pcrState: "Disabled (price-action mode)",
+      vixState: "n/a",
+      spikeDetected: !!pa.spikeDetected,
+    };
+    const pipeline = [
+      { stage: "MARKET DATA", passed: pa.ltp !== null, note: pa.ltp !== null ? `LTP ${pa.ltp}` : "no data" },
+      { stage: "PRICE ACTION", passed: !!(pa.support && pa.resistance), note: `S=${pa.support?.toFixed(0) ?? "—"} R=${pa.resistance?.toFixed(0) ?? "—"}` },
+      { stage: "SCORE AGGREGATION", passed: confidenceScore > 0, note: `${confidenceScore}/100 bull=${bullScore} bear=${bearScore}` },
+      { stage: "REGIME FILTER", passed: confidenceScore >= requiredConfidence, note: `${regime} gate=${requiredConfidence}` },
+      { stage: "SIGNAL DECISION", passed: action !== "WAIT", note: action },
+      { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
+    ];
+    const gateInfo = {
+      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief, lossBump,
+      passedGate: confidenceScore >= requiredConfidence,
+      gateBlockedReasons,
+    };
+
+    console.log("[PRO+++ ENGINE v13]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -1093,6 +1164,13 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         postLossCooldownActive,
         postLossCooldownRemainingMin,
         sixthTradeWindow,
+        // v13: debug payload (real backend values)
+        scoringBreakdown,
+        bullScoringFull: bullScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
+        bearScoringFull: bearScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
+        liveFactors,
+        pipeline,
+        gateInfo,
       },
       guidance: reasonParts,
       tradesToday,

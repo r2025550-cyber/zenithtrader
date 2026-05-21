@@ -37,6 +37,7 @@ import { useToast } from "@/hooks/use-toast";
 import { lovable } from "@/integrations/lovable";
 import { supabase } from "@/integrations/supabase/client";
 import { ProEngineStatus, usePersistedEngineState } from "@/components/ProEngineStatus";
+import { EngineDebugPanel } from "@/components/EngineDebugPanel";
 
 const history = [
   {
@@ -4819,6 +4820,10 @@ const Index = () => {
               maxTradesPerDay={8}
               tradesToday={(latestSignal?.ruleContext as any)?.tradesToday ?? 0}
             />
+
+            <EngineDebugPanel signal={latestSignal as any} />
+
+
 
             <section className={`rounded-lg border bg-panel p-5 shadow-market ${aiPanelTone}`}>
 
