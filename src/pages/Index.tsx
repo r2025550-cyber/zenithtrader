@@ -4305,6 +4305,7 @@ const Index = () => {
                         title: "FORCE TRADE PLACED",
                         description: `${forced.instrument.tradingSymbol} · Entry ₹${forced.entryPremium?.toFixed(2)}`,
                       });
+                      activeTradeRef.current = true;
                       setActiveTrade(true);
                       setLastExecution(forced);
                     } catch (e) {
