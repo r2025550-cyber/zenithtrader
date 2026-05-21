@@ -48,15 +48,20 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v12: aggressive-protected scalper — restored entry responsiveness, EMA assists not blocks
-const CONF_GATE_TRENDING = 48;
-const CONF_GATE_SCALPING = 50;
-const CONF_GATE_CHOPPY = 54;
-const CONF_GATE_SNIPER = 68;
+// v13: starvation-fix — gates lowered, EMA-slope + body-size scoring added,
+// regime promoted to TRENDING when EMA slope is strongly directional.
+const CONF_GATE_TRENDING = 42;
+const CONF_GATE_SCALPING = 46;
+const CONF_GATE_CHOPPY = 50;
+const CONF_GATE_SNIPER = 66;
+const CONF_GATE_FLOOR = 36;
 // v11: open-session adaptive — reduce gate during opening drive (9:15–10:30 IST)
 const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
 const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
 const OPEN_SESSION_GATE_RELIEF   = 10;
+// v13: EMA slope + body thresholds for "trend-equivalent" promotion
+const STRONG_SLOPE_PTS = 15;
+const BIG_BODY_PTS = 12;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
