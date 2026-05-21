@@ -680,24 +680,28 @@ serve(async (req) => {
     // Replaces hard-filter bias with scoring; promotes missed FAST_SCALPs.
     // ============================================================
     const bullScoring = [
-      { w: 20, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },
-      { w: 20, ok: !!pa.trendUp, label: "5m trend up aligned" },
-      { w: 15, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },
-      { w: 15, ok: !!pa.momentumBull, label: "Momentum confirmed" },
+      { w: 12, ok: !!pa.emaBullish, label: "EMA bullish (9>21)" },              // v12: EMA assists (was 20)
+      { w: 18, ok: !!pa.trendUp, label: "5m trend up aligned" },
+      { w: 22, ok: !!(pa.strongGreen || pa.bullishEngulfing), label: "Breakout candle" },  // v12: +7
+      { w: 20, ok: !!pa.momentumBull, label: "Momentum confirmed" },             // v12: +5
       { w: 10, ok: !!pa.nearSupport, label: "Support bounce zone" },
-      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
-      { w: 5,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },
+      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongGreen || pa.momentumBull)), label: "Compression breakout" },
+      { w: 8,  ok: (pa.bullStreak ?? 0) >= 2, label: "Bullish streak" },         // v12: +3
+      { w: 10, ok: !!pa.liveBullBreakout || !!pa.earlyBuy, label: "Live bull breakout" }, // v12: new
+      { w: 6,  ok: !!pa.retestBullOk, label: "Bull retest confirmed" },          // v12: new
       { w: -10, ok: !!pa.longUpperWick, label: "Upper wick rejection" },
       { w: -15, ok: !!pa.bullTrap, label: "Bull-trap risk" },
     ];
     const bearScoring = [
-      { w: 20, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },
-      { w: 20, ok: !!pa.trendDown, label: "5m trend down aligned" },
-      { w: 15, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
-      { w: 15, ok: !!pa.momentumBear, label: "Momentum confirmed" },
+      { w: 12, ok: !!pa.emaBearish, label: "EMA bearish (9<21)" },               // v12: EMA assists
+      { w: 18, ok: !!pa.trendDown, label: "5m trend down aligned" },
+      { w: 22, ok: !!(pa.strongRed || pa.bearishEngulfing), label: "Breakdown candle" },
+      { w: 20, ok: !!pa.momentumBear, label: "Momentum confirmed" },
       { w: 10, ok: !!pa.nearResistance, label: "Resistance rejection zone" },
-      { w: 10, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
-      { w: 5,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
+      { w: 12, ok: !!(pa.compressionBreakout && (pa.strongRed || pa.momentumBear)), label: "Compression breakdown" },
+      { w: 8,  ok: (pa.bearStreak ?? 0) >= 2, label: "Bearish streak" },
+      { w: 10, ok: !!pa.liveBearBreakout || !!pa.earlySell, label: "Live bear breakdown" },
+      { w: 6,  ok: !!pa.retestBearOk, label: "Bear retest confirmed" },
       { w: -10, ok: !!pa.longLowerWick, label: "Lower wick rejection" },
       { w: -15, ok: !!pa.bearTrap, label: "Bear-trap risk" },
     ];
