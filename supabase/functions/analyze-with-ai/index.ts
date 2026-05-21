@@ -793,7 +793,7 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason });
+    console.log("[PRO+++ ENGINE v10]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
