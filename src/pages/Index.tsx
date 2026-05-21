@@ -3519,6 +3519,72 @@ const Index = () => {
           )}
         </header>
 
+        {lockedTradeContext && (
+          <section className="rounded-lg border-2 border-primary/60 bg-primary/10 p-4 shadow-market animate-pulse-glow">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Radio className="h-4 w-4 text-primary" />
+                <h2 className="text-sm font-bold uppercase tracking-[0.22em] text-primary">
+                  Active Locked Trade
+                </h2>
+                <span className="rounded-sm border border-primary/50 bg-primary/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                  TRADE MANAGEMENT MODE
+                </span>
+              </div>
+              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                signal locked · new signals blocked
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-6">
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Direction</p>
+                <p className={`font-bold ${lockedTradeContext.action === "BUY" ? "text-profit" : "text-loss"}`}>
+                  {lockedTradeContext.action === "BUY" ? "BULLISH" : "BEARISH"} · {lockedTradeContext.optionSide}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Contract</p>
+                <p className="font-mono font-bold text-foreground">{lockedTradeContext.tradingSymbol}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Entry</p>
+                <p className="font-mono font-bold text-foreground">₹{lockedTradeContext.entryPremium.toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Current</p>
+                <p className="font-mono font-bold text-foreground">
+                  ₹{(activeTradePlan?.currentPremium ?? lockedTradeContext.entryPremium).toFixed(2)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">SL · Target</p>
+                <p className="font-mono text-[11px] text-foreground">
+                  <span className="text-loss">₹{(activeTradePlan?.stopLossPremium ?? lockedTradeContext.stopLossPremium).toFixed(2)}</span>
+                  {" · "}
+                  <span className="text-profit">₹{(activeTradePlan?.targetPremium ?? lockedTradeContext.targetPremium).toFixed(2)}</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-muted-foreground">Trailing · Conf</p>
+                <p className="font-mono text-[11px] text-foreground">
+                  <span className={activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0) ? "text-profit" : "text-muted-foreground"}>
+                    {activeTradePlan && (activeTradePlan.stopLossPremium ?? 0) > (activeTradePlan.entryPremium ?? 0) - (activeTradePlan.initialSlPoints ?? 0) ? "ACTIVE" : "IDLE"}
+                  </span>
+                  {" · "}
+                  <span className="text-primary">{lockedTradeContext.confidenceSnapshot}</span>
+                </p>
+              </div>
+            </div>
+            {lockedTradeContext.reasoningSnapshot && (
+              <p className="mt-3 line-clamp-2 rounded border border-primary/20 bg-surface/60 px-2 py-1.5 text-[10px] italic text-muted-foreground">
+                "{lockedTradeContext.reasoningSnapshot}"
+              </p>
+            )}
+          </section>
+        )}
+
+
+
         {!session && (
           <section className="rounded-lg border border-border bg-panel p-5 shadow-panel">
             <div className="mb-4 flex items-center gap-2">
