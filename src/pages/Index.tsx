@@ -727,9 +727,9 @@ const Index = () => {
   const fillPollRef = useRef<{ cancelled: boolean; orderId: string | null }>({ cancelled: false, orderId: null });
 
   const applyFreshSignal = (signal: Signal, liveSpot: number | null) => {
-    // SINGLE-POSITION LOCK: ignore any signal while a trade is open.
-    if (activeTrade) {
-      console.log("[SIGNAL LOCK] suppressed AI overwrite — position active");
+    // SINGLE-POSITION LOCK: ignore any signal while a trade is open (race-safe via ref).
+    if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current) {
+      console.log("[SIGNAL LOCK] suppressed AI overwrite — position active (locked)");
       return false;
     }
     // Freeze signal panel while an execution is in-flight.
