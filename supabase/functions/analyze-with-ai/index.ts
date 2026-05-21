@@ -789,14 +789,27 @@ serve(async (req) => {
     let gateRejection: string | null = null;
     const gateBlockedReasons: string[] = [];
 
+    // v14: Pre-Market (9:00–9:14) — preload analysis only, never execute.
+    // Bias direction + confidence are still computed so the dashboard shows
+    // the opening lean before the bell rings.
+    if (preMarketActive && action !== "WAIT") {
+      gateRejection = `PRE_MARKET preload — analysis only until 9:15 IST`;
+      gateBlockedReasons.push("pre-market preload");
+      reasonParts.unshift(`PRE-MARKET (${biasDir ?? "neutral"} lean @ ${confidenceScore}/100) — armed for 9:15 open.`);
+      action = "WAIT";
+    }
+
     // Apply confidence gate to ANY non-WAIT action
     if (action !== "WAIT") {
       if (confidenceScore < requiredConfidence) {
-        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""})`;
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""})`;
         gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
-      } else if (regime === "CHOPPY" && !choppyConfirmed) {
+      } else if (regime === "CHOPPY" && !choppyConfirmed && !openingDriveActive) {
+        // v14: during 9:15–9:30 opening drive, skip the CHOPPY price-action
+        // confirmation requirement — first 15 min are inherently choppy but
+        // carry the day's directional intent.
         gateRejection = `CHOPPY regime requires at least one price-action confirmation`;
         gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
