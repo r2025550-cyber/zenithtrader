@@ -480,6 +480,27 @@ const Index = () => {
   // Execution lifecycle: keep locked signal stable while order attempts are in-flight,
   // even across temporary VPS unreachable errors.
   const executionStateRef = useRef<ExecutionState>("IDLE");
+  // IMMUTABLE locked trade snapshot — captured at ORDER_ACCEPTED, cleared only on exit.
+  // While set, the UI must FREEZE signal/confidence/reasoning panels and the AI loop
+  // must NOT generate or apply new signals (TRADE MANAGEMENT MODE).
+  type LockedTradeContext = {
+    action: "BUY" | "SELL";
+    strike: number;
+    optionSide: "CE" | "PE";
+    tradingSymbol: string;
+    instrument_token: string;
+    confidenceSnapshot: number;
+    reasoningSnapshot: string;
+    supportSnapshot: number | null;
+    resistanceSnapshot: number | null;
+    stopLossPremium: number;
+    targetPremium: number;
+    entryPremium: number;
+    signalCreatedAt: string | null;
+    lockedAt: number;
+  };
+  const lockedTradeContextRef = useRef<LockedTradeContext | null>(null);
+  const [lockedTradeContext, setLockedTradeContext] = useState<LockedTradeContext | null>(null);
   const vpsOfflineSinceRef = useRef<number | null>(null);
   // Session-restore guards: prevent the "Saved Upstox access token found…" flow
   // from spamming /system-status calls and re-triggering the AI loop on every render.
