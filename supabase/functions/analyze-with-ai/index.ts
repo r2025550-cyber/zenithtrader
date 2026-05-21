@@ -1164,6 +1164,13 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         postLossCooldownActive,
         postLossCooldownRemainingMin,
         sixthTradeWindow,
+        // v13: debug payload (real backend values)
+        scoringBreakdown,
+        bullScoringFull: bullScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
+        bearScoringFull: bearScoring.map(x => ({ label: x.label, weight: x.w, applied: x.ok })),
+        liveFactors,
+        pipeline,
+        gateInfo,
       },
       guidance: reasonParts,
       tradesToday,
