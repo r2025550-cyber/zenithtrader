@@ -735,7 +735,7 @@ serve(async (req) => {
     const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
     // Post-loss tighten: bump required confidence by +5
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = Math.max(45, baseGate + lossBump - openSessionRelief);
+    const requiredConfidence = Math.max(40, baseGate + lossBump - openSessionRelief);
 
     // v11: CHOPPY regime — relaxed; require only ONE of breakout / momentum / engulfing aligned with bias
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
