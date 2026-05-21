@@ -1356,6 +1356,14 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         bullScore,
         bearScore,
         biasDir,
+        // v14: session-phase + opening-drive metadata for dashboard
+        sessionPhase,
+        preMarketActive,
+        openingDriveActive,
+        openSessionActive,
+        openingDriveRelief,
+        openSessionRelief,
+        effectiveFloor,
       },
     });
   } catch (error) {
