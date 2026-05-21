@@ -48,11 +48,15 @@ const FALLBACK_SR_DISTANCE_PTS = 35;
 const POST_LOSS_COOLDOWN_MIN = 10;       // after 1 SL
 const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
-// v10: regime-aware confidence gates (balanced — active but disciplined)
-const CONF_GATE_TRENDING = 56;
-const CONF_GATE_SCALPING = 58;
-const CONF_GATE_CHOPPY = 66;
-const CONF_GATE_SNIPER = 72;
+// v11: regime-aware confidence gates (active scalping — anti-starvation)
+const CONF_GATE_TRENDING = 54;
+const CONF_GATE_SCALPING = 55;
+const CONF_GATE_CHOPPY = 58;
+const CONF_GATE_SNIPER = 68;
+// v11: open-session adaptive — reduce gate during opening drive (9:15–10:30 IST)
+const OPEN_SESSION_START_IST_MIN = 9 * 60 + 15;   // 555
+const OPEN_SESSION_END_IST_MIN   = 10 * 60 + 30;  // 630
+const OPEN_SESSION_GATE_RELIEF   = 8;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -714,21 +718,26 @@ serve(async (req) => {
 
     const hardBlocked = dailyTargetHit || maxDailyLossHit || lossPauseActive || postLossCooldownActive || !tradeCapOk || (!tradeGapOk && !gapBypassedByReEntry) || cooldownActive;
 
-    // v9: regime-aware HARD confidence gate
+    // v11: regime-aware HARD confidence gate + open-session adaptive relief
     const baseGate =
       tradingMode === "sniper" ? CONF_GATE_SNIPER :
       regime === "TRENDING" ? CONF_GATE_TRENDING :
       regime === "CHOPPY" ? CONF_GATE_CHOPPY :
       CONF_GATE_SCALPING;
+    // Open-session window (9:15–10:30 IST): subtract OPEN_SESSION_GATE_RELIEF
+    const _now = new Date();
+    const istMinutes = (_now.getUTCHours() * 60 + _now.getUTCMinutes() + 330) % 1440;
+    const openSessionActive = istMinutes >= OPEN_SESSION_START_IST_MIN && istMinutes <= OPEN_SESSION_END_IST_MIN;
+    const openSessionRelief = openSessionActive && tradingMode !== "sniper" ? OPEN_SESSION_GATE_RELIEF : 0;
     // Post-loss tighten: bump required confidence by +5
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
-    const requiredConfidence = baseGate + lossBump;
+    const requiredConfidence = Math.max(45, baseGate + lossBump - openSessionRelief);
 
-    // v9: CHOPPY regime requires extra confirmation (momentum + breakout candle aligned with bias)
+    // v11: CHOPPY regime — relaxed; require only ONE of breakout / momentum / engulfing aligned with bias
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
-      ? (pa.momentumBull || pa.bullStreak >= 2) && (pa.strongGreen || pa.bullishEngulfing)
+      ? (pa.liveBullBreakout || pa.retestBullOk || pa.earlyBuy || pa.momentumBull || pa.bullStreak >= 2 || pa.bullishEngulfing || pa.strongGreen)
       : biasDir === "SELL"
-        ? (pa.momentumBear || pa.bearStreak >= 2) && (pa.strongRed || pa.bearishEngulfing)
+        ? (pa.liveBearBreakout || pa.retestBearOk || pa.earlySell || pa.momentumBear || pa.bearStreak >= 2 || pa.bearishEngulfing || pa.strongRed)
         : false);
 
     let aiMode: "HIGH_CONVICTION" | "FAST_SCALP" | "WAIT" = "WAIT";
@@ -793,7 +802,7 @@ serve(async (req) => {
       ? ((pa.bearishEngulfing || pa.strongRed) ? 3 : ((pa.bearStreak ?? 0) >= 2 ? 2 : 1))
       : 0;
 
-    console.log("[PRO+++ ENGINE v10]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v11]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -980,7 +989,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
       premiumContract,
       trailMode: v6TrailMode,
       trailSteps: v6TrailSteps,
-      engineVersion: "price-action-scalper-v10-balanced",
+      engineVersion: "price-action-scalper-v11-active",
       liveSpot: pa.ltp,
       analysisTimestamp,
       payloadTimestamp,
