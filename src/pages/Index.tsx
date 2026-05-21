@@ -452,6 +452,8 @@ const Index = () => {
   const retryToastRef = useRef(0);
   const marketPollInFlightRef = useRef(false);
   const aiAnalysisInFlightRef = useRef(false);
+  // Race-safe sync mirror of `activeTrade` state so async loops never see stale closures.
+  const activeTradeRef = useRef(false);
   const lastUpstoxRequestAtRef = useRef(0);
   const upstoxBackoffUntilRef = useRef(0);
   const upstoxRequestQueueRef = useRef<Promise<void>>(Promise.resolve());
