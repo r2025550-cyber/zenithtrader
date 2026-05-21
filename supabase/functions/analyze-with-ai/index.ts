@@ -902,12 +902,14 @@ serve(async (req) => {
       { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
     ];
     const gateInfo = {
-      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief, lossBump,
+      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief,
+      openingDriveActive, openingDriveRelief, preMarketActive, sessionPhase, effectiveFloor,
+      lossBump,
       passedGate: confidenceScore >= requiredConfidence,
       gateBlockedReasons,
     };
 
-    console.log("[PRO+++ ENGINE v13]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), openSessionActive, openSessionRelief, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v14]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), sessionPhase, openSessionActive, openSessionRelief, openingDriveActive, openingDriveRelief, preMarketActive, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
