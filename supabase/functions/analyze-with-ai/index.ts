@@ -306,13 +306,13 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
   const pullbackSell = trendDown && ema21 !== null && ltp !== null &&
     Math.abs(ltp - ema21) <= PULLBACK_TOLERANCE_PTS && (strongRed || bearishEngulfing) && ema21Slope < 0;
 
-  // ===== v4: EARLY ENTRY (strong breakout close, skip retest) =====
+  // ===== v12: EARLY ENTRY — EMA assists, not blocks. Allow strong breakouts regardless of EMA alignment. =====
   const earlyBuy = ltp !== null && resistance !== null && close !== null &&
     close > resistance && strongGreen && body >= EARLY_ENTRY_MIN_BODY_PTS &&
-    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick && (emaBullish || ema21Slope > 0);
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longUpperWick;
   const earlySell = ltp !== null && support !== null && close !== null &&
     close < support && strongRed && body >= EARLY_ENTRY_MIN_BODY_PTS &&
-    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick && (emaBearish || ema21Slope < 0);
+    Math.abs(oneMinMove) >= EARLY_ENTRY_MIN_MOVE_PTS && !longLowerWick;
 
   // ===== v4: CHOPPY market (very tight range = downsize) =====
   const choppyMarket = last30Range !== null && last30Range < CHOPPY_RANGE_PTS;
