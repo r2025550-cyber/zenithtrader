@@ -2387,7 +2387,7 @@ const Index = () => {
     // While a position is open OR an order is mid-flight, the AI engine must
     // NOT generate new signals / re-evaluate strikes / refresh conviction.
     // Only SL / trailing / exit monitors are allowed to run.
-    if (activeTrade || isExecutionActive()) {
+    if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
       console.log("[AI_LOOP] skipped — trade active (monitoring-only mode)");
       return;
     }
@@ -2434,7 +2434,7 @@ const Index = () => {
       // ===== ACTIVE POSITION LOCK =====
       // Block new entries (AUTO or manual force-trade) while a trade is open
       // or while an order is mid-flight. Unlock only on SL/target/manual exit.
-      if (activeTrade || isExecutionActive()) {
+      if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
         toast({
           title: "Trade already active",
           description: "Wait for SL hit, target hit, or manual exit before a new entry.",
@@ -3312,7 +3312,7 @@ const Index = () => {
       console.log("[AI_REASONING] interval started", { intervalMs: AI_REASONING_INTERVAL_MS });
       aiIntervalRef.current = setInterval(() => {
         if (tradingBlocked) return;
-        if (activeTrade || isExecutionActive()) {
+        if (activeTradeRef.current || activeTrade || lockedTradeContextRef.current || isExecutionActive()) {
           console.log("[AI_REASONING] tick skipped — position active (monitor-only)");
           return;
         }
