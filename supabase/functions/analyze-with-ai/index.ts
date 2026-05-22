@@ -1073,7 +1073,7 @@ serve(async (req) => {
       emaSeparation: Number(emaSep.toFixed(2)),
     };
 
-    console.log("[PRO+++ ENGINE v15]", { confidenceScore, aiMode, regime, biasDir, momentumTier, momentumVelocityScore, entryQualityScore, lateEntryPenalty, requiredConfidence, dynamicBaseGate, baseGate, sessionPhase, rejectedByGate: !!gateRejection, dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v17]", { confidenceScore, rawConfidenceScore, momentumOverrideActive, momentumConvictionMultiplier, aiMode, regime, biasDir, momentumTier, momentumVelocityScore, entryQualityScore, lateEntryPenalty, momentumExhaustionRisk, sidewaysOverrideActive, requiredConfidence, dynamicBaseGate, baseGate, sessionPhase, rejectedByGate: !!gateRejection, dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
