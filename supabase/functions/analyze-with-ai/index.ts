@@ -764,6 +764,70 @@ serve(async (req) => {
       .filter((x) => x.ok && x.w > 0)
       .map((x) => x.label);
 
+    // ============================================================
+    // v15: LIVE MOMENTUM SCALPING — velocity, entry quality, late-entry guard
+    // (additive only — does not touch execution / Upstox / VPS flow)
+    // ============================================================
+    const dirStreak = biasDir === "BUY" ? (pa.bullStreak ?? 0)
+                    : biasDir === "SELL" ? (pa.bearStreak ?? 0) : 0;
+    const dirSlopeAligned = biasDir === "BUY" ? ((pa.ema21Slope ?? 0) >= STRONG_SLOPE_PTS)
+                          : biasDir === "SELL" ? ((pa.ema21Slope ?? 0) <= -STRONG_SLOPE_PTS) : false;
+    const emaSep = (pa.ema9 !== null && pa.ema21 !== null) ? Math.abs((pa.ema9 as number) - (pa.ema21 as number)) : 0;
+    const liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
+                    : biasDir === "SELL" ? !!(pa.liveBearBreakout || pa.earlySell) : false;
+    const dirMomentum = biasDir === "BUY" ? !!pa.momentumBull
+                      : biasDir === "SELL" ? !!pa.momentumBear : false;
+    const dirBigBody = bigBody && ((biasDir === "BUY" && (pa.close ?? 0) > (pa.open ?? 0)) || (biasDir === "SELL" && (pa.close ?? 0) < (pa.open ?? 0)));
+    const dirTrap = biasDir === "BUY" ? !!pa.bullTrap : biasDir === "SELL" ? !!pa.bearTrap : false;
+
+    // momentumVelocityScore 0..100
+    let momentumVelocityScore = 0;
+    if (biasDir) {
+      momentumVelocityScore += dirSlopeAligned ? 25 : (slopeAbs >= STRONG_SLOPE_PTS * 0.6 ? 12 : 0);
+      momentumVelocityScore += dirBigBody ? 20 : (bigBody ? 8 : 0);
+      momentumVelocityScore += dirMomentum ? 20 : (dirStreak >= 2 ? 12 : 0);
+      momentumVelocityScore += liveBreak ? 20 : 0;
+      momentumVelocityScore += emaSep >= 8 ? 10 : (emaSep >= 4 ? 5 : 0);
+      momentumVelocityScore += (pa.compressionBreakout === (biasDir === "BUY" ? "BULL" : "BEAR")) ? 10 : 0;
+      momentumVelocityScore -= dirTrap ? 25 : 0;
+      momentumVelocityScore = Math.max(0, Math.min(100, momentumVelocityScore));
+    }
+
+    // late-entry detection — already too stretched / too many expansion candles done
+    const distFromEma21 = (pa.ltp !== null && pa.ema21 !== null) ? Math.abs((pa.ltp as number) - (pa.ema21 as number)) : 0;
+    const overstretched = distFromEma21 >= LATE_ENTRY_STRETCH_PTS;
+    const lateBody = bodyPts >= LATE_ENTRY_BODY_PTS;
+    const exhausted = dirStreak >= LATE_ENTRY_STREAK_MAX && (overstretched || lateBody);
+    const wickAgainst = biasDir === "BUY" ? !!pa.longUpperWick : biasDir === "SELL" ? !!pa.longLowerWick : false;
+    const lateEntryPenalty = !!biasDir && (exhausted || (overstretched && wickAgainst));
+
+    // entryQualityScore 0..100 — favors clean, not-too-late entries
+    let entryQualityScore = 50;
+    if (biasDir) {
+      entryQualityScore += dirMomentum ? 10 : 0;
+      entryQualityScore += liveBreak ? 10 : 0;
+      entryQualityScore += (distFromEma21 <= 12 ? 15 : distFromEma21 <= 20 ? 5 : -15);
+      entryQualityScore += dirSlopeAligned ? 10 : 0;
+      entryQualityScore -= wickAgainst ? 15 : 0;
+      entryQualityScore -= dirTrap ? 25 : 0;
+      entryQualityScore -= lateBody ? 10 : 0;
+      entryQualityScore -= overstretched ? 15 : 0;
+      entryQualityScore = Math.max(0, Math.min(100, entryQualityScore));
+    }
+
+    // scalping momentum tier — drives dynamic gate
+    const momentumTier: "EXPLOSIVE" | "CONTINUATION" | "NORMAL" | "CHOP" =
+      momentumVelocityScore >= MOMENTUM_VELOCITY_EXPLOSIVE ? "EXPLOSIVE"
+      : momentumVelocityScore >= MOMENTUM_VELOCITY_CONTINUE ? "CONTINUATION"
+      : momentumVelocityScore >= MOMENTUM_VELOCITY_NORMAL ? "NORMAL"
+      : "CHOP";
+    const momentumGate: number | null =
+      momentumTier === "EXPLOSIVE" ? MOMENTUM_GATE_EXPLOSIVE
+      : momentumTier === "CONTINUATION" ? MOMENTUM_GATE_CONTINUATION
+      : momentumTier === "NORMAL" ? MOMENTUM_GATE_NORMAL
+      : null;
+    const scalpingMomentumMode = momentumTier === "EXPLOSIVE" || momentumTier === "CONTINUATION";
+
     // v13: full scoring breakdown for live debug panel (real backend values)
     const scoringBreakdown = (biasDir === "SELL" ? bearScoring : bullScoring).map((x) => ({
       label: x.label, weight: x.w, applied: x.ok, contribution: x.ok ? x.w : 0,
