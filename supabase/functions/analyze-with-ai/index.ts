@@ -80,6 +80,17 @@ const LATE_ENTRY_STREAK_MAX       = 3;    // ≥3 expansion candles already done
 const LATE_ENTRY_STRETCH_PTS      = 28;   // distance from ema21
 const LATE_ENTRY_BODY_PTS         = 22;   // overstretched single candle
 const ENTRY_QUALITY_MIN           = 40;   // floor — block ugly entries
+// v17: MOMENTUM OVERRIDE LAYER (additive — momentum > structure during explosive moves)
+const MOM_OVR_VELOCITY_MIN        = 60;   // momentumVelocity floor to consider override
+const MOM_OVR_VELOCITY_EXTREME    = 78;   // extreme threshold → max multiplier
+const MOM_OVR_EMA_SEP_MIN         = 6;    // EMA9/21 spread widening proxy (pts)
+const MOM_OVR_STREAK_MIN          = 2;    // ≥2 directional expansion candles
+const MOM_OVR_GATE_TRENDING_LO    = 24;
+const MOM_OVR_GATE_TRENDING_HI    = 28;
+const MOM_OVR_GATE_NORMAL_LO      = 22;
+const MOM_OVR_GATE_NORMAL_HI      = 26;
+const MOM_OVR_MULT_EXPLOSIVE      = 1.6;
+const MOM_OVR_MULT_EXTREME        = 1.9;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
