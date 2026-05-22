@@ -1065,6 +1065,9 @@ serve(async (req) => {
       gateBlockedReasons,
       // v15
       momentumVelocityScore, entryQualityScore, momentumTier, momentumGate,
+      // v17 override telemetry
+      momentumOverrideActive, momentumConvictionMultiplier, rawConfidenceScore,
+      trendExpansionStrength, premiumVelocity, momentumExhaustionRisk, sidewaysOverrideActive,
       lateEntryPenalty, scalpingMomentumMode,
       distFromEma21: Number(distFromEma21.toFixed(2)),
       emaSeparation: Number(emaSep.toFixed(2)),
