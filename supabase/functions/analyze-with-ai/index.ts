@@ -80,6 +80,17 @@ const LATE_ENTRY_STREAK_MAX       = 3;    // ≥3 expansion candles already done
 const LATE_ENTRY_STRETCH_PTS      = 28;   // distance from ema21
 const LATE_ENTRY_BODY_PTS         = 22;   // overstretched single candle
 const ENTRY_QUALITY_MIN           = 40;   // floor — block ugly entries
+// v17: MOMENTUM OVERRIDE LAYER (additive — momentum > structure during explosive moves)
+const MOM_OVR_VELOCITY_MIN        = 60;   // momentumVelocity floor to consider override
+const MOM_OVR_VELOCITY_EXTREME    = 78;   // extreme threshold → max multiplier
+const MOM_OVR_EMA_SEP_MIN         = 6;    // EMA9/21 spread widening proxy (pts)
+const MOM_OVR_STREAK_MIN          = 2;    // ≥2 directional expansion candles
+const MOM_OVR_GATE_TRENDING_LO    = 24;
+const MOM_OVR_GATE_TRENDING_HI    = 28;
+const MOM_OVR_GATE_NORMAL_LO      = 22;
+const MOM_OVR_GATE_NORMAL_HI      = 26;
+const MOM_OVR_MULT_EXPLOSIVE      = 1.6;
+const MOM_OVR_MULT_EXTREME        = 1.9;
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -759,7 +770,8 @@ serve(async (req) => {
     const biasDir: "BUY" | "SELL" | null =
       bullScore > bearScore + 5 ? "BUY" :
       bearScore > bullScore + 5 ? "SELL" : null;
-    const confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
+    let confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
+    const rawConfidenceScore = confidenceScore;
     const edgeFactors = (biasDir === "SELL" ? bearScoring : bullScoring)
       .filter((x) => x.ok && x.w > 0)
       .map((x) => x.label);
@@ -828,6 +840,39 @@ serve(async (req) => {
       : null;
     const scalpingMomentumMode = momentumTier === "EXPLOSIVE" || momentumTier === "CONTINUATION";
 
+    // ============================================================
+    // v17: MOMENTUM OVERRIDE LAYER — momentum > structure (additive)
+    // Activates ONLY during real explosive expansion.
+    // ============================================================
+    const trendExpansionStrength = Math.max(0, Math.min(100,
+      Math.round(emaSep * 4 + dirStreak * 10 + (dirSlopeAligned ? 20 : 0) + (dirBigBody ? 15 : 0))
+    ));
+    // Premium velocity proxy: spot expansion velocity (body * streak) — VPS/Upstox untouched.
+    const premiumVelocity = Number((bodyPts * Math.max(1, dirStreak) * (liveBreak ? 1.2 : 1)).toFixed(2));
+    const momentumExhaustionRisk = !!biasDir && (exhausted || (dirStreak >= 4 && wickAgainst) || (overstretched && lateBody));
+    const momentumOverrideActive = !!biasDir
+      && tradingMode !== "sniper"
+      && momentumVelocityScore >= MOM_OVR_VELOCITY_MIN
+      && dirSlopeAligned
+      && emaSep >= MOM_OVR_EMA_SEP_MIN
+      && dirStreak >= MOM_OVR_STREAK_MIN
+      && (liveBreak || dirMomentum || dirBigBody)
+      && !wickAgainst
+      && !dirTrap
+      && !momentumExhaustionRisk
+      && !lateEntryPenalty;
+    const momentumConvictionMultiplier = !momentumOverrideActive ? 1
+      : (momentumVelocityScore >= MOM_OVR_VELOCITY_EXTREME ? MOM_OVR_MULT_EXTREME : MOM_OVR_MULT_EXPLOSIVE);
+    if (momentumOverrideActive && momentumConvictionMultiplier > 1) {
+      confidenceScore = Math.max(0, Math.min(100, Math.round(confidenceScore * momentumConvictionMultiplier)));
+    }
+    // Sideways override — never treat as sideways during real momentum expansion
+    const sidewaysOverrideActive = !!pa.sidewaysMarket && (
+      momentumOverrideActive
+      || (scalpingMomentumMode && (dirSlopeAligned || liveBreak) && emaSep >= 4 && dirStreak >= 2)
+    );
+
+
     // v13: full scoring breakdown for live debug panel (real backend values)
     const scoringBreakdown = (biasDir === "SELL" ? bearScoring : bullScoring).map((x) => ({
       label: x.label, weight: x.w, applied: x.ok, contribution: x.ok ? x.w : 0,
@@ -865,9 +910,16 @@ serve(async (req) => {
     const effectiveFloor = openingDriveActive ? OPENING_DRIVE_FLOOR : CONF_GATE_FLOOR;
     // v15: dynamic momentum gate — collapse base gate when real momentum is live.
     // Sniper mode is never softened. CHOP tier keeps regime gate untouched.
-    const dynamicBaseGate = (momentumGate !== null && tradingMode !== "sniper")
+    let dynamicBaseGate = (momentumGate !== null && tradingMode !== "sniper")
       ? Math.min(baseGate, momentumGate)
       : baseGate;
+    // v17: momentum override → temporarily collapse base gate further (regime-aware)
+    if (momentumOverrideActive) {
+      const ovrLo = regime === "TRENDING" ? MOM_OVR_GATE_TRENDING_LO : MOM_OVR_GATE_NORMAL_LO;
+      const ovrHi = regime === "TRENDING" ? MOM_OVR_GATE_TRENDING_HI : MOM_OVR_GATE_NORMAL_HI;
+      const ovrGate = momentumVelocityScore >= MOM_OVR_VELOCITY_EXTREME ? ovrLo : ovrHi;
+      dynamicBaseGate = Math.min(dynamicBaseGate, ovrGate);
+    }
     const requiredConfidence = Math.max(effectiveFloor, dynamicBaseGate + lossBump - openSessionRelief - openingDriveRelief);
 
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
@@ -988,7 +1040,7 @@ serve(async (req) => {
       strongCandle: !!(pa.strongGreen || pa.strongRed),
       bigBody,
       bodyPts: Number(bodyPts.toFixed(2)),
-      sidewaysFilter: !!pa.sidewaysMarket,
+      sidewaysFilter: !!pa.sidewaysMarket && !sidewaysOverrideActive,
       choppyMarket: !!pa.choppyMarket,
       nearSupport: !!pa.nearSupport,
       nearResistance: !!pa.nearResistance,
@@ -1013,12 +1065,15 @@ serve(async (req) => {
       gateBlockedReasons,
       // v15
       momentumVelocityScore, entryQualityScore, momentumTier, momentumGate,
+      // v17 override telemetry
+      momentumOverrideActive, momentumConvictionMultiplier, rawConfidenceScore,
+      trendExpansionStrength, premiumVelocity, momentumExhaustionRisk, sidewaysOverrideActive,
       lateEntryPenalty, scalpingMomentumMode,
       distFromEma21: Number(distFromEma21.toFixed(2)),
       emaSeparation: Number(emaSep.toFixed(2)),
     };
 
-    console.log("[PRO+++ ENGINE v15]", { confidenceScore, aiMode, regime, biasDir, momentumTier, momentumVelocityScore, entryQualityScore, lateEntryPenalty, requiredConfidence, dynamicBaseGate, baseGate, sessionPhase, rejectedByGate: !!gateRejection, dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v17]", { confidenceScore, rawConfidenceScore, momentumOverrideActive, momentumConvictionMultiplier, aiMode, regime, biasDir, momentumTier, momentumVelocityScore, entryQualityScore, lateEntryPenalty, momentumExhaustionRisk, sidewaysOverrideActive, requiredConfidence, dynamicBaseGate, baseGate, sessionPhase, rejectedByGate: !!gateRejection, dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -1494,6 +1549,14 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         scalpingMomentumMode,
         distFromEma21: Number(distFromEma21.toFixed(2)),
         emaSeparation: Number(emaSep.toFixed(2)),
+        // v17: MOMENTUM OVERRIDE telemetry
+        momentumOverrideActive,
+        momentumConvictionMultiplier,
+        rawConfidenceScore,
+        trendExpansionStrength,
+        premiumVelocity,
+        momentumExhaustionRisk,
+        sidewaysOverrideActive,
       },
     });
   } catch (error) {

@@ -37,6 +37,15 @@ export function EngineDebugPanel({ signal }: Props) {
   const lateEntryPenalty = !!rules.lateEntryPenalty;
   const scalpingMomentumMode = !!rules.scalpingMomentumMode;
   const sessionPhase = (rules.sessionPhase ?? "—") as string;
+  // v17: momentum override telemetry
+  const momentumOverrideActive = !!rules.momentumOverrideActive;
+  const momentumConvictionMultiplier = Number(rules.momentumConvictionMultiplier ?? 1);
+  const rawConfidenceScore = Number(rules.rawConfidenceScore ?? confidenceScore);
+  const trendExpansionStrength = Number(rules.trendExpansionStrength ?? 0);
+  const premiumVelocity = Number(rules.premiumVelocity ?? 0);
+  const momentumExhaustionRisk = !!rules.momentumExhaustionRisk;
+  const sidewaysOverrideActive = !!rules.sidewaysOverrideActive;
+  const baseGate = Number(rules.baseGate ?? 0);
 
   if (!signal) {
     return (
@@ -149,8 +158,67 @@ export function EngineDebugPanel({ signal }: Props) {
         </div>
       </div>
 
+      {/* v17 Momentum Override Layer */}
+      <div className={`rounded-md border p-3 ${momentumOverrideActive ? "border-emerald-500/50 bg-emerald-500/10" : "border-border bg-surface"}`}>
+        <p className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide">
+          <span className={momentumOverrideActive ? "text-emerald-300" : "text-muted-foreground"}>
+            🚀 Momentum Override Layer
+          </span>
+          <Badge variant={momentumOverrideActive ? "default" : "secondary"} className="text-[10px]">
+            {momentumOverrideActive ? "OVERRIDE ON" : "OFF"}
+          </Badge>
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+          <div>
+            <div className="text-muted-foreground">Conviction Multiplier</div>
+            <div className={`font-mono tabular-nums font-bold ${momentumConvictionMultiplier >= 1.9 ? "text-emerald-400" : momentumConvictionMultiplier > 1 ? "text-emerald-300" : "text-foreground"}`}>
+              ×{momentumConvictionMultiplier.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Raw → Boosted</div>
+            <div className="font-mono tabular-nums text-foreground">
+              {rawConfidenceScore} → <span className={momentumOverrideActive ? "text-emerald-300 font-bold" : ""}>{confidenceScore}</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Gate Collapse</div>
+            <div className="font-mono tabular-nums text-foreground">{baseGate} → <span className={dynamicBaseGate < baseGate ? "text-emerald-300 font-bold" : ""}>{dynamicBaseGate}</span></div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Trend Expansion</div>
+            <div className={`font-mono tabular-nums font-bold ${trendExpansionStrength >= 60 ? "text-emerald-400" : trendExpansionStrength >= 35 ? "text-amber-300" : "text-muted-foreground"}`}>
+              {trendExpansionStrength}/100
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Premium Velocity</div>
+            <div className={`font-mono tabular-nums font-bold ${premiumVelocity >= 30 ? "text-emerald-400" : premiumVelocity >= 15 ? "text-amber-300" : "text-foreground"}`}>
+              {premiumVelocity.toFixed(1)}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Sideways Override</div>
+            <div className={`font-mono font-bold ${sidewaysOverrideActive ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {sidewaysOverrideActive ? "BYPASSED" : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Exhaustion Risk</div>
+            <div className={`font-mono font-bold ${momentumExhaustionRisk ? "text-destructive" : "text-emerald-400"}`}>
+              {momentumExhaustionRisk ? "HIGH" : "LOW"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Real Momentum</div>
+            <div className={`font-mono font-bold ${momentumOverrideActive ? "text-emerald-400" : scalpingMomentumMode ? "text-emerald-300" : "text-muted-foreground"}`}>
+              {momentumOverrideActive ? "EXPLOSIVE" : scalpingMomentumMode ? "ACTIVE" : "DORMANT"}
+            </div>
+          </div>
+        </div>
+      </div>
 
-      {/* Live factors */}
+
       <div className="rounded-md border border-border bg-surface p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           <Activity className="h-3.5 w-3.5" /> Live Factors
