@@ -29,6 +29,14 @@ export function EngineDebugPanel({ signal }: Props) {
   const pipeline = (rules.pipeline ?? []) as PipelineRow[];
   const rejectionReason = (rules.rejectionReason ?? null) as string | null;
   const gateBlocked = (rules.gateInfo?.gateBlockedReasons ?? []) as string[];
+  // v15/v16 momentum scalping telemetry
+  const momentumVelocityScore = Number(rules.momentumVelocityScore ?? 0);
+  const entryQualityScore = Number(rules.entryQualityScore ?? 0);
+  const momentumTier = (rules.momentumTier ?? "—") as string;
+  const dynamicBaseGate = Number(rules.dynamicBaseGate ?? rules.baseGate ?? 0);
+  const lateEntryPenalty = !!rules.lateEntryPenalty;
+  const scalpingMomentumMode = !!rules.scalpingMomentumMode;
+  const sessionPhase = (rules.sessionPhase ?? "—") as string;
 
   if (!signal) {
     return (
@@ -88,6 +96,59 @@ export function EngineDebugPanel({ signal }: Props) {
           <div><span className="text-muted-foreground">Passed:</span> <span className={`font-mono font-bold ${passedGate ? "text-emerald-400" : "text-amber-400"}`}>{passedGate ? "YES" : "NO"}</span></div>
         </div>
       </div>
+
+      {/* v16 Momentum Scalping telemetry */}
+      <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+        <p className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-primary">
+          <span>⚡ Momentum Scalping Engine</span>
+          <span className="text-foreground">{sessionPhase}</span>
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+          <div>
+            <div className="text-muted-foreground">Momentum Velocity</div>
+            <div className={`font-mono tabular-nums font-bold ${momentumVelocityScore >= 65 ? "text-emerald-400" : momentumVelocityScore >= 45 ? "text-amber-300" : "text-muted-foreground"}`}>
+              {momentumVelocityScore}/100
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Entry Quality</div>
+            <div className={`font-mono tabular-nums font-bold ${entryQualityScore >= 60 ? "text-emerald-400" : entryQualityScore >= 40 ? "text-amber-300" : "text-destructive"}`}>
+              {entryQualityScore}/100
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Momentum Tier</div>
+            <div className={`font-mono font-bold ${momentumTier === "EXPLOSIVE" ? "text-emerald-400" : momentumTier === "CONTINUATION" ? "text-emerald-300" : momentumTier === "CHOP" ? "text-amber-400" : "text-foreground"}`}>
+              {momentumTier}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Dynamic Gate</div>
+            <div className="font-mono tabular-nums text-foreground">{dynamicBaseGate}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Late Entry Risk</div>
+            <div className={`font-mono font-bold ${lateEntryPenalty ? "text-destructive" : "text-emerald-400"}`}>
+              {lateEntryPenalty ? "BLOCKED" : "OK"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Scalping Mode</div>
+            <div className={`font-mono font-bold ${scalpingMomentumMode ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {scalpingMomentumMode ? "FAST" : "STD"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Dist from EMA21</div>
+            <div className="font-mono tabular-nums text-foreground">{Number(rules.distFromEma21 ?? 0).toFixed(1)}pt</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">EMA Separation</div>
+            <div className="font-mono tabular-nums text-foreground">{Number(rules.emaSeparation ?? 0).toFixed(1)}pt</div>
+          </div>
+        </div>
+      </div>
+
 
       {/* Live factors */}
       <div className="rounded-md border border-border bg-surface p-3">

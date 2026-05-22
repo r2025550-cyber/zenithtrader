@@ -1245,22 +1245,44 @@ const Index = () => {
     lastAtmStrikeRef.current = liveAtmStrike;
   }, [liveAtmStrike, activeTrade]);
 
+  // v16 SCALPER EXIT ENGINE — tiered trailing + peak give-back + hard SL retry watchdog
+  const peakProfitRef = useRef<number>(0);
+  const lastSlRetryRef = useRef<number>(0);
   useEffect(() => {
-    if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium || activeTradePlan.exitAlertReason) return;
+    if (!activeTradePlan?.entryPremium || !activeTradePlan.currentPremium) return;
     const currentStop = activeTradePlan.stopLossPremium ?? activeTradePlan.stopLoss;
     const currentTarget = activeTradePlan.targetPremium ?? activeTradePlan.target;
     const premiumProfit = activeTradePlan.currentPremium - activeTradePlan.entryPremium;
     const stopHit = activeTradePlan.currentPremium <= currentStop;
     const targetHit = activeTradePlan.currentPremium >= currentTarget;
+
+    // HARD SL retry watchdog — keep firing emergencyExit every 1s until trade flattens
+    if (activeTradePlan.exitAlertReason) {
+      if (stopHit || activeTradePlan.exitAlertReason === "TRAILING_SL") {
+        const now = Date.now();
+        if (now - lastSlRetryRef.current >= 1_000) {
+          lastSlRetryRef.current = now;
+          console.warn("[HARD-SL WATCHDOG] re-firing emergencyExit", { premium: activeTradePlan.currentPremium, stop: currentStop });
+          emergencyExit(false);
+        }
+      }
+      return;
+    }
+
+    // HARD SL — instant market exit on premium breach
     if (stopHit) {
+      peakProfitRef.current = 0;
+      lastSlRetryRef.current = Date.now();
       const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
       setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
       localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      console.error("[HARD-SL TRIGGERED]", { premium: activeTradePlan.currentPremium, stop: currentStop });
       emergencyExit(false);
       return;
     }
     if (targetHit) {
+      peakProfitRef.current = 0;
       const nextPlan = { ...activeTradePlan, exitAlertReason: "FINAL_TARGET" as const };
       setExitFlashUntil(Date.now() + 10_000);
       setActiveTradePlan(nextPlan);
@@ -1268,31 +1290,60 @@ const Index = () => {
       emergencyExit(false);
       return;
     }
-    if (premiumProfit >= PREMIUM_TSL_STEP) {
-      const lockedSteps = Math.floor(premiumProfit / PREMIUM_TSL_STEP);
-      const candidateStop =
-        activeTradePlan.entryPremium - activeTradePlan.initialSlPoints + lockedSteps * PREMIUM_TSL_STEP;
-      const candidateTarget =
-        activeTradePlan.entryPremium + activeTradePlan.initialTargetPoints + lockedSteps * PREMIUM_TSL_STEP;
-      const shouldTrail = candidateStop > currentStop;
-      if (shouldTrail) {
-        const nextPlan = {
-          ...activeTradePlan,
-          targetPremium: candidateTarget,
-          target: candidateTarget,
-          stopLossPremium: candidateStop,
-          stopLoss: candidateStop,
-        };
-        setActiveTradePlan(nextPlan);
-        setUserTargetPoints(formatPremiumInput(candidateTarget));
-        setUserSlPoints(formatPremiumInput(candidateStop));
-        localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
-        syncStopLossPremium(nextPlan).catch((error) =>
-          showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."),
-        );
-      }
+
+    // Track peak profit for give-back detection
+    if (premiumProfit > peakProfitRef.current) peakProfitRef.current = premiumProfit;
+
+    // GIVE-BACK EXIT — peak profit dies, momentum collapse protection
+    // Once we've seen ≥8pt profit, exit if price gives back >5pts from peak
+    if (peakProfitRef.current >= 8 && premiumProfit < peakProfitRef.current - 5 && premiumProfit > 0) {
+      const nextPlan = { ...activeTradePlan, exitAlertReason: "TRAILING_SL" as const };
+      setExitFlashUntil(Date.now() + 10_000);
+      setActiveTradePlan(nextPlan);
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      console.warn("[GIVE-BACK EXIT]", { peak: peakProfitRef.current, current: premiumProfit });
+      emergencyExit(false);
+      return;
+    }
+
+    // TIERED TRAILING — professional scalper ladder
+    //   +5  → SL to cost (breakeven)
+    //   +10 → lock +4
+    //   +15 → lock +8
+    //   +20 → aggressive: trail every +3pts above
+    let lockedSl: number | null = null;
+    if (premiumProfit >= 20) {
+      const extraSteps = Math.floor((premiumProfit - 20) / PREMIUM_TSL_STEP);
+      lockedSl = activeTradePlan.entryPremium + 12 + extraSteps * PREMIUM_TSL_STEP;
+    } else if (premiumProfit >= 15) {
+      lockedSl = activeTradePlan.entryPremium + 8;
+    } else if (premiumProfit >= 10) {
+      lockedSl = activeTradePlan.entryPremium + 4;
+    } else if (premiumProfit >= 5) {
+      lockedSl = activeTradePlan.entryPremium; // breakeven
+    }
+    if (lockedSl !== null && lockedSl > currentStop) {
+      const nextPlan = {
+        ...activeTradePlan,
+        stopLossPremium: Number(lockedSl.toFixed(2)),
+        stopLoss: Number(lockedSl.toFixed(2)),
+      };
+      setActiveTradePlan(nextPlan);
+      setUserSlPoints(formatPremiumInput(lockedSl));
+      localStorage.setItem(ACTIVE_TRADE_PLAN_STORAGE_KEY, `${todayKey()}:${JSON.stringify(nextPlan)}`);
+      syncStopLossPremium(nextPlan).catch((error) =>
+        showRetryToast(error instanceof Error ? error.message : "Server SL modify will retry."),
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTradePlan]);
+
+  // Reset peak when trade closes
+  useEffect(() => {
+    if (!activeTradePlan) {
+      peakProfitRef.current = 0;
+      lastSlRetryRef.current = 0;
+    }
   }, [activeTradePlan]);
 
   useEffect(() => {
