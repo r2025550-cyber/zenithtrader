@@ -29,6 +29,19 @@ export function EngineDebugPanel({ signal }: Props) {
   const pipeline = (rules.pipeline ?? []) as PipelineRow[];
   const rejectionReason = (rules.rejectionReason ?? null) as string | null;
   const gateBlocked = (rules.gateInfo?.gateBlockedReasons ?? []) as string[];
+  // v15/v16 momentum scalping telemetry
+  const momentumVelocityScore = Number(rules.momentumVelocityScore ?? 0);
+  const entryQualityScore = Number(rules.entryQualityScore ?? 0);
+  const momentumTier = (rules.momentumTier ?? "—") as string;
+  const dynamicBaseGate = Number(rules.dynamicBaseGate ?? rules.baseGate ?? 0);
+  const lateEntryPenalty = !!rules.lateEntryPenalty;
+  const scalpingMomentumMode = !!rules.scalpingMomentumMode;
+  const sessionPhase = (rules.sessionPhase ?? "—") as string;
+  const bullFull = (rules.bullScoringFull ?? []) as ScoreRow[];
+  const bearFull = (rules.bearScoringFull ?? []) as ScoreRow[];
+  const pipeline = (rules.pipeline ?? []) as PipelineRow[];
+  const rejectionReason = (rules.rejectionReason ?? null) as string | null;
+  const gateBlocked = (rules.gateInfo?.gateBlockedReasons ?? []) as string[];
 
   if (!signal) {
     return (
