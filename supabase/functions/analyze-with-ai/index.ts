@@ -840,6 +840,39 @@ serve(async (req) => {
       : null;
     const scalpingMomentumMode = momentumTier === "EXPLOSIVE" || momentumTier === "CONTINUATION";
 
+    // ============================================================
+    // v17: MOMENTUM OVERRIDE LAYER — momentum > structure (additive)
+    // Activates ONLY during real explosive expansion.
+    // ============================================================
+    const trendExpansionStrength = Math.max(0, Math.min(100,
+      Math.round(emaSep * 4 + dirStreak * 10 + (dirSlopeAligned ? 20 : 0) + (dirBigBody ? 15 : 0))
+    ));
+    // Premium velocity proxy: spot expansion velocity (body * streak) — VPS/Upstox untouched.
+    const premiumVelocity = Number((bodyPts * Math.max(1, dirStreak) * (liveBreak ? 1.2 : 1)).toFixed(2));
+    const momentumExhaustionRisk = !!biasDir && (exhausted || (dirStreak >= 4 && wickAgainst) || (overstretched && lateBody));
+    const momentumOverrideActive = !!biasDir
+      && tradingMode !== "sniper"
+      && momentumVelocityScore >= MOM_OVR_VELOCITY_MIN
+      && dirSlopeAligned
+      && emaSep >= MOM_OVR_EMA_SEP_MIN
+      && dirStreak >= MOM_OVR_STREAK_MIN
+      && (liveBreak || dirMomentum || dirBigBody)
+      && !wickAgainst
+      && !dirTrap
+      && !momentumExhaustionRisk
+      && !lateEntryPenalty;
+    const momentumConvictionMultiplier = !momentumOverrideActive ? 1
+      : (momentumVelocityScore >= MOM_OVR_VELOCITY_EXTREME ? MOM_OVR_MULT_EXTREME : MOM_OVR_MULT_EXPLOSIVE);
+    if (momentumOverrideActive && momentumConvictionMultiplier > 1) {
+      confidenceScore = Math.max(0, Math.min(100, Math.round(confidenceScore * momentumConvictionMultiplier)));
+    }
+    // Sideways override — never treat as sideways during real momentum expansion
+    const sidewaysOverrideActive = !!pa.sidewaysMarket && (
+      momentumOverrideActive
+      || (scalpingMomentumMode && (dirSlopeAligned || liveBreak) && emaSep >= 4 && dirStreak >= 2)
+    );
+
+
     // v13: full scoring breakdown for live debug panel (real backend values)
     const scoringBreakdown = (biasDir === "SELL" ? bearScoring : bullScoring).map((x) => ({
       label: x.label, weight: x.w, applied: x.ok, contribution: x.ok ? x.w : 0,
