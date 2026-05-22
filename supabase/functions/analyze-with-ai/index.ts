@@ -69,6 +69,17 @@ const OPENING_DRIVE_FLOOR         = 30;           // lower hard floor only durin
 // v13: EMA slope + body thresholds for "trend-equivalent" promotion
 const STRONG_SLOPE_PTS = 15;
 const BIG_BODY_PTS = 12;
+// v15: LIVE MOMENTUM SCALPING — dynamic gate by momentum velocity
+const MOMENTUM_GATE_EXPLOSIVE     = 20;   // velocity ≥ 75
+const MOMENTUM_GATE_CONTINUATION  = 26;   // velocity 55–74
+const MOMENTUM_GATE_NORMAL        = 30;   // velocity 35–54
+const MOMENTUM_VELOCITY_EXPLOSIVE = 75;
+const MOMENTUM_VELOCITY_CONTINUE  = 55;
+const MOMENTUM_VELOCITY_NORMAL    = 35;
+const LATE_ENTRY_STREAK_MAX       = 3;    // ≥3 expansion candles already done
+const LATE_ENTRY_STRETCH_PTS      = 28;   // distance from ema21
+const LATE_ENTRY_BODY_PTS         = 22;   // overstretched single candle
+const ENTRY_QUALITY_MIN           = 40;   // floor — block ugly entries
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
