@@ -97,6 +97,59 @@ export function EngineDebugPanel({ signal }: Props) {
         </div>
       </div>
 
+      {/* v16 Momentum Scalping telemetry */}
+      <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+        <p className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-primary">
+          <span>⚡ Momentum Scalping Engine</span>
+          <span className="text-foreground">{sessionPhase}</span>
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+          <div>
+            <div className="text-muted-foreground">Momentum Velocity</div>
+            <div className={`font-mono tabular-nums font-bold ${momentumVelocityScore >= 65 ? "text-emerald-400" : momentumVelocityScore >= 45 ? "text-amber-300" : "text-muted-foreground"}`}>
+              {momentumVelocityScore}/100
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Entry Quality</div>
+            <div className={`font-mono tabular-nums font-bold ${entryQualityScore >= 60 ? "text-emerald-400" : entryQualityScore >= 40 ? "text-amber-300" : "text-destructive"}`}>
+              {entryQualityScore}/100
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Momentum Tier</div>
+            <div className={`font-mono font-bold ${momentumTier === "EXPLOSIVE" ? "text-emerald-400" : momentumTier === "CONTINUATION" ? "text-emerald-300" : momentumTier === "CHOP" ? "text-amber-400" : "text-foreground"}`}>
+              {momentumTier}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Dynamic Gate</div>
+            <div className="font-mono tabular-nums text-foreground">{dynamicBaseGate}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Late Entry Risk</div>
+            <div className={`font-mono font-bold ${lateEntryPenalty ? "text-destructive" : "text-emerald-400"}`}>
+              {lateEntryPenalty ? "BLOCKED" : "OK"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Scalping Mode</div>
+            <div className={`font-mono font-bold ${scalpingMomentumMode ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {scalpingMomentumMode ? "FAST" : "STD"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Dist from EMA21</div>
+            <div className="font-mono tabular-nums text-foreground">{Number(rules.distFromEma21 ?? 0).toFixed(1)}pt</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">EMA Separation</div>
+            <div className="font-mono tabular-nums text-foreground">{Number(rules.emaSeparation ?? 0).toFixed(1)}pt</div>
+          </div>
+        </div>
+      </div>
+
+
       {/* Live factors */}
       <div className="rounded-md border border-border bg-surface p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
