@@ -894,7 +894,7 @@ serve(async (req) => {
     // Apply confidence gate to ANY non-WAIT action
     if (action !== "WAIT") {
       if (confidenceScore < requiredConfidence) {
-        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""})`;
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""}${momentumGate !== null ? `, mom=${momentumTier}` : ""})`;
         gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
@@ -906,12 +906,24 @@ serve(async (req) => {
         gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
+      } else if (lateEntryPenalty) {
+        // v15: anti-late-entry — block stretched/exhausted moves even if confidence passes.
+        gateRejection = `LATE-ENTRY blocked (streak=${dirStreak}, dist=${distFromEma21.toFixed(0)}pt, body=${bodyPts.toFixed(0)}pt)`;
+        gateBlockedReasons.push("late-entry: momentum overstretched");
+        reasonParts.unshift(`Gated to WAIT — chasing exhausted move (${gateRejection}).`);
+        action = "WAIT";
+      } else if (entryQualityScore < ENTRY_QUALITY_MIN) {
+        // v15: entry quality floor — refuse ugly entries (top/bottom chase, wick traps).
+        gateRejection = `Entry quality ${entryQualityScore}/100 < ${ENTRY_QUALITY_MIN}`;
+        gateBlockedReasons.push(`low entry quality ${entryQualityScore}`);
+        reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
+        action = "WAIT";
       }
     }
 
     if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
     else if (action !== "WAIT" && confidenceScore >= requiredConfidence) aiMode = "FAST_SCALP";
-    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed)) {
+    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed) && !lateEntryPenalty && entryQualityScore >= ENTRY_QUALITY_MIN) {
       action = biasDir;
       aiMode = "FAST_SCALP";
       reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${requiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
