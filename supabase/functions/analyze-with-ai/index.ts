@@ -863,7 +863,12 @@ serve(async (req) => {
     const openingDriveRelief = openingDriveActive && tradingMode !== "sniper" ? OPENING_DRIVE_EXTRA_RELIEF : 0;
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
     const effectiveFloor = openingDriveActive ? OPENING_DRIVE_FLOOR : CONF_GATE_FLOOR;
-    const requiredConfidence = Math.max(effectiveFloor, baseGate + lossBump - openSessionRelief - openingDriveRelief);
+    // v15: dynamic momentum gate — collapse base gate when real momentum is live.
+    // Sniper mode is never softened. CHOP tier keeps regime gate untouched.
+    const dynamicBaseGate = (momentumGate !== null && tradingMode !== "sniper")
+      ? Math.min(baseGate, momentumGate)
+      : baseGate;
+    const requiredConfidence = Math.max(effectiveFloor, dynamicBaseGate + lossBump - openSessionRelief - openingDriveRelief);
 
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
