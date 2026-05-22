@@ -1549,6 +1549,14 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         scalpingMomentumMode,
         distFromEma21: Number(distFromEma21.toFixed(2)),
         emaSeparation: Number(emaSep.toFixed(2)),
+        // v17: MOMENTUM OVERRIDE telemetry
+        momentumOverrideActive,
+        momentumConvictionMultiplier,
+        rawConfidenceScore,
+        trendExpansionStrength,
+        premiumVelocity,
+        momentumExhaustionRisk,
+        sidewaysOverrideActive,
       },
     });
   } catch (error) {
