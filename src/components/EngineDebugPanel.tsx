@@ -37,11 +37,6 @@ export function EngineDebugPanel({ signal }: Props) {
   const lateEntryPenalty = !!rules.lateEntryPenalty;
   const scalpingMomentumMode = !!rules.scalpingMomentumMode;
   const sessionPhase = (rules.sessionPhase ?? "—") as string;
-  const bullFull = (rules.bullScoringFull ?? []) as ScoreRow[];
-  const bearFull = (rules.bearScoringFull ?? []) as ScoreRow[];
-  const pipeline = (rules.pipeline ?? []) as PipelineRow[];
-  const rejectionReason = (rules.rejectionReason ?? null) as string | null;
-  const gateBlocked = (rules.gateInfo?.gateBlockedReasons ?? []) as string[];
 
   if (!signal) {
     return (
