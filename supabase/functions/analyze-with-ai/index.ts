@@ -1040,7 +1040,7 @@ serve(async (req) => {
       strongCandle: !!(pa.strongGreen || pa.strongRed),
       bigBody,
       bodyPts: Number(bodyPts.toFixed(2)),
-      sidewaysFilter: !!pa.sidewaysMarket,
+      sidewaysFilter: !!pa.sidewaysMarket && !sidewaysOverrideActive,
       choppyMarket: !!pa.choppyMarket,
       nearSupport: !!pa.nearSupport,
       nearResistance: !!pa.nearResistance,
