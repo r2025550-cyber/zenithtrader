@@ -1484,6 +1484,16 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         openingDriveRelief,
         openSessionRelief,
         effectiveFloor,
+        // v15: LIVE MOMENTUM SCALPING fields
+        momentumVelocityScore,
+        entryQualityScore,
+        momentumTier,
+        momentumGate,
+        dynamicBaseGate,
+        lateEntryPenalty,
+        scalpingMomentumMode,
+        distFromEma21: Number(distFromEma21.toFixed(2)),
+        emaSeparation: Number(emaSep.toFixed(2)),
       },
     });
   } catch (error) {
