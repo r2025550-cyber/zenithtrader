@@ -770,7 +770,8 @@ serve(async (req) => {
     const biasDir: "BUY" | "SELL" | null =
       bullScore > bearScore + 5 ? "BUY" :
       bearScore > bullScore + 5 ? "SELL" : null;
-    const confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
+    let confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
+    const rawConfidenceScore = confidenceScore;
     const edgeFactors = (biasDir === "SELL" ? bearScoring : bullScoring)
       .filter((x) => x.ok && x.w > 0)
       .map((x) => x.label);
