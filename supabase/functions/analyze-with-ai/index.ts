@@ -69,6 +69,17 @@ const OPENING_DRIVE_FLOOR         = 30;           // lower hard floor only durin
 // v13: EMA slope + body thresholds for "trend-equivalent" promotion
 const STRONG_SLOPE_PTS = 15;
 const BIG_BODY_PTS = 12;
+// v15: LIVE MOMENTUM SCALPING — dynamic gate by momentum velocity
+const MOMENTUM_GATE_EXPLOSIVE     = 20;   // velocity ≥ 75
+const MOMENTUM_GATE_CONTINUATION  = 26;   // velocity 55–74
+const MOMENTUM_GATE_NORMAL        = 30;   // velocity 35–54
+const MOMENTUM_VELOCITY_EXPLOSIVE = 75;
+const MOMENTUM_VELOCITY_CONTINUE  = 55;
+const MOMENTUM_VELOCITY_NORMAL    = 35;
+const LATE_ENTRY_STREAK_MAX       = 3;    // ≥3 expansion candles already done
+const LATE_ENTRY_STRETCH_PTS      = 28;   // distance from ema21
+const LATE_ENTRY_BODY_PTS         = 22;   // overstretched single candle
+const ENTRY_QUALITY_MIN           = 40;   // floor — block ugly entries
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -753,6 +764,70 @@ serve(async (req) => {
       .filter((x) => x.ok && x.w > 0)
       .map((x) => x.label);
 
+    // ============================================================
+    // v15: LIVE MOMENTUM SCALPING — velocity, entry quality, late-entry guard
+    // (additive only — does not touch execution / Upstox / VPS flow)
+    // ============================================================
+    const dirStreak = biasDir === "BUY" ? (pa.bullStreak ?? 0)
+                    : biasDir === "SELL" ? (pa.bearStreak ?? 0) : 0;
+    const dirSlopeAligned = biasDir === "BUY" ? ((pa.ema21Slope ?? 0) >= STRONG_SLOPE_PTS)
+                          : biasDir === "SELL" ? ((pa.ema21Slope ?? 0) <= -STRONG_SLOPE_PTS) : false;
+    const emaSep = (pa.ema9 !== null && pa.ema21 !== null) ? Math.abs((pa.ema9 as number) - (pa.ema21 as number)) : 0;
+    const liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
+                    : biasDir === "SELL" ? !!(pa.liveBearBreakout || pa.earlySell) : false;
+    const dirMomentum = biasDir === "BUY" ? !!pa.momentumBull
+                      : biasDir === "SELL" ? !!pa.momentumBear : false;
+    const dirBigBody = bigBody && ((biasDir === "BUY" && (pa.close ?? 0) > (pa.open ?? 0)) || (biasDir === "SELL" && (pa.close ?? 0) < (pa.open ?? 0)));
+    const dirTrap = biasDir === "BUY" ? !!pa.bullTrap : biasDir === "SELL" ? !!pa.bearTrap : false;
+
+    // momentumVelocityScore 0..100
+    let momentumVelocityScore = 0;
+    if (biasDir) {
+      momentumVelocityScore += dirSlopeAligned ? 25 : (slopeAbs >= STRONG_SLOPE_PTS * 0.6 ? 12 : 0);
+      momentumVelocityScore += dirBigBody ? 20 : (bigBody ? 8 : 0);
+      momentumVelocityScore += dirMomentum ? 20 : (dirStreak >= 2 ? 12 : 0);
+      momentumVelocityScore += liveBreak ? 20 : 0;
+      momentumVelocityScore += emaSep >= 8 ? 10 : (emaSep >= 4 ? 5 : 0);
+      momentumVelocityScore += (pa.compressionBreakout === (biasDir === "BUY" ? "BULL" : "BEAR")) ? 10 : 0;
+      momentumVelocityScore -= dirTrap ? 25 : 0;
+      momentumVelocityScore = Math.max(0, Math.min(100, momentumVelocityScore));
+    }
+
+    // late-entry detection — already too stretched / too many expansion candles done
+    const distFromEma21 = (pa.ltp !== null && pa.ema21 !== null) ? Math.abs((pa.ltp as number) - (pa.ema21 as number)) : 0;
+    const overstretched = distFromEma21 >= LATE_ENTRY_STRETCH_PTS;
+    const lateBody = bodyPts >= LATE_ENTRY_BODY_PTS;
+    const exhausted = dirStreak >= LATE_ENTRY_STREAK_MAX && (overstretched || lateBody);
+    const wickAgainst = biasDir === "BUY" ? !!pa.longUpperWick : biasDir === "SELL" ? !!pa.longLowerWick : false;
+    const lateEntryPenalty = !!biasDir && (exhausted || (overstretched && wickAgainst));
+
+    // entryQualityScore 0..100 — favors clean, not-too-late entries
+    let entryQualityScore = 50;
+    if (biasDir) {
+      entryQualityScore += dirMomentum ? 10 : 0;
+      entryQualityScore += liveBreak ? 10 : 0;
+      entryQualityScore += (distFromEma21 <= 12 ? 15 : distFromEma21 <= 20 ? 5 : -15);
+      entryQualityScore += dirSlopeAligned ? 10 : 0;
+      entryQualityScore -= wickAgainst ? 15 : 0;
+      entryQualityScore -= dirTrap ? 25 : 0;
+      entryQualityScore -= lateBody ? 10 : 0;
+      entryQualityScore -= overstretched ? 15 : 0;
+      entryQualityScore = Math.max(0, Math.min(100, entryQualityScore));
+    }
+
+    // scalping momentum tier — drives dynamic gate
+    const momentumTier: "EXPLOSIVE" | "CONTINUATION" | "NORMAL" | "CHOP" =
+      momentumVelocityScore >= MOMENTUM_VELOCITY_EXPLOSIVE ? "EXPLOSIVE"
+      : momentumVelocityScore >= MOMENTUM_VELOCITY_CONTINUE ? "CONTINUATION"
+      : momentumVelocityScore >= MOMENTUM_VELOCITY_NORMAL ? "NORMAL"
+      : "CHOP";
+    const momentumGate: number | null =
+      momentumTier === "EXPLOSIVE" ? MOMENTUM_GATE_EXPLOSIVE
+      : momentumTier === "CONTINUATION" ? MOMENTUM_GATE_CONTINUATION
+      : momentumTier === "NORMAL" ? MOMENTUM_GATE_NORMAL
+      : null;
+    const scalpingMomentumMode = momentumTier === "EXPLOSIVE" || momentumTier === "CONTINUATION";
+
     // v13: full scoring breakdown for live debug panel (real backend values)
     const scoringBreakdown = (biasDir === "SELL" ? bearScoring : bullScoring).map((x) => ({
       label: x.label, weight: x.w, applied: x.ok, contribution: x.ok ? x.w : 0,
@@ -788,7 +863,12 @@ serve(async (req) => {
     const openingDriveRelief = openingDriveActive && tradingMode !== "sniper" ? OPENING_DRIVE_EXTRA_RELIEF : 0;
     const lossBump = (lastTradeWasLoss || consecutiveLosses >= 1) ? POST_LOSS_CONFIDENCE_BUMP : 0;
     const effectiveFloor = openingDriveActive ? OPENING_DRIVE_FLOOR : CONF_GATE_FLOOR;
-    const requiredConfidence = Math.max(effectiveFloor, baseGate + lossBump - openSessionRelief - openingDriveRelief);
+    // v15: dynamic momentum gate — collapse base gate when real momentum is live.
+    // Sniper mode is never softened. CHOP tier keeps regime gate untouched.
+    const dynamicBaseGate = (momentumGate !== null && tradingMode !== "sniper")
+      ? Math.min(baseGate, momentumGate)
+      : baseGate;
+    const requiredConfidence = Math.max(effectiveFloor, dynamicBaseGate + lossBump - openSessionRelief - openingDriveRelief);
 
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
@@ -814,7 +894,7 @@ serve(async (req) => {
     // Apply confidence gate to ANY non-WAIT action
     if (action !== "WAIT") {
       if (confidenceScore < requiredConfidence) {
-        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""})`;
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""}${momentumGate !== null ? `, mom=${momentumTier}` : ""})`;
         gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
@@ -826,12 +906,24 @@ serve(async (req) => {
         gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
+      } else if (lateEntryPenalty) {
+        // v15: anti-late-entry — block stretched/exhausted moves even if confidence passes.
+        gateRejection = `LATE-ENTRY blocked (streak=${dirStreak}, dist=${distFromEma21.toFixed(0)}pt, body=${bodyPts.toFixed(0)}pt)`;
+        gateBlockedReasons.push("late-entry: momentum overstretched");
+        reasonParts.unshift(`Gated to WAIT — chasing exhausted move (${gateRejection}).`);
+        action = "WAIT";
+      } else if (entryQualityScore < ENTRY_QUALITY_MIN) {
+        // v15: entry quality floor — refuse ugly entries (top/bottom chase, wick traps).
+        gateRejection = `Entry quality ${entryQualityScore}/100 < ${ENTRY_QUALITY_MIN}`;
+        gateBlockedReasons.push(`low entry quality ${entryQualityScore}`);
+        reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
+        action = "WAIT";
       }
     }
 
     if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
     else if (action !== "WAIT" && confidenceScore >= requiredConfidence) aiMode = "FAST_SCALP";
-    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed)) {
+    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed) && !lateEntryPenalty && entryQualityScore >= ENTRY_QUALITY_MIN) {
       action = biasDir;
       aiMode = "FAST_SCALP";
       reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${requiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
@@ -914,14 +1006,19 @@ serve(async (req) => {
       { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
     ];
     const gateInfo = {
-      baseGate, requiredConfidence, regime, openSessionActive, openSessionRelief,
+      baseGate, dynamicBaseGate, requiredConfidence, regime, openSessionActive, openSessionRelief,
       openingDriveActive, openingDriveRelief, preMarketActive, sessionPhase, effectiveFloor,
       lossBump,
       passedGate: confidenceScore >= requiredConfidence,
       gateBlockedReasons,
+      // v15
+      momentumVelocityScore, entryQualityScore, momentumTier, momentumGate,
+      lateEntryPenalty, scalpingMomentumMode,
+      distFromEma21: Number(distFromEma21.toFixed(2)),
+      emaSeparation: Number(emaSep.toFixed(2)),
     };
 
-    console.log("[PRO+++ ENGINE v14]", { confidenceScore, aiMode, regime, biasDir, bullScore, bearScore, edgeFactors, rejectionReason, requiredConfidence, slopeAbs: slopeAbs.toFixed(1), slopeTrending, bigBody, bodyPts: bodyPts.toFixed(1), sessionPhase, openSessionActive, openSessionRelief, openingDriveActive, openingDriveRelief, preMarketActive, rejectedByGate: !!gateRejection, tradeGapRemaining: Math.max(0, MIN_TRADE_GAP_MIN - minutesSinceLastTrade), dailyTradeCount: tradesToday });
+    console.log("[PRO+++ ENGINE v15]", { confidenceScore, aiMode, regime, biasDir, momentumTier, momentumVelocityScore, entryQualityScore, lateEntryPenalty, requiredConfidence, dynamicBaseGate, baseGate, sessionPhase, rejectedByGate: !!gateRejection, dailyTradeCount: tradesToday });
 
     // SL/Target on spot points
     const entry = pa.ltp ?? 0;
@@ -1387,6 +1484,16 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         openingDriveRelief,
         openSessionRelief,
         effectiveFloor,
+        // v15: LIVE MOMENTUM SCALPING fields
+        momentumVelocityScore,
+        entryQualityScore,
+        momentumTier,
+        momentumGate,
+        dynamicBaseGate,
+        lateEntryPenalty,
+        scalpingMomentumMode,
+        distFromEma21: Number(distFromEma21.toFixed(2)),
+        emaSeparation: Number(emaSep.toFixed(2)),
       },
     });
   } catch (error) {
