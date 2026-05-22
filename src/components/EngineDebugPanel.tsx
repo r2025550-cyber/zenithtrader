@@ -37,6 +37,15 @@ export function EngineDebugPanel({ signal }: Props) {
   const lateEntryPenalty = !!rules.lateEntryPenalty;
   const scalpingMomentumMode = !!rules.scalpingMomentumMode;
   const sessionPhase = (rules.sessionPhase ?? "—") as string;
+  // v17: momentum override telemetry
+  const momentumOverrideActive = !!rules.momentumOverrideActive;
+  const momentumConvictionMultiplier = Number(rules.momentumConvictionMultiplier ?? 1);
+  const rawConfidenceScore = Number(rules.rawConfidenceScore ?? confidenceScore);
+  const trendExpansionStrength = Number(rules.trendExpansionStrength ?? 0);
+  const premiumVelocity = Number(rules.premiumVelocity ?? 0);
+  const momentumExhaustionRisk = !!rules.momentumExhaustionRisk;
+  const sidewaysOverrideActive = !!rules.sidewaysOverrideActive;
+  const baseGate = Number(rules.baseGate ?? 0);
 
   if (!signal) {
     return (
