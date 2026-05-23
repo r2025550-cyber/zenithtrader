@@ -1598,6 +1598,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         // v18: conviction-floor telemetry
         momentumConvictionFloor,
         momentumSoftBoost,
+      },
     });
   } catch (error) {
     const reason =
