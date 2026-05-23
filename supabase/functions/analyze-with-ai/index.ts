@@ -91,6 +91,12 @@ const MOM_OVR_GATE_NORMAL_LO      = 22;
 const MOM_OVR_GATE_NORMAL_HI      = 26;
 const MOM_OVR_MULT_EXPLOSIVE      = 1.6;
 const MOM_OVR_MULT_EXTREME        = 1.9;
+// v18: MOMENTUM CONVICTION FLOOR — kill the 22–32 freeze trap (additive only)
+const MOM_FLOOR_OVERRIDE          = 50;   // when momentumOverrideActive
+const MOM_FLOOR_OVERRIDE_EXTREME  = 55;   // when extreme velocity + override
+const MOM_FLOOR_EXPLOSIVE_TIER    = 45;   // EXPLOSIVE tier without full override
+const MOM_FLOOR_CONTINUATION_TIER = 40;   // CONTINUATION tier without override
+const MOM_SOFT_BOOST_PTS          = 8;    // additive boost when momentum present, override not
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -866,6 +872,38 @@ serve(async (req) => {
     if (momentumOverrideActive && momentumConvictionMultiplier > 1) {
       confidenceScore = Math.max(0, Math.min(100, Math.round(confidenceScore * momentumConvictionMultiplier)));
     }
+    // ============================================================
+    // v18: MOMENTUM CONVICTION FLOOR + SOFT BOOST (additive, momentum-first)
+    // Applies AFTER raw score + penalties + multiplier, so structure penalties
+    // can no longer trap conviction at 22–32 during real momentum expansion.
+    // Safety: requires biasDir + no exhaustion/trap/wick-against.
+    // ============================================================
+    let momentumSoftBoost = 0;
+    let momentumConvictionFloor = 0;
+    const momentumSafe = !!biasDir && !momentumExhaustionRisk && !lateEntryPenalty && !dirTrap && !wickAgainst;
+    if (momentumSafe && tradingMode !== "sniper") {
+      // Soft boost: rewards momentum factors AFTER structure penalties applied.
+      if (!momentumOverrideActive) {
+        if (momentumTier === "EXPLOSIVE") momentumSoftBoost = MOM_SOFT_BOOST_PTS + 4;
+        else if (momentumTier === "CONTINUATION") momentumSoftBoost = MOM_SOFT_BOOST_PTS;
+        else if (momentumTier === "NORMAL" && dirSlopeAligned && (liveBreak || dirMomentum)) momentumSoftBoost = 5;
+      }
+      if (momentumSoftBoost > 0) {
+        confidenceScore = Math.max(0, Math.min(100, confidenceScore + momentumSoftBoost));
+      }
+      // Conviction floor — kills the 22–32 trap during real momentum.
+      if (momentumOverrideActive) {
+        momentumConvictionFloor = momentumVelocityScore >= MOM_OVR_VELOCITY_EXTREME
+          ? MOM_FLOOR_OVERRIDE_EXTREME : MOM_FLOOR_OVERRIDE;
+      } else if (momentumTier === "EXPLOSIVE" && dirSlopeAligned && (liveBreak || dirMomentum || dirBigBody)) {
+        momentumConvictionFloor = MOM_FLOOR_EXPLOSIVE_TIER;
+      } else if (momentumTier === "CONTINUATION" && dirSlopeAligned && emaSep >= 4 && (liveBreak || dirMomentum)) {
+        momentumConvictionFloor = MOM_FLOOR_CONTINUATION_TIER;
+      }
+      if (momentumConvictionFloor > 0 && confidenceScore < momentumConvictionFloor) {
+        confidenceScore = momentumConvictionFloor;
+      }
+    }
     // Sideways override — never treat as sideways during real momentum expansion
     const sidewaysOverrideActive = !!pa.sidewaysMarket && (
       momentumOverrideActive
@@ -1557,6 +1595,9 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         premiumVelocity,
         momentumExhaustionRisk,
         sidewaysOverrideActive,
+        // v18: conviction-floor telemetry
+        momentumConvictionFloor,
+        momentumSoftBoost,
       },
     });
   } catch (error) {
