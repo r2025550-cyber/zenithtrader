@@ -872,6 +872,38 @@ serve(async (req) => {
     if (momentumOverrideActive && momentumConvictionMultiplier > 1) {
       confidenceScore = Math.max(0, Math.min(100, Math.round(confidenceScore * momentumConvictionMultiplier)));
     }
+    // ============================================================
+    // v18: MOMENTUM CONVICTION FLOOR + SOFT BOOST (additive, momentum-first)
+    // Applies AFTER raw score + penalties + multiplier, so structure penalties
+    // can no longer trap conviction at 22–32 during real momentum expansion.
+    // Safety: requires biasDir + no exhaustion/trap/wick-against.
+    // ============================================================
+    let momentumSoftBoost = 0;
+    let momentumConvictionFloor = 0;
+    const momentumSafe = !!biasDir && !momentumExhaustionRisk && !lateEntryPenalty && !dirTrap && !wickAgainst;
+    if (momentumSafe && tradingMode !== "sniper") {
+      // Soft boost: rewards momentum factors AFTER structure penalties applied.
+      if (!momentumOverrideActive) {
+        if (momentumTier === "EXPLOSIVE") momentumSoftBoost = MOM_SOFT_BOOST_PTS + 4;
+        else if (momentumTier === "CONTINUATION") momentumSoftBoost = MOM_SOFT_BOOST_PTS;
+        else if (momentumTier === "NORMAL" && dirSlopeAligned && (liveBreak || dirMomentum)) momentumSoftBoost = 5;
+      }
+      if (momentumSoftBoost > 0) {
+        confidenceScore = Math.max(0, Math.min(100, confidenceScore + momentumSoftBoost));
+      }
+      // Conviction floor — kills the 22–32 trap during real momentum.
+      if (momentumOverrideActive) {
+        momentumConvictionFloor = momentumVelocityScore >= MOM_OVR_VELOCITY_EXTREME
+          ? MOM_FLOOR_OVERRIDE_EXTREME : MOM_FLOOR_OVERRIDE;
+      } else if (momentumTier === "EXPLOSIVE" && dirSlopeAligned && (liveBreak || dirMomentum || dirBigBody)) {
+        momentumConvictionFloor = MOM_FLOOR_EXPLOSIVE_TIER;
+      } else if (momentumTier === "CONTINUATION" && dirSlopeAligned && emaSep >= 4 && (liveBreak || dirMomentum)) {
+        momentumConvictionFloor = MOM_FLOOR_CONTINUATION_TIER;
+      }
+      if (momentumConvictionFloor > 0 && confidenceScore < momentumConvictionFloor) {
+        confidenceScore = momentumConvictionFloor;
+      }
+    }
     // Sideways override — never treat as sideways during real momentum expansion
     const sidewaysOverrideActive = !!pa.sidewaysMarket && (
       momentumOverrideActive
