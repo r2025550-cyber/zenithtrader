@@ -91,6 +91,12 @@ const MOM_OVR_GATE_NORMAL_LO      = 22;
 const MOM_OVR_GATE_NORMAL_HI      = 26;
 const MOM_OVR_MULT_EXPLOSIVE      = 1.6;
 const MOM_OVR_MULT_EXTREME        = 1.9;
+// v18: MOMENTUM CONVICTION FLOOR — kill the 22–32 freeze trap (additive only)
+const MOM_FLOOR_OVERRIDE          = 50;   // when momentumOverrideActive
+const MOM_FLOOR_OVERRIDE_EXTREME  = 55;   // when extreme velocity + override
+const MOM_FLOOR_EXPLOSIVE_TIER    = 45;   // EXPLOSIVE tier without full override
+const MOM_FLOOR_CONTINUATION_TIER = 40;   // CONTINUATION tier without override
+const MOM_SOFT_BOOST_PTS          = 8;    // additive boost when momentum present, override not
 
 function num(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
