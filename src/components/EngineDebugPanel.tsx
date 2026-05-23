@@ -46,6 +46,9 @@ export function EngineDebugPanel({ signal }: Props) {
   const momentumExhaustionRisk = !!rules.momentumExhaustionRisk;
   const sidewaysOverrideActive = !!rules.sidewaysOverrideActive;
   const baseGate = Number(rules.baseGate ?? 0);
+  // v18: momentum conviction floor telemetry
+  const momentumConvictionFloor = Number(rules.momentumConvictionFloor ?? 0);
+  const momentumSoftBoost = Number(rules.momentumSoftBoost ?? 0);
 
   if (!signal) {
     return (
