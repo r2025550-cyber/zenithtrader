@@ -218,6 +218,18 @@ export function EngineDebugPanel({ signal }: Props) {
               {momentumOverrideActive ? "EXPLOSIVE" : scalpingMomentumMode ? "ACTIVE" : "DORMANT"}
             </div>
           </div>
+          <div>
+            <div className="text-muted-foreground">Conviction Floor</div>
+            <div className={`font-mono tabular-nums font-bold ${momentumConvictionFloor >= 50 ? "text-emerald-400" : momentumConvictionFloor > 0 ? "text-emerald-300" : "text-muted-foreground"}`}>
+              {momentumConvictionFloor > 0 ? `≥${momentumConvictionFloor}` : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Soft Boost</div>
+            <div className={`font-mono tabular-nums font-bold ${momentumSoftBoost > 0 ? "text-emerald-300" : "text-muted-foreground"}`}>
+              {momentumSoftBoost > 0 ? `+${momentumSoftBoost}` : "—"}
+            </div>
+          </div>
         </div>
       </div>
 
