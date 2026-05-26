@@ -911,9 +911,13 @@ serve(async (req) => {
     // v17: MOMENTUM OVERRIDE LAYER — momentum > structure (additive)
     // Activates ONLY during real explosive expansion.
     // ============================================================
-    const trendExpansionStrength = Math.max(0, Math.min(100,
+    // v19: FORCE TREND PARTICIPATION — strong slope + big body floors expansion at 60.
+    const forceTrendParticipation = !!biasDir && slopeAbs >= 20 && bodyPts >= 10;
+    let trendExpansionStrength = Math.max(0, Math.min(100,
       Math.round(emaSep * 4 + dirStreak * 10 + (dirSlopeAligned ? 20 : 0) + (dirBigBody ? 15 : 0))
     ));
+    if (forceTrendParticipation && trendExpansionStrength < 60) trendExpansionStrength = 60;
+    const momentumState: "ACTIVE" | "DORMANT" = forceTrendParticipation ? "ACTIVE" : "DORMANT";
     // Premium velocity proxy: spot expansion velocity (body * streak) — VPS/Upstox untouched.
     const premiumVelocity = Number((bodyPts * Math.max(1, dirStreak) * (liveBreak ? 1.2 : 1)).toFixed(2));
     const momentumExhaustionRisk = !!biasDir && (exhausted || (dirStreak >= 4 && wickAgainst) || (overstretched && lateBody));
