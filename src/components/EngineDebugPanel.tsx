@@ -271,6 +271,66 @@ export function EngineDebugPanel({ signal }: Props) {
         </div>
       </div>
 
+      {/* v19 Directional Alignment + Momentum Activation */}
+      <div className={`rounded-md border p-3 ${forceTrendParticipation ? "border-emerald-500/50 bg-emerald-500/10" : "border-border bg-surface"}`}>
+        <p className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide">
+          <span className={forceTrendParticipation ? "text-emerald-300" : "text-muted-foreground"}>
+            🎯 Directional Alignment v19
+          </span>
+          <Badge variant={momentumState === "ACTIVE" ? "default" : "secondary"} className="text-[10px]">
+            {momentumState}
+          </Badge>
+        </p>
+        <div className="grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+          <div>
+            <div className="text-muted-foreground">Directional Expansion</div>
+            <div className={`font-mono tabular-nums font-bold ${directionalExpansion >= 60 ? "text-emerald-400" : directionalExpansion >= 35 ? "text-amber-300" : "text-muted-foreground"}`}>
+              {directionalExpansion.toFixed(1)}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Directional Velocity</div>
+            <div className="font-mono tabular-nums text-foreground">{directionalVelocity}/100</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Price Range</div>
+            <div className="font-mono tabular-nums text-foreground">{priceChangePoints.toFixed(1)}pt</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Force Trend</div>
+            <div className={`font-mono font-bold ${forceTrendParticipation ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {forceTrendParticipation ? "FORCED" : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Bull Disabled</div>
+            <div className={`font-mono font-bold ${bullScoringDisabled ? "text-destructive" : "text-emerald-400"}`}>
+              {bullScoringDisabled ? "YES" : "OK"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Bear Disabled</div>
+            <div className={`font-mono font-bold ${bearScoringDisabled ? "text-destructive" : "text-emerald-400"}`}>
+              {bearScoringDisabled ? "YES" : "OK"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Breakout Bypass</div>
+            <div className={`font-mono font-bold ${breakoutBypassActive ? "text-emerald-400" : "text-muted-foreground"}`}>
+              {breakoutBypassActive ? "ACTIVE" : "—"}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Conf Floor 26</div>
+            <div className={`font-mono font-bold ${v19ConfidenceFloorActive ? "text-emerald-300" : "text-muted-foreground"}`}>
+              {v19ConfidenceFloorActive ? "ENFORCED" : "—"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+
 
       <div className="rounded-md border border-border bg-surface p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
