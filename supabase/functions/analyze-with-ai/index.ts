@@ -832,8 +832,12 @@ serve(async (req) => {
     const dirSlopeAligned = biasDir === "BUY" ? ((pa.ema21Slope ?? 0) >= STRONG_SLOPE_PTS)
                           : biasDir === "SELL" ? ((pa.ema21Slope ?? 0) <= -STRONG_SLOPE_PTS) : false;
     const emaSep = (pa.ema9 !== null && pa.ema21 !== null) ? Math.abs((pa.ema9 as number) - (pa.ema21 as number)) : 0;
-    const liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
+    let liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
                     : biasDir === "SELL" ? !!(pa.liveBearBreakout || pa.earlySell) : false;
+    // v19: BREAKOUT BYPASS — auto-activate breakout participation during
+    // clear directional expansion when retest/strict-confirmation is missing.
+    const breakoutBypassActive = !!biasDir && slopeAbs >= 18 && bodyPts >= 8;
+    if (breakoutBypassActive) liveBreak = true;
     const dirMomentum = biasDir === "BUY" ? !!pa.momentumBull
                       : biasDir === "SELL" ? !!pa.momentumBear : false;
     const dirBigBody = bigBody && ((biasDir === "BUY" && (pa.close ?? 0) > (pa.open ?? 0)) || (biasDir === "SELL" && (pa.close ?? 0) < (pa.open ?? 0)));
