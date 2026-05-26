@@ -49,6 +49,10 @@ export function EngineDebugPanel({ signal }: Props) {
   // v18: momentum conviction floor telemetry
   const momentumConvictionFloor = Number(rules.momentumConvictionFloor ?? 0);
   const momentumSoftBoost = Number(rules.momentumSoftBoost ?? 0);
+  // v18: micro-momentum adaptive gate telemetry
+  const adaptiveRequiredConfidence = Number(rules.adaptiveRequiredConfidence ?? requiredConfidence);
+  const sidewaysFilterActive = !!rules.sidewaysFilterActive;
+  const momentumVelocity = Number(rules.momentumVelocity ?? momentumVelocityScore);
 
   if (!signal) {
     return (
