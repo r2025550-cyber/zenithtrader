@@ -1736,6 +1736,16 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         // v18: conviction-floor telemetry
         momentumConvictionFloor,
         momentumSoftBoost,
+        // v19: directional alignment + momentum activation telemetry
+        directionalExpansion: Number(directionalExpansion.toFixed(2)),
+        directionalVelocity,
+        priceChangePoints: Number(priceChangePoints.toFixed(2)),
+        bullScoringDisabled,
+        bearScoringDisabled,
+        breakoutBypassActive,
+        forceTrendParticipation,
+        momentumState,
+        v19ConfidenceFloorActive,
       },
     });
   } catch (error) {
