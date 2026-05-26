@@ -1151,7 +1151,9 @@ serve(async (req) => {
       baseGate, dynamicBaseGate, requiredConfidence, adaptiveRequiredConfidence, regime, openSessionActive, openSessionRelief,
       openingDriveActive, openingDriveRelief, preMarketActive, sessionPhase, effectiveFloor,
       lossBump,
-      passedGate: confidenceScore >= requiredConfidence,
+      passedGate: confidenceScore >= adaptiveRequiredConfidence,
+      sidewaysHardBlock, sidewaysScalpRelief,
+      momentumVelocity: momentumVelocityScore,
       gateBlockedReasons,
       // v15
       momentumVelocityScore, entryQualityScore, momentumTier, momentumGate,
