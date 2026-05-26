@@ -71,16 +71,48 @@ serve(async (req) => {
       trigger_price: trigger,
     };
 
-    const { result, attempts } = await modifyWithRetry(headers, body);
-    return json({
-      success: true,
-      result,
-      triggerPrice: trigger,
-      limitPrice: limit,
-      orderType,
-      retry: { attempts },
-      execution: { trailingActive: true, slActive: true },
-    });
+    // v18: Mandatory state cleanup — if quantity is 0, position is already flat.
+    // Don't call modify (will 400). Return a flag so frontend clears activeTrade/trailing/signal-lock.
+    if (parsed.data.quantity <= 0) {
+      return json({
+        success: true,
+        skipped: true,
+        positionFlat: true,
+        clearState: true,
+        triggerPrice: trigger,
+        limitPrice: limit,
+        orderType,
+        execution: { trailingActive: false, slActive: false, positionClosed: true },
+      });
+    }
+
+    try {
+      const { result, attempts } = await modifyWithRetry(headers, body);
+      return json({
+        success: true,
+        result,
+        triggerPrice: trigger,
+        limitPrice: limit,
+        orderType,
+        retry: { attempts },
+        execution: { trailingActive: true, slActive: true },
+      });
+    } catch (innerErr) {
+      // v18: detect settled/cancelled/complete order → tell frontend to release state
+      const msg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+      const settled = /complete|cancelled|canceled|rejected|not\s*found|invalid\s*order|already/i.test(msg);
+      if (settled) {
+        return json({
+          success: true,
+          skipped: true,
+          positionFlat: true,
+          clearState: true,
+          reason: msg,
+          execution: { trailingActive: false, slActive: false, positionClosed: true },
+        });
+      }
+      throw innerErr;
+    }
   } catch (error) {
     return json({
       error: error instanceof Error ? error.message : "Stop loss modification failed",
