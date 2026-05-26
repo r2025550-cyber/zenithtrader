@@ -7,7 +7,7 @@ const NIFTY_LOT_SIZE = 65;
 
 // ===== v6 EXECUTION LAYER CONSTANTS =====
 const ENTRY_SLIPPAGE_PCT = 1.5;          // cancel if entry > quoted LTP by 1.5%
-const SL_LMT_BUFFER_PCT = 0.5;           // limit = trigger * (1 - 0.5%) for SELL SL
+const SL_LMT_BUFFER_PCT = 4.0;           // v18: widened to 4% — guarantees SL-L queue match on sharp option premium drops (SL-M blocked on options)
 const MAX_ORDER_RETRIES = 2;             // retry failed orders up to 2 times
 const MAX_BID_ASK_SPREAD_PCT = 2.0;      // skip if spread > 2% of LTP
 const MIN_OPTION_VOLUME = 5000;          // skip if day volume < 5000
