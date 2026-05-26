@@ -770,6 +770,47 @@ serve(async (req) => {
       { w: -10, ok: !!pa.longLowerWick, label: "Lower wick rejection" },
       { w: -15, ok: !!pa.bearTrap, label: "Bear-trap risk" },
     ];
+
+    // ============================================================
+    // v19: STRICT DIRECTIONAL ALIGNMENT FILTER — prevent opposite-side
+    // aggregation when EMA slope is decisively against. Applied BEFORE
+    // score aggregation. Sniper mode unaffected (no momentum overrides).
+    // ============================================================
+    const _slope = pa.ema21Slope ?? 0;
+    const bullScoringDisabled = _slope <= -10;
+    const bearScoringDisabled = _slope >= 10;
+    if (bullScoringDisabled) {
+      // disable bull breakout / continuation / momentum boosts
+      for (const r of bullScoring) {
+        if (r.w > 0 && (
+          r.label.startsWith("Breakout") ||
+          r.label.startsWith("Big bull") ||
+          r.label.startsWith("Momentum") ||
+          r.label.startsWith("Live bull") ||
+          r.label.startsWith("Compression breakout") ||
+          r.label.startsWith("Bullish streak") ||
+          r.label.startsWith("Bull retest")
+        )) {
+          r.ok = false;
+        }
+      }
+    }
+    if (bearScoringDisabled) {
+      for (const r of bearScoring) {
+        if (r.w > 0 && (
+          r.label.startsWith("Breakdown") ||
+          r.label.startsWith("Big bear") ||
+          r.label.startsWith("Momentum") ||
+          r.label.startsWith("Live bear") ||
+          r.label.startsWith("Compression breakdown") ||
+          r.label.startsWith("Bearish streak") ||
+          r.label.startsWith("Bear retest")
+        )) {
+          r.ok = false;
+        }
+      }
+    }
+
     const sumScore = (arr: typeof bullScoring) => arr.reduce((s, x) => s + (x.ok ? x.w : 0), 0);
     const bullScore = Math.max(0, Math.min(100, sumScore(bullScoring)));
     const bearScore = Math.max(0, Math.min(100, sumScore(bearScoring)));
