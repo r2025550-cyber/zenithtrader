@@ -1445,6 +1445,7 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         mode: aiMode,
         confidenceScore,
         requiredConfidence,
+        adaptiveRequiredConfidence,
         bullScore,
         bearScore,
         edgeFactors,
