@@ -1634,6 +1634,11 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         effectiveFloor,
         // v15: LIVE MOMENTUM SCALPING fields
         momentumVelocityScore,
+        momentumVelocity: momentumVelocityScore,
+        adaptiveRequiredConfidence,
+        sidewaysFilterActive: sidewaysHardBlock && !sidewaysOverrideActive,
+        sidewaysHardBlock,
+        sidewaysScalpRelief,
         entryQualityScore,
         momentumTier,
         momentumGate,
