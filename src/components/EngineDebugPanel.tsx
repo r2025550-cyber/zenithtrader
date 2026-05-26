@@ -111,6 +111,30 @@ export function EngineDebugPanel({ signal }: Props) {
           <div><span className="text-muted-foreground">Regime Gate:</span> <span className="font-mono tabular-nums text-foreground">{requiredConfidence} ({regime})</span></div>
           <div><span className="text-muted-foreground">Passed:</span> <span className={`font-mono font-bold ${passedGate ? "text-emerald-400" : "text-amber-400"}`}>{passedGate ? "YES" : "NO"}</span></div>
         </div>
+        {/* v18 Micro-Momentum Adaptive Gate */}
+        <div className="mt-2 grid grid-cols-2 gap-2 border-t border-border/50 pt-2 text-[11px] sm:grid-cols-3">
+          <div>
+            <span className="text-muted-foreground">Adaptive Gate:</span>{" "}
+            <span className={`font-mono tabular-nums font-bold ${adaptiveRequiredConfidence < requiredConfidence ? "text-emerald-300" : "text-foreground"}`}>
+              {adaptiveRequiredConfidence}
+              {adaptiveRequiredConfidence !== requiredConfidence && (
+                <span className="ml-1 text-muted-foreground">(req {requiredConfidence})</span>
+              )}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Sideways Filter:</span>{" "}
+            <span className={`font-mono font-bold ${sidewaysFilterActive ? "text-amber-300" : "text-emerald-400"}`}>
+              {sidewaysFilterActive ? "ACTIVE" : "OFF"}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Momentum Velocity:</span>{" "}
+            <span className={`font-mono tabular-nums font-bold ${momentumVelocity >= 55 ? "text-emerald-400" : momentumVelocity >= 35 ? "text-amber-300" : "text-muted-foreground"}`}>
+              {momentumVelocity}/100
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* v16 Momentum Scalping telemetry */}
