@@ -1014,29 +1014,30 @@ serve(async (req) => {
       action = "WAIT";
     }
 
-    // Apply confidence gate to ANY non-WAIT action
+    // Apply confidence gate to ANY non-WAIT action (v18: adaptive gate)
     if (action !== "WAIT") {
-      if (confidenceScore < requiredConfidence) {
-        gateRejection = `Conviction ${confidenceScore}/100 < gate ${requiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""}${momentumGate !== null ? `, mom=${momentumTier}` : ""})`;
-        gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${requiredConfidence}`);
+      if (confidenceScore < adaptiveRequiredConfidence) {
+        gateRejection = `Conviction ${confidenceScore}/100 < gate ${adaptiveRequiredConfidence} (regime=${regime}${lossBump ? ", post-loss" : ""}${openingDriveActive ? ", opening-drive" : ""}${momentumGate !== null ? `, mom=${momentumTier}` : ""})`;
+        gateBlockedReasons.push(`confidence ${confidenceScore} < gate ${adaptiveRequiredConfidence}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
       } else if (regime === "CHOPPY" && !choppyConfirmed && !openingDriveActive) {
-        // v14: during 9:15–9:30 opening drive, skip the CHOPPY price-action
-        // confirmation requirement — first 15 min are inherently choppy but
-        // carry the day's directional intent.
         gateRejection = `CHOPPY regime requires at least one price-action confirmation`;
         gateBlockedReasons.push("CHOPPY: no price-action confirmation");
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
         action = "WAIT";
+      } else if (sidewaysHardBlock && !sidewaysOverrideActive) {
+        // v18: only block when truly flat (slope<5) AND overlapping candles
+        gateRejection = `Sideways hard-block (slope=${emaSlopeAbs.toFixed(1)} < 5, overlap=true)`;
+        gateBlockedReasons.push("sideways: flat slope + candle overlap");
+        reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
+        action = "WAIT";
       } else if (lateEntryPenalty) {
-        // v15: anti-late-entry — block stretched/exhausted moves even if confidence passes.
         gateRejection = `LATE-ENTRY blocked (streak=${dirStreak}, dist=${distFromEma21.toFixed(0)}pt, body=${bodyPts.toFixed(0)}pt)`;
         gateBlockedReasons.push("late-entry: momentum overstretched");
         reasonParts.unshift(`Gated to WAIT — chasing exhausted move (${gateRejection}).`);
         action = "WAIT";
       } else if (entryQualityScore < ENTRY_QUALITY_MIN) {
-        // v15: entry quality floor — refuse ugly entries (top/bottom chase, wick traps).
         gateRejection = `Entry quality ${entryQualityScore}/100 < ${ENTRY_QUALITY_MIN}`;
         gateBlockedReasons.push(`low entry quality ${entryQualityScore}`);
         reasonParts.unshift(`Gated to WAIT — ${gateRejection}.`);
@@ -1045,12 +1046,28 @@ serve(async (req) => {
     }
 
     if (action !== "WAIT" && confidenceScore >= 75) aiMode = "HIGH_CONVICTION";
-    else if (action !== "WAIT" && confidenceScore >= requiredConfidence) aiMode = "FAST_SCALP";
-    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= requiredConfidence && (regime !== "CHOPPY" || choppyConfirmed) && !lateEntryPenalty && entryQualityScore >= ENTRY_QUALITY_MIN) {
+    else if (action !== "WAIT" && confidenceScore >= adaptiveRequiredConfidence) aiMode = "FAST_SCALP";
+    else if (action === "WAIT" && !hardBlocked && biasDir && confidenceScore >= adaptiveRequiredConfidence && (regime !== "CHOPPY" || choppyConfirmed) && !lateEntryPenalty && entryQualityScore >= ENTRY_QUALITY_MIN && !sidewaysHardBlock) {
       action = biasDir;
       aiMode = "FAST_SCALP";
-      reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${requiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
+      reasonParts.unshift(`FAST SCALP (${confidenceScore}/100, gate ${adaptiveRequiredConfidence}): ${edgeFactors.slice(0, 3).join(", ") || "weighted bias"}.`);
     }
+
+    // v18 FAST-TRACK CONTINUATION INGRESS — bypass fresh breakout requirement
+    // when EMA-aligned + decent momentum + body, so we can ride immediate
+    // 15–20pt bursts without waiting for a full breakout structure.
+    if (action === "WAIT" && !hardBlocked && biasDir && tradingMode !== "sniper"
+        && !lateEntryPenalty && !momentumExhaustionRisk && !sidewaysHardBlock
+        && entryQualityScore >= 40
+        && ((biasDir === "BUY" && pa.emaBullish) || (biasDir === "SELL" && pa.emaBearish))
+        && momentumVelocityScore >= 35
+        && bodyPts >= 5) {
+      action = biasDir;
+      aiMode = "FAST_SCALP";
+      gateRejection = null;
+      reasonParts.unshift(`FAST-TRACK CONTINUATION (mv=${momentumVelocityScore}, body=${bodyPts.toFixed(1)}, EMA aligned) — 15–20pt micro-scalp.`);
+    }
+
 
 
     // v9: 6th-trade override — allow exactly one extra trade if HIGH_CONVICTION + TRENDING + last win
