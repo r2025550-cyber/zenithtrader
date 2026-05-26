@@ -970,7 +970,7 @@ serve(async (req) => {
     let adaptiveRequiredConfidence = requiredConfidence;
     if (tradingMode !== "sniper") {
       if (momentumVelocityScore >= 55) {
-        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 24);
+        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 26);
       } else if (emaSlopeAbs >= 10 && bodyPts >= 6) {
         adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 28);
       } else {
