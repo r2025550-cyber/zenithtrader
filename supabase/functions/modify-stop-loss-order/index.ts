@@ -2,8 +2,8 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { z } from "https://esm.sh/zod@3.25.76";
 import { corsHeaders, getAuthenticatedClients, getSettings, json } from "../_shared/trading.ts";
 
-// v6: keep limit slightly below trigger so SL-L gets filled
-const SL_LMT_BUFFER_PCT = 0.5;
+// v18: widened to 4% to guarantee SL-L fills on sharp premium drops (brokers block SL-M on options)
+const SL_LMT_BUFFER_PCT = 4.0;
 const MAX_RETRIES = 2;
 
 const BodySchema = z.object({
