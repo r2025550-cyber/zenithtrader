@@ -53,6 +53,16 @@ export function EngineDebugPanel({ signal }: Props) {
   const adaptiveRequiredConfidence = Number(rules.adaptiveRequiredConfidence ?? requiredConfidence);
   const sidewaysFilterActive = !!rules.sidewaysFilterActive;
   const momentumVelocity = Number(rules.momentumVelocity ?? momentumVelocityScore);
+  // v19: directional alignment + momentum activation telemetry
+  const directionalExpansion = Number(rules.directionalExpansion ?? 0);
+  const directionalVelocity = Number(rules.directionalVelocity ?? 0);
+  const priceChangePoints = Number(rules.priceChangePoints ?? 0);
+  const bullScoringDisabled = !!rules.bullScoringDisabled;
+  const bearScoringDisabled = !!rules.bearScoringDisabled;
+  const breakoutBypassActive = !!rules.breakoutBypassActive;
+  const forceTrendParticipation = !!rules.forceTrendParticipation;
+  const momentumState = (rules.momentumState ?? "—") as string;
+  const v19ConfidenceFloorActive = !!rules.v19ConfidenceFloorActive;
 
   if (!signal) {
     return (
