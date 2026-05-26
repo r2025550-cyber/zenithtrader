@@ -960,6 +960,39 @@ serve(async (req) => {
     }
     const requiredConfidence = Math.max(effectiveFloor, dynamicBaseGate + lossBump - openSessionRelief - openingDriveRelief);
 
+    // ============================================================
+    // v18 MICRO-MOMENTUM ADAPTIVE GATE (15-20pt scalping participation)
+    // Lower the required confidence early on quick micro-bursts so we
+    // don't miss fast option scalps while the structural engine still
+    // demands big expansion. Sniper mode is never softened.
+    // ============================================================
+    const emaSlopeAbs = Math.abs(pa.ema21Slope ?? 0);
+    let adaptiveRequiredConfidence = requiredConfidence;
+    if (tradingMode !== "sniper") {
+      if (momentumVelocityScore >= 55) {
+        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 24);
+      } else if (emaSlopeAbs >= 10 && bodyPts >= 6) {
+        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 28);
+      } else {
+        adaptiveRequiredConfidence = Math.max(requiredConfidence, 36);
+      }
+      // Never drop under the absolute floor (CONF_GATE_FLOOR / opening-drive floor)
+      adaptiveRequiredConfidence = Math.max(effectiveFloor, adaptiveRequiredConfidence);
+    }
+
+    // v18: clamp entry quality on legitimate quick moves so a perfectly
+    // valid micro-scalp isn't murdered by an over-zealous quality penalty.
+    if (emaSlopeAbs >= 10 && momentumVelocityScore >= 35 && entryQualityScore < 45) {
+      entryQualityScore = 45;
+    }
+
+    // v18: relax sideways filter — only block when slope is truly flat (<5)
+    // AND price-action genuinely overlapping. Any minor expansion = allow scalp.
+    const candleOverlapHigh = !!pa.sidewaysMarket;
+    const sidewaysHardBlock = emaSlopeAbs < 5 && candleOverlapHigh;
+    const sidewaysScalpRelief = !sidewaysHardBlock; // expose for telemetry
+
+
     // v13: CHOPPY confirm — kept loose (one of many price-action proofs)
     const choppyConfirmed = regime !== "CHOPPY" || (biasDir === "BUY"
       ? (pa.liveBullBreakout || pa.retestBullOk || pa.earlyBuy || pa.momentumBull || pa.bullStreak >= 2 || pa.bullishEngulfing || pa.strongGreen || bigBody)
