@@ -856,6 +856,22 @@ serve(async (req) => {
       momentumVelocityScore = Math.max(0, Math.min(100, momentumVelocityScore));
     }
 
+    // ============================================================
+    // v19: DIRECTIONAL EXPANSION VELOCITY — fixes stuck-at-0 pipeline
+    // by using raw price/EMA/body expansion (not gated by booleans).
+    // We take MAX with the existing score so prior detection still wins.
+    // ============================================================
+    const priceChangePoints = (pa.high !== null && pa.low !== null) ? Math.abs((pa.high as number) - (pa.low as number)) : 0;
+    const directionalExpansion =
+      Math.abs(pa.ema21Slope ?? 0) * 0.45 +
+      bodyPts * 2.2 +
+      Math.abs(priceChangePoints) * 0.8;
+    const directionalVelocity = Math.min(100, Math.round(directionalExpansion));
+    if (!!biasDir && directionalVelocity > momentumVelocityScore) {
+      momentumVelocityScore = directionalVelocity;
+    }
+    const momentumVelocity = momentumVelocityScore;
+
     // late-entry detection — already too stretched / too many expansion candles done
     const distFromEma21 = (pa.ltp !== null && pa.ema21 !== null) ? Math.abs((pa.ltp as number) - (pa.ema21 as number)) : 0;
     const overstretched = distFromEma21 >= LATE_ENTRY_STRETCH_PTS;
