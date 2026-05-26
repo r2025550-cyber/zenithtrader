@@ -1148,7 +1148,7 @@ serve(async (req) => {
       { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
     ];
     const gateInfo = {
-      baseGate, dynamicBaseGate, requiredConfidence, regime, openSessionActive, openSessionRelief,
+      baseGate, dynamicBaseGate, requiredConfidence, adaptiveRequiredConfidence, regime, openSessionActive, openSessionRelief,
       openingDriveActive, openingDriveRelief, preMarketActive, sessionPhase, effectiveFloor,
       lossBump,
       passedGate: confidenceScore >= requiredConfidence,
