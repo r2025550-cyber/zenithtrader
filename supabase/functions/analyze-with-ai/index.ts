@@ -1041,8 +1041,21 @@ serve(async (req) => {
       } else {
         adaptiveRequiredConfidence = Math.max(requiredConfidence, 36);
       }
+      // v19: FORCE TREND PARTICIPATION — cap adaptive gate at 24 during real trend.
+      if (forceTrendParticipation) {
+        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 24);
+      }
       // Never drop under the absolute floor (CONF_GATE_FLOOR / opening-drive floor)
       adaptiveRequiredConfidence = Math.max(effectiveFloor, adaptiveRequiredConfidence);
+    }
+
+    // v19: PREVENT CONFIDENCE COLLAPSE during active trend movement.
+    let v19ConfidenceFloorActive = false;
+    if (tradingMode !== "sniper" && !!biasDir && momentumVelocityScore >= 35 && emaSlopeAbs >= 15) {
+      if (confidenceScore < 26) {
+        confidenceScore = 26;
+        v19ConfidenceFloorActive = true;
+      }
     }
 
     // v18: clamp entry quality on legitimate quick moves so a perfectly
