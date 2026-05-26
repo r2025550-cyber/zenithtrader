@@ -770,6 +770,47 @@ serve(async (req) => {
       { w: -10, ok: !!pa.longLowerWick, label: "Lower wick rejection" },
       { w: -15, ok: !!pa.bearTrap, label: "Bear-trap risk" },
     ];
+
+    // ============================================================
+    // v19: STRICT DIRECTIONAL ALIGNMENT FILTER — prevent opposite-side
+    // aggregation when EMA slope is decisively against. Applied BEFORE
+    // score aggregation. Sniper mode unaffected (no momentum overrides).
+    // ============================================================
+    const _slope = pa.ema21Slope ?? 0;
+    const bullScoringDisabled = _slope <= -10;
+    const bearScoringDisabled = _slope >= 10;
+    if (bullScoringDisabled) {
+      // disable bull breakout / continuation / momentum boosts
+      for (const r of bullScoring) {
+        if (r.w > 0 && (
+          r.label.startsWith("Breakout") ||
+          r.label.startsWith("Big bull") ||
+          r.label.startsWith("Momentum") ||
+          r.label.startsWith("Live bull") ||
+          r.label.startsWith("Compression breakout") ||
+          r.label.startsWith("Bullish streak") ||
+          r.label.startsWith("Bull retest")
+        )) {
+          r.ok = false;
+        }
+      }
+    }
+    if (bearScoringDisabled) {
+      for (const r of bearScoring) {
+        if (r.w > 0 && (
+          r.label.startsWith("Breakdown") ||
+          r.label.startsWith("Big bear") ||
+          r.label.startsWith("Momentum") ||
+          r.label.startsWith("Live bear") ||
+          r.label.startsWith("Compression breakdown") ||
+          r.label.startsWith("Bearish streak") ||
+          r.label.startsWith("Bear retest")
+        )) {
+          r.ok = false;
+        }
+      }
+    }
+
     const sumScore = (arr: typeof bullScoring) => arr.reduce((s, x) => s + (x.ok ? x.w : 0), 0);
     const bullScore = Math.max(0, Math.min(100, sumScore(bullScoring)));
     const bearScore = Math.max(0, Math.min(100, sumScore(bearScoring)));
@@ -791,8 +832,12 @@ serve(async (req) => {
     const dirSlopeAligned = biasDir === "BUY" ? ((pa.ema21Slope ?? 0) >= STRONG_SLOPE_PTS)
                           : biasDir === "SELL" ? ((pa.ema21Slope ?? 0) <= -STRONG_SLOPE_PTS) : false;
     const emaSep = (pa.ema9 !== null && pa.ema21 !== null) ? Math.abs((pa.ema9 as number) - (pa.ema21 as number)) : 0;
-    const liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
+    let liveBreak = biasDir === "BUY" ? !!(pa.liveBullBreakout || pa.earlyBuy)
                     : biasDir === "SELL" ? !!(pa.liveBearBreakout || pa.earlySell) : false;
+    // v19: BREAKOUT BYPASS — auto-activate breakout participation during
+    // clear directional expansion when retest/strict-confirmation is missing.
+    const breakoutBypassActive = !!biasDir && slopeAbs >= 18 && bodyPts >= 8;
+    if (breakoutBypassActive) liveBreak = true;
     const dirMomentum = biasDir === "BUY" ? !!pa.momentumBull
                       : biasDir === "SELL" ? !!pa.momentumBear : false;
     const dirBigBody = bigBody && ((biasDir === "BUY" && (pa.close ?? 0) > (pa.open ?? 0)) || (biasDir === "SELL" && (pa.close ?? 0) < (pa.open ?? 0)));
@@ -810,6 +855,22 @@ serve(async (req) => {
       momentumVelocityScore -= dirTrap ? 25 : 0;
       momentumVelocityScore = Math.max(0, Math.min(100, momentumVelocityScore));
     }
+
+    // ============================================================
+    // v19: DIRECTIONAL EXPANSION VELOCITY — fixes stuck-at-0 pipeline
+    // by using raw price/EMA/body expansion (not gated by booleans).
+    // We take MAX with the existing score so prior detection still wins.
+    // ============================================================
+    const priceChangePoints = (pa.high !== null && pa.low !== null) ? Math.abs((pa.high as number) - (pa.low as number)) : 0;
+    const directionalExpansion =
+      Math.abs(pa.ema21Slope ?? 0) * 0.45 +
+      bodyPts * 2.2 +
+      Math.abs(priceChangePoints) * 0.8;
+    const directionalVelocity = Math.min(100, Math.round(directionalExpansion));
+    if (!!biasDir && directionalVelocity > momentumVelocityScore) {
+      momentumVelocityScore = directionalVelocity;
+    }
+    const momentumVelocity = momentumVelocityScore;
 
     // late-entry detection — already too stretched / too many expansion candles done
     const distFromEma21 = (pa.ltp !== null && pa.ema21 !== null) ? Math.abs((pa.ltp as number) - (pa.ema21 as number)) : 0;
@@ -850,9 +911,13 @@ serve(async (req) => {
     // v17: MOMENTUM OVERRIDE LAYER — momentum > structure (additive)
     // Activates ONLY during real explosive expansion.
     // ============================================================
-    const trendExpansionStrength = Math.max(0, Math.min(100,
+    // v19: FORCE TREND PARTICIPATION — strong slope + big body floors expansion at 60.
+    const forceTrendParticipation = !!biasDir && slopeAbs >= 20 && bodyPts >= 10;
+    let trendExpansionStrength = Math.max(0, Math.min(100,
       Math.round(emaSep * 4 + dirStreak * 10 + (dirSlopeAligned ? 20 : 0) + (dirBigBody ? 15 : 0))
     ));
+    if (forceTrendParticipation && trendExpansionStrength < 60) trendExpansionStrength = 60;
+    const momentumState: "ACTIVE" | "DORMANT" = forceTrendParticipation ? "ACTIVE" : "DORMANT";
     // Premium velocity proxy: spot expansion velocity (body * streak) — VPS/Upstox untouched.
     const premiumVelocity = Number((bodyPts * Math.max(1, dirStreak) * (liveBreak ? 1.2 : 1)).toFixed(2));
     const momentumExhaustionRisk = !!biasDir && (exhausted || (dirStreak >= 4 && wickAgainst) || (overstretched && lateBody));
@@ -976,8 +1041,21 @@ serve(async (req) => {
       } else {
         adaptiveRequiredConfidence = Math.max(requiredConfidence, 36);
       }
+      // v19: FORCE TREND PARTICIPATION — cap adaptive gate at 24 during real trend.
+      if (forceTrendParticipation) {
+        adaptiveRequiredConfidence = Math.min(adaptiveRequiredConfidence, 24);
+      }
       // Never drop under the absolute floor (CONF_GATE_FLOOR / opening-drive floor)
       adaptiveRequiredConfidence = Math.max(effectiveFloor, adaptiveRequiredConfidence);
+    }
+
+    // v19: PREVENT CONFIDENCE COLLAPSE during active trend movement.
+    let v19ConfidenceFloorActive = false;
+    if (tradingMode !== "sniper" && !!biasDir && momentumVelocityScore >= 35 && emaSlopeAbs >= 15) {
+      if (confidenceScore < 26) {
+        confidenceScore = 26;
+        v19ConfidenceFloorActive = true;
+      }
     }
 
     // v18: clamp entry quality on legitimate quick moves so a perfectly
@@ -1658,6 +1736,16 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         // v18: conviction-floor telemetry
         momentumConvictionFloor,
         momentumSoftBoost,
+        // v19: directional alignment + momentum activation telemetry
+        directionalExpansion: Number(directionalExpansion.toFixed(2)),
+        directionalVelocity,
+        priceChangePoints: Number(priceChangePoints.toFixed(2)),
+        bullScoringDisabled,
+        bearScoringDisabled,
+        breakoutBypassActive,
+        forceTrendParticipation,
+        momentumState,
+        v19ConfidenceFloorActive,
       },
     });
   } catch (error) {
