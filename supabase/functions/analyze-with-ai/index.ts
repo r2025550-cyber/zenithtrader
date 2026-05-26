@@ -1143,7 +1143,7 @@ serve(async (req) => {
       { stage: "MARKET DATA", passed: pa.ltp !== null, note: pa.ltp !== null ? `LTP ${pa.ltp}` : "no data" },
       { stage: "PRICE ACTION", passed: !!(pa.support && pa.resistance), note: `S=${pa.support?.toFixed(0) ?? "—"} R=${pa.resistance?.toFixed(0) ?? "—"}` },
       { stage: "SCORE AGGREGATION", passed: confidenceScore > 0, note: `${confidenceScore}/100 bull=${bullScore} bear=${bearScore}` },
-      { stage: "REGIME FILTER", passed: confidenceScore >= requiredConfidence, note: `${regime} gate=${requiredConfidence}` },
+      { stage: "REGIME FILTER", passed: confidenceScore >= adaptiveRequiredConfidence, note: `${regime} gate=${adaptiveRequiredConfidence} (req=${requiredConfidence})` },
       { stage: "SIGNAL DECISION", passed: action !== "WAIT", note: action },
       { stage: "ORDER EXECUTION", passed: action !== "WAIT" && !hardBlocked, note: hardBlocked ? "blocked" : (action !== "WAIT" ? "ready" : "—") },
     ];
