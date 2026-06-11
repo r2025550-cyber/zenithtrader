@@ -291,9 +291,25 @@ serve(async (req) => {
     const quantity = liveLotSize * NIFTY_LOT_SIZE;
     const slippageTolerancePct = parsed.data.maxSlippagePct ?? ENTRY_SLIPPAGE_PCT;
 
-    // v8: explicit optionSide preferred; fallback derives from action (BUY→CE / SELL→PE) for backwards-compat
+    // v20: prefer LOCKED contract from signal time. Only re-resolve via Upstox
+    // option chain when the caller didn't supply a locked instrument_token.
     const explicitOptionSide = parsed.data.optionSide;
-    const option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike, explicitOptionSide);
+    const lockedToken = parsed.data.instrument_token;
+    const lockedSymbol = parsed.data.tradingSymbol;
+    const lockedStrikeNum = parsed.data.strike;
+    const lockedSideFinal: "CE" | "PE" = explicitOptionSide ?? (parsed.data.action === "BUY" ? "CE" : "PE");
+    let option: { instrumentToken: string; strike: number; optionType: string; tradingSymbol: string };
+    if (lockedToken && lockedStrikeNum) {
+      option = {
+        instrumentToken: lockedToken,
+        strike: lockedStrikeNum,
+        optionType: lockedSideFinal,
+        tradingSymbol: lockedSymbol ?? `Nifty ${lockedStrikeNum} ${lockedSideFinal}`,
+      };
+      console.log("[CONTRACT LOCK HONORED]", option);
+    } else {
+      option = await resolveOption(headers, parsed.data.spotPrice, parsed.data.action, parsed.data.strike, explicitOptionSide);
+    }
 
     // ===== v6 LIQUIDITY FILTER =====
     const quote = await getOptionQuote(headers, String(option.instrumentToken));
