@@ -22,6 +22,13 @@ const BodySchema = z.object({
   transactionType: z.enum(["BUY", "SELL"]).optional(),
   spotPrice: z.number().positive(),
   strike: z.number().positive().optional(),
+  // v20 CONTRACT LOCK — when instrument_token is provided, we trade EXACTLY this
+  // contract. No re-resolution against Upstox option chain. Fixes:
+  //  (a) CE drift caused by intermittent re-resolve / strict-strike failures
+  //  (b) target/SL drift (entry, target, SL, trailing all share one locked contract)
+  instrument_token: z.string().min(1).optional(),
+  tradingSymbol: z.string().min(1).optional(),
+  entryPremium: z.number().positive().optional(),         // premiumAtSignal (locked)
   tradingLotSize: z.number().int().positive(),
   effectiveLotSize: z.number().int().positive().optional(),
   targetPremiumPoints: z.number().positive().optional(),
