@@ -2685,9 +2685,10 @@ const Index = () => {
           transactionType: "BUY" as const,
           transaction_type: "BUY" as const,
           execution_side: "BUY" as const,
-          // ---- Instrument (LOCKED at signal time) ----
+          // ---- Instrument (LOCKED at signal time — bypasses re-resolution in edge fn) ----
           instrument_token: resolvedToken,
           tradingSymbol: lockedContract!.tradingSymbol,
+          entryPremium: lockedContract!.premiumAtSignal,
           ce_instrument_token: liveMarket.ce_instrument_token ?? null,
           pe_instrument_token: liveMarket.pe_instrument_token ?? null,
           // ---- Trade params ----
