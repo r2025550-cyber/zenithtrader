@@ -63,6 +63,11 @@ export function EngineDebugPanel({ signal }: Props) {
   const forceTrendParticipation = !!rules.forceTrendParticipation;
   const momentumState = (rules.momentumState ?? "—") as string;
   const v19ConfidenceFloorActive = !!rules.v19ConfidenceFloorActive;
+  // v20: directional penalty model telemetry
+  const bullPenalty = Number(rules.bullPenalty ?? 0);
+  const bearPenalty = Number(rules.bearPenalty ?? 0);
+  const adjustedBullScore = Number(rules.adjustedBullScore ?? 0);
+  const adjustedBearScore = Number(rules.adjustedBearScore ?? 0);
 
   if (!signal) {
     return (
@@ -318,8 +323,28 @@ export function EngineDebugPanel({ signal }: Props) {
             <div className="text-muted-foreground">Breakout Bypass</div>
             <div className={`font-mono font-bold ${breakoutBypassActive ? "text-emerald-400" : "text-muted-foreground"}`}>
               {breakoutBypassActive ? "ACTIVE" : "—"}
+          <div>
+            <div className="text-muted-foreground">Bull Penalty</div>
+            <div className={`font-mono font-bold ${bullPenalty > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+              -{bullPenalty}
             </div>
           </div>
+          <div>
+            <div className="text-muted-foreground">Bear Penalty</div>
+            <div className={`font-mono font-bold ${bearPenalty > 0 ? "text-amber-400" : "text-emerald-400"}`}>
+              -{bearPenalty}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Adj Bull</div>
+            <div className="font-mono font-bold text-emerald-300">{adjustedBullScore}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Adj Bear</div>
+            <div className="font-mono font-bold text-rose-300">{adjustedBearScore}</div>
+          </div>
+        </div>
+      </div>
           <div>
             <div className="text-muted-foreground">Conf Floor 26</div>
             <div className={`font-mono font-bold ${v19ConfidenceFloorActive ? "text-emerald-300" : "text-muted-foreground"}`}>
