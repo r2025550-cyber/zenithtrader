@@ -772,51 +772,36 @@ serve(async (req) => {
     ];
 
     // ============================================================
-    // v19: STRICT DIRECTIONAL ALIGNMENT FILTER — prevent opposite-side
-    // aggregation when EMA slope is decisively against. Applied BEFORE
-    // score aggregation. Sniper mode unaffected (no momentum overrides).
+    // v20: DIRECTIONAL PENALTY MODEL — no longer hard-disables scoring
+    // factors. Bullish pullbacks (temporary negative slope) previously
+    // wiped out CE participation. We now apply graded penalties to the
+    // aggregated score so structure can still earn confidence while a
+    // mildly opposing slope is appropriately discounted.
     // ============================================================
     const _slope = pa.ema21Slope ?? 0;
-    const bullScoringDisabled = _slope <= -10;
-    const bearScoringDisabled = _slope >= 10;
-    if (bullScoringDisabled) {
-      // disable bull breakout / continuation / momentum boosts
-      for (const r of bullScoring) {
-        if (r.w > 0 && (
-          r.label.startsWith("Breakout") ||
-          r.label.startsWith("Big bull") ||
-          r.label.startsWith("Momentum") ||
-          r.label.startsWith("Live bull") ||
-          r.label.startsWith("Compression breakout") ||
-          r.label.startsWith("Bullish streak") ||
-          r.label.startsWith("Bull retest")
-        )) {
-          r.ok = false;
-        }
-      }
-    }
-    if (bearScoringDisabled) {
-      for (const r of bearScoring) {
-        if (r.w > 0 && (
-          r.label.startsWith("Breakdown") ||
-          r.label.startsWith("Big bear") ||
-          r.label.startsWith("Momentum") ||
-          r.label.startsWith("Live bear") ||
-          r.label.startsWith("Compression breakdown") ||
-          r.label.startsWith("Bearish streak") ||
-          r.label.startsWith("Bear retest")
-        )) {
-          r.ok = false;
-        }
-      }
-    }
+    const bullPenalty =
+      _slope <= -15 ? 20 :
+      _slope <= -10 ? 10 :
+      0;
+    const bearPenalty =
+      _slope >= 15 ? 20 :
+      _slope >= 10 ? 10 :
+      0;
+    // Legacy flags retained for telemetry — derived from penalty model
+    const bullScoringDisabled = bullPenalty >= 20;
+    const bearScoringDisabled = bearPenalty >= 20;
 
     const sumScore = (arr: typeof bullScoring) => arr.reduce((s, x) => s + (x.ok ? x.w : 0), 0);
-    const bullScore = Math.max(0, Math.min(100, sumScore(bullScoring)));
-    const bearScore = Math.max(0, Math.min(100, sumScore(bearScoring)));
+    const rawBullScore = Math.max(0, Math.min(100, sumScore(bullScoring)));
+    const rawBearScore = Math.max(0, Math.min(100, sumScore(bearScoring)));
+    const adjustedBullScore = Math.max(0, rawBullScore - bullPenalty);
+    const adjustedBearScore = Math.max(0, rawBearScore - bearPenalty);
+    // Downstream code uses bullScore/bearScore — wire them to adjusted values
+    const bullScore = adjustedBullScore;
+    const bearScore = adjustedBearScore;
     const biasDir: "BUY" | "SELL" | null =
-      bullScore > bearScore + 5 ? "BUY" :
-      bearScore > bullScore + 5 ? "SELL" : null;
+      adjustedBullScore > adjustedBearScore + 8 ? "BUY" :
+      adjustedBearScore > adjustedBullScore + 8 ? "SELL" : null;
     let confidenceScore = biasDir === "BUY" ? bullScore : biasDir === "SELL" ? bearScore : Math.max(bullScore, bearScore);
     const rawConfidenceScore = confidenceScore;
     const edgeFactors = (biasDir === "SELL" ? bearScoring : bullScoring)
