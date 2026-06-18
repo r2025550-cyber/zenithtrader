@@ -63,6 +63,11 @@ export function EngineDebugPanel({ signal }: Props) {
   const forceTrendParticipation = !!rules.forceTrendParticipation;
   const momentumState = (rules.momentumState ?? "—") as string;
   const v19ConfidenceFloorActive = !!rules.v19ConfidenceFloorActive;
+  // v20: directional penalty model telemetry
+  const bullPenalty = Number(rules.bullPenalty ?? 0);
+  const bearPenalty = Number(rules.bearPenalty ?? 0);
+  const adjustedBullScore = Number(rules.adjustedBullScore ?? 0);
+  const adjustedBearScore = Number(rules.adjustedBearScore ?? 0);
 
   if (!signal) {
     return (
