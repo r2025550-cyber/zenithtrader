@@ -1731,6 +1731,13 @@ REASON: [SCALPING MODE] one-line price-action trigger (entry, SL, target).`;
         forceTrendParticipation,
         momentumState,
         v19ConfidenceFloorActive,
+        // v20: directional penalty model telemetry
+        bullPenalty,
+        bearPenalty,
+        adjustedBullScore,
+        adjustedBearScore,
+        rawBullScore,
+        rawBearScore,
       },
     });
   } catch (error) {
