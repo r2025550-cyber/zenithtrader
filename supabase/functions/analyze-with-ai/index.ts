@@ -50,8 +50,8 @@ const POST_DOUBLE_LOSS_COOLDOWN_MIN = 20;// after 2 SL
 const POST_LOSS_CONFIDENCE_BUMP = 5;     // +5 to required confidence
 // v13: starvation-fix — gates lowered, EMA-slope + body-size scoring added,
 // regime promoted to TRENDING when EMA slope is strongly directional.
-const CONF_GATE_TRENDING = 42;
-const CONF_GATE_SCALPING = 46;
+const CONF_GATE_TRENDING = 40;
+const CONF_GATE_SCALPING = 42;
 const CONF_GATE_CHOPPY = 50;
 const CONF_GATE_SNIPER = 66;
 const CONF_GATE_FLOOR = 36;
