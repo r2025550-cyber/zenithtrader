@@ -564,8 +564,9 @@ serve(async (req) => {
 
     // ===== v5: LIQUIDITY TRAP REVERSAL SETUPS =====
     // Trap above resistance => SELL signal; trap below support => BUY signal.
-    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing || pa.liveBullTrap);
-    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing || pa.liveBearTrap);
+    // v21: trap signal requires BOTH a prior trap pattern AND an independent bearish/bullish confirmation candle.
+    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing);
+    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing);
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
 
