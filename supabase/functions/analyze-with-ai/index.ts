@@ -113,9 +113,11 @@ function sanitizeImmediateLevels(ltp: number | null, support: number | null, res
   const recent = history.slice(0, 20);
   const lows = recent.flatMap((r) => [num(r?.low_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v < ltp && ltp - v <= SR_STALE_DISTANCE_PTS);
   const highs = recent.flatMap((r) => [num(r?.high_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v > ltp && v - ltp <= SR_STALE_DISTANCE_PTS);
+  // v21: NO synthetic ltp±35 fallback. If no valid swing high/low exists within range, return null
+  // and let downstream breakout logic skip evaluation (prevents asymmetric CE starvation).
   return {
-    support: staleSupport ? (lows.length ? Math.max(...lows) : Number((ltp - FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : support,
-    resistance: staleResistance ? (highs.length ? Math.min(...highs) : Number((ltp + FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : resistance,
+    support: staleSupport ? (lows.length ? Math.max(...lows) : null) : support,
+    resistance: staleResistance ? (highs.length ? Math.min(...highs) : null) : resistance,
     stale: true,
   };
 }
@@ -380,11 +382,14 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
       if (bc !== null && fc !== null && bc < support && fc > support) { bearTrap = true; break; }
     }
   }
-  // Live trap (current candle reverses immediately)
+  // Live trap (current candle reverses immediately) — v21: require bearish/bullish CONFIRMATION
+  // Wick-above-resistance ALONE no longer creates a bull trap; must close bearishly (strong red or bearish engulfing).
   const liveBullTrap = resistance !== null && close !== null && open !== null &&
-    high !== null && high > resistance && close < resistance;
+    high !== null && high > resistance && close < resistance &&
+    (strongRed || bearishEngulfing);
   const liveBearTrap = support !== null && close !== null && open !== null &&
-    low !== null && low < support && close > support;
+    low !== null && low < support && close > support &&
+    (strongGreen || bullishEngulfing);
   bullTrap = bullTrap || liveBullTrap;
   bearTrap = bearTrap || liveBearTrap;
 
@@ -561,8 +566,9 @@ serve(async (req) => {
 
     // ===== v5: LIQUIDITY TRAP REVERSAL SETUPS =====
     // Trap above resistance => SELL signal; trap below support => BUY signal.
-    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing || pa.liveBullTrap);
-    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing || pa.liveBearTrap);
+    // v21: trap signal requires BOTH a prior trap pattern AND an independent bearish/bullish confirmation candle.
+    const trapSell = pa.bullTrap && (pa.strongRed || pa.bearishEngulfing);
+    const trapBuy = pa.bearTrap && (pa.strongGreen || pa.bullishEngulfing);
 
     let action: "BUY" | "SELL" | "WAIT" = "WAIT";
 
