@@ -380,11 +380,14 @@ function buildPriceAction(latest: MarketRow, history: MarketRow[]) {
       if (bc !== null && fc !== null && bc < support && fc > support) { bearTrap = true; break; }
     }
   }
-  // Live trap (current candle reverses immediately)
+  // Live trap (current candle reverses immediately) — v21: require bearish/bullish CONFIRMATION
+  // Wick-above-resistance ALONE no longer creates a bull trap; must close bearishly (strong red or bearish engulfing).
   const liveBullTrap = resistance !== null && close !== null && open !== null &&
-    high !== null && high > resistance && close < resistance;
+    high !== null && high > resistance && close < resistance &&
+    (strongRed || bearishEngulfing);
   const liveBearTrap = support !== null && close !== null && open !== null &&
-    low !== null && low < support && close > support;
+    low !== null && low < support && close > support &&
+    (strongGreen || bullishEngulfing);
   bullTrap = bullTrap || liveBullTrap;
   bearTrap = bearTrap || liveBearTrap;
 
