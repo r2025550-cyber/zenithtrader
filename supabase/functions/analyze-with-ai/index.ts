@@ -113,9 +113,11 @@ function sanitizeImmediateLevels(ltp: number | null, support: number | null, res
   const recent = history.slice(0, 20);
   const lows = recent.flatMap((r) => [num(r?.low_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v < ltp && ltp - v <= SR_STALE_DISTANCE_PTS);
   const highs = recent.flatMap((r) => [num(r?.high_price), num(r?.ltp), num(r?.close_price)]).filter((v): v is number => v !== null && v > ltp && v - ltp <= SR_STALE_DISTANCE_PTS);
+  // v21: NO synthetic ltp±35 fallback. If no valid swing high/low exists within range, return null
+  // and let downstream breakout logic skip evaluation (prevents asymmetric CE starvation).
   return {
-    support: staleSupport ? (lows.length ? Math.max(...lows) : Number((ltp - FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : support,
-    resistance: staleResistance ? (highs.length ? Math.min(...highs) : Number((ltp + FALLBACK_SR_DISTANCE_PTS).toFixed(2))) : resistance,
+    support: staleSupport ? (lows.length ? Math.max(...lows) : null) : support,
+    resistance: staleResistance ? (highs.length ? Math.min(...highs) : null) : resistance,
     stale: true,
   };
 }
